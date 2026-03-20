@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reference Manager</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Literature Discovery Platform</p>
+          <h1>Reference Manager</h1>
+          <p class="lead">
+            A self-contained scholarly discovery workspace with collections, ingest, graph exploration,
+            recommendations, timeline analysis, sharing, import/export, and audit visibility.
+          </p>
+        </div>
+        <div class="hero-card">
+          <div id="session-status">Not authenticated.</div>
+          <button id="refresh-bootstrap" class="ghost">Refresh workspace</button>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <h2>Account</h2>
+          <form id="register-form" class="stack">
+            <label>Email <input name="email" type="email" required></label>
+            <label>Password <input name="password" type="password" required></label>
+            <label>Display name <input name="display_name" type="text"></label>
+            <button type="submit">Register</button>
+          </form>
+          <form id="login-form" class="stack muted-top">
+            <label>Email <input name="email" type="email" required></label>
+            <label>Password <input name="password" type="password" required></label>
+            <button type="submit">Login</button>
+          </form>
+          <button id="logout-button" class="ghost">Logout</button>
+        </article>
+
+        <article class="panel">
+          <h2>Collection</h2>
+          <form id="collection-form" class="stack">
+            <label>Name <input name="name" type="text" required></label>
+            <label>Description <textarea name="description" rows="3"></textarea></label>
+            <label>Visibility
+              <select name="visibility">
+                <option value="private">Private</option>
+                <option value="shared">Shared</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+            <button type="submit">Create collection</button>
+          </form>
+          <div id="collections-list" class="list"></div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <h2>Add Paper</h2>
+          <form id="paper-form" class="stack">
+            <label>Input mode
+              <select name="identifier_type">
+                <option value="doi">DOI</option>
+                <option value="title">Title</option>
+                <option value="url">URL</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <label>Value <input name="value" type="text"></label>
+            <label>Target collection ID <input name="collection_id" type="number"></label>
+            <label>Manual title <input name="title" type="text"></label>
+            <label>Manual authors <input name="authors" type="text" placeholder="Alice; Bob"></label>
+            <label>Manual year <input name="year" type="number"></label>
+            <label>Manual abstract <textarea name="abstract" rows="3"></textarea></label>
+            <button type="submit">Ingest paper</button>
+          </form>
+          <pre id="paper-result" class="output"></pre>
+        </article>
+
+        <article class="panel">
+          <h2>Search</h2>
+          <form id="search-form" class="stack">
+            <label>Query <input name="q" type="text" required></label>
+            <button type="submit">Search</button>
+          </form>
+          <div id="search-results" class="list"></div>
+        </article>
+      </section>
+
+      <section class="grid three">
+        <article class="panel">
+          <h2>Recommendations</h2>
+          <form id="recommend-form" class="stack">
+            <label>Collection ID <input name="collection_id" type="number"></label>
+            <label>Seed paper IDs <input name="seed" type="text" placeholder="1,2,3"></label>
+            <button type="submit">Generate</button>
+          </form>
+          <div id="recommendations-list" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <h2>Timeline</h2>
+          <form id="timeline-form" class="stack">
+            <label>Collection ID <input name="collection_id" type="number"></label>
+            <label>Topic <input name="topic" type="text"></label>
+            <label>Seed paper ID <input name="seed_paper_id" type="number"></label>
+            <button type="submit">Load timeline</button>
+          </form>
+          <pre id="timeline-output" class="output small"></pre>
+        </article>
+
+        <article class="panel">
+          <h2>Graph</h2>
+          <form id="graph-form" class="stack">
+            <label>Seed paper IDs <input name="seed" type="text" placeholder="1,2"></label>
+            <label>Depth <input name="depth" type="number" value="1" min="1" max="3"></label>
+            <button type="submit">Load graph</button>
+          </form>
+          <pre id="graph-output" class="output small"></pre>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <h2>Import / Export</h2>
+          <form id="import-form" class="stack">
+            <label>Source type
+              <select name="source_type">
+                <option value="identifiers">DOI list</option>
+                <option value="titles">Title list</option>
+                <option value="json">JSON records</option>
+                <option value="bibtex">BibTeX</option>
+              </select>
+            </label>
+            <label>Collection ID <input name="collection_id" type="number"></label>
+            <label>Content <textarea name="content" rows="6"></textarea></label>
+            <button type="submit">Run import</button>
+          </form>
+          <form id="export-form" class="stack muted-top">
+            <label>Collection ID <input name="collection_id" type="number" required></label>
+            <label>Format
+              <select name="format">
+                <option value="json">JSON</option>
+                <option value="bibtex">BibTeX</option>
+                <option value="backup">Backup</option>
+              </select>
+            </label>
+            <button type="submit">Export collection</button>
+          </form>
+          <pre id="import-export-output" class="output"></pre>
+        </article>
+
+        <article class="panel">
+          <h2>Feed / Notifications / Audit</h2>
+          <div class="actions-row">
+            <button id="load-feed">Feed</button>
+            <button id="load-notifications">Notifications</button>
+            <button id="load-audit">Audit</button>
+          </div>
+          <pre id="ops-output" class="output"></pre>
+        </article>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
+
