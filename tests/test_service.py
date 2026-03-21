@@ -5,14 +5,172 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from reference_manager.config import AppConfig
+from reference_manager.providers import ProviderRegistry
 from reference_manager.service import ReferenceManagerService
+
+
+def openalex_work(
+    work_id: str,
+    doi: str,
+    title: str,
+    year: int,
+    *,
+    venue: str,
+    authors: list[str],
+    referenced: list[str],
+    cited_by_filter: str,
+) -> dict:
+    return {
+        "id": f"https://openalex.org/{work_id}",
+        "doi": f"https://doi.org/{doi}",
+        "display_name": title,
+        "publication_year": year,
+        "publication_date": f"{year}-01-01",
+        "type": "journal-article",
+        "language": "en",
+        "ids": {"pmid": None, "pmcid": None},
+        "primary_location": {
+            "landing_page_url": f"https://example.org/{work_id.lower()}",
+            "pdf_url": f"https://example.org/{work_id.lower()}.pdf",
+            "source": {"display_name": venue},
+        },
+        "authorships": [
+            {
+                "author": {"display_name": name, "id": f"https://openalex.org/A{index + 1}", "orcid": None},
+                "institutions": [{"display_name": f"Institute {index + 1}"}],
+            }
+            for index, name in enumerate(authors)
+        ],
+        "referenced_works": [f"https://openalex.org/{item}" for item in referenced],
+        "cited_by_api_url": f"https://api.openalex.org/works?filter=cites:{cited_by_filter}",
+        "topics": [{"display_name": "literature discovery"}],
+        "keywords": [{"display_name": "citation graph"}],
+        "concepts": [{"display_name": "academic search"}],
+        "abstract_inverted_index": {"Visual": [0], "scholarly": [1], "discovery": [2]},
+        "cited_by_count": 3,
+    }
+
+
+OPENALEX_FIXTURES = {
+    "W1001": openalex_work(
+        "W1001",
+        "10.1000/litdisc.2020.001",
+        "Visual Discovery for Scholarly Graph Exploration",
+        2020,
+        venue="Journal of Scholarly Systems",
+        authors=["Elena Marino", "Marco Berti"],
+        referenced=["W1003"],
+        cited_by_filter="W1001",
+    ),
+    "W1003": openalex_work(
+        "W1003",
+        "10.1000/litdisc.2018.003",
+        "Seed Papers and Citation Chaining in Literature Reviews",
+        2018,
+        venue="Review Science Quarterly",
+        authors=["Marco Berti", "Giulia Rinaldi"],
+        referenced=[],
+        cited_by_filter="W1003",
+    ),
+    "W1004": openalex_work(
+        "W1004",
+        "10.1000/litdisc.2021.004",
+        "Explainable Scholarly Recommendations with Feedback Loops",
+        2021,
+        venue="ACM Knowledge Interfaces",
+        authors=["Sara Valli", "Laura Conti"],
+        referenced=["W1001"],
+        cited_by_filter="W1004",
+    ),
+    "W1008": openalex_work(
+        "W1008",
+        "10.1000/litdisc.2023.008",
+        "Collaborative Curation of Shared Reference Collections",
+        2023,
+        venue="Collaborative Systems Letters",
+        authors=["Sara Valli", "Enrico Fontana"],
+        referenced=["W1004"],
+        cited_by_filter="W1008",
+    ),
+    "W1009": openalex_work(
+        "W1009",
+        "10.1000/litdisc.2024.009",
+        "Robust Bibliographic Reconciliation Across Metadata Providers",
+        2024,
+        venue="Metadata Engineering Journal",
+        authors=["Enrico Fontana", "Elena Marino"],
+        referenced=["W1003"],
+        cited_by_filter="W1009",
+    ),
+}
+
+
+class MockTransport:
+    def get_json(self, url: str, *, headers=None, timeout: int = 20) -> dict:
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2020.001" in url:
+            return OPENALEX_FIXTURES["W1001"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2021.004" in url:
+            return OPENALEX_FIXTURES["W1004"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2023.008" in url:
+            return OPENALEX_FIXTURES["W1008"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2024.009" in url:
+            return OPENALEX_FIXTURES["W1009"]
+        if "api.openalex.org/works/W1001" in url:
+            return OPENALEX_FIXTURES["W1001"]
+        if "api.openalex.org/works/W1003" in url:
+            return OPENALEX_FIXTURES["W1003"]
+        if "api.openalex.org/works/W1004" in url:
+            return OPENALEX_FIXTURES["W1004"]
+        if "api.openalex.org/works/W1008" in url:
+            return OPENALEX_FIXTURES["W1008"]
+        if "api.openalex.org/works/W1009" in url:
+            return OPENALEX_FIXTURES["W1009"]
+        if "filter=cites%3AW1001" in url or "filter=cites:W1001" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1004"]]}
+        if "filter=cites%3AW1004" in url or "filter=cites:W1004" in url:
+            return {"meta": {"count": 0}, "results": []}
+        if "filter=cites%3AW1008" in url or "filter=cites:W1008" in url:
+            return {"meta": {"count": 0}, "results": []}
+        if "filter=cites%3AW1009" in url or "filter=cites:W1009" in url:
+            return {"meta": {"count": 0}, "results": []}
+        if "api.crossref.org/works/" in url:
+            doi = url.split("/works/", 1)[1].split("?", 1)[0].replace("%2F", "/")
+            return {
+                "message": {
+                    "DOI": doi,
+                    "title": [OPENALEX_FIXTURES["W1001"]["display_name"] if doi.endswith("2020.001") else "Crossref enriched title"],
+                    "type": "journal-article",
+                    "container-title": ["Crossref Journal"],
+                    "issued": {"date-parts": [[2020, 1, 1]]},
+                    "reference": [{"DOI": "10.1000/litdisc.2018.003", "article-title": "Seed Papers and Citation Chaining in Literature Reviews"}],
+                    "is-referenced-by-count": 2,
+                    "references-count": 1,
+                    "author": [{"given": "Elena", "family": "Marino", "affiliation": [{"name": "Institute 1"}]}],
+                    "URL": f"https://doi.org/{doi}",
+                }
+            }
+        if "api.crossref.org/works?" in url:
+            return {"message": {"items": []}}
+        if "europepmc" in url:
+            return {"resultList": {"result": []}}
+        raise AssertionError(f"Unexpected URL requested in test: {url}")
 
 
 class ReferenceManagerServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self.tempdir.name) / "test.sqlite3")
-        self.service = ReferenceManagerService(self.db_path)
+        self.config = AppConfig(
+            openalex_api_key="test-openalex-key",
+            crossref_mailto="tests@example.com",
+            europepmc_enabled=True,
+            europepmc_email="tests@example.com",
+            request_timeout_seconds=5,
+            max_related_works=25,
+        )
+        self.providers = ProviderRegistry(self.config, transport=MockTransport())
+        self.service = ReferenceManagerService(self.db_path, config=self.config, providers=self.providers)
         self.user = self.service.register_user("owner@example.com", "secret123", "Owner")["user"]
         self.other = self.service.register_user("editor@example.com", "secret123", "Editor")["user"]
 
@@ -40,6 +198,13 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertTrue(any(item["body"] == note["body"] for item in merged["notes"]))
         updated_collection = self.service.get_collection(self.user["id"], collection["id"])
         self.assertEqual(updated_collection["papers"][0]["id"], first["id"])
+
+    def test_backend_ingests_references_and_citations_with_provenance(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        relation_types = {item["relation_type"] for item in paper["relations"]}
+        self.assertIn("cites", relation_types)
+        self.assertIn("cited_by", relation_types)
+        self.assertTrue(any(source["provider"] == "openalex" for source in paper["sources"]))
 
     def test_recommendations_reduce_reappearance_of_excluded_papers(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]

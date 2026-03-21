@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .config import AppConfig
 from .providers import ProviderRegistry
 
 
@@ -93,10 +94,11 @@ class ServiceError(Exception):
 
 
 class ReferenceManagerService:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, config: Optional[AppConfig] = None, providers: Optional[ProviderRegistry] = None) -> None:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.providers = ProviderRegistry()
+        self.config = config or AppConfig.from_env()
+        self.providers = providers or ProviderRegistry(self.config)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -202,6 +204,8 @@ class ReferenceManagerService:
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_paper_relationship
+                ON paper_relationships(source_paper_id, target_paper_id, relation_type);
                 CREATE TABLE IF NOT EXISTS collection_papers (
                     collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
                     paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
@@ -298,6 +302,17 @@ class ReferenceManagerService:
                     external_library_id TEXT,
                     last_synced_at TEXT,
                     source_payload_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS paper_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    provider_paper_id TEXT,
+                    source_url TEXT,
+                    is_primary INTEGER NOT NULL DEFAULT 0,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    retrieved_at TEXT NOT NULL,
+                    UNIQUE (paper_id, provider, provider_paper_id)
                 );
                 CREATE TABLE IF NOT EXISTS collection_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -736,7 +751,13 @@ class ReferenceManagerService:
         states = self._credential_states(user_id)
         result = []
         for doc in self.providers.docs():
-            result.append({**doc, "credential_state": states.get(doc["name"], "assente" if doc["requires_credentials"] else "valid")})
+            default_state = "valid"
+            if doc["requires_credentials"]:
+                if doc["name"] == "openalex" and self.config.openalex_api_key:
+                    default_state = "configured"
+                else:
+                    default_state = "assente"
+            result.append({**doc, "credential_state": states.get(doc["name"], default_state)})
         return result
 
     def upsert_provider_credential(self, user_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -839,6 +860,29 @@ class ReferenceManagerService:
         )
         return cursor.lastrowid
 
+    def _upsert_paper_sources(self, connection: sqlite3.Connection, paper_id: int, metadata: Dict[str, Any]) -> None:
+        for source in metadata.get("raw_sources", []):
+            connection.execute(
+                """
+                INSERT INTO paper_sources (paper_id, provider, provider_paper_id, source_url, is_primary, payload_json, retrieved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (paper_id, provider, provider_paper_id) DO UPDATE SET
+                    source_url = excluded.source_url,
+                    is_primary = excluded.is_primary,
+                    payload_json = excluded.payload_json,
+                    retrieved_at = excluded.retrieved_at
+                """,
+                (
+                    paper_id,
+                    source.get("provider"),
+                    source.get("provider_id"),
+                    source.get("source_url"),
+                    int(bool(source.get("is_primary"))),
+                    json_dumps(source.get("payload", {})),
+                    source.get("retrieved_at", utcnow()),
+                ),
+            )
+
     def _attach_topics(self, connection: sqlite3.Connection, paper_id: int, topics: Iterable[str]) -> None:
         seen = set()
         for topic in topics:
@@ -901,6 +945,7 @@ class ReferenceManagerService:
                     existing["id"],
                 ),
             )
+            self._upsert_paper_sources(connection, existing["id"], merged)
             return self._row_to_paper(connection.execute("SELECT * FROM papers WHERE id = ?", (existing["id"],)).fetchone())
         cursor = connection.execute(
             """
@@ -938,6 +983,7 @@ class ReferenceManagerService:
                 (paper_id, author_id, position),
             )
         self._attach_topics(connection, paper_id, metadata.get("topics", []) + metadata.get("keywords", []))
+        self._upsert_paper_sources(connection, paper_id, metadata)
         return self._row_to_paper(connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone())
 
     def _row_to_paper(self, row: sqlite3.Row) -> Dict[str, Any]:
@@ -975,25 +1021,49 @@ class ReferenceManagerService:
             "updated_at": row["updated_at"],
         }
 
-    def _ensure_relationships(self, connection: sqlite3.Connection, paper_id: int, relations: Dict[str, List[str]]) -> None:
-        paper_lookup = {row["doi"]: row["id"] for row in connection.execute("SELECT id, doi FROM papers WHERE merged_into_paper_id IS NULL")}
-        relation_map = {
-            "references": "cites",
-            "citations": "cited_by",
-            "similar": "similar",
-        }
-        for relation_key, relation_type in relation_map.items():
-            for doi in relations.get(relation_key, []):
-                target_id = paper_lookup.get(normalize_doi(doi))
-                if not target_id:
-                    continue
-                connection.execute(
-                    """
-                    INSERT INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
-                    VALUES (?, ?, ?, 1.0, ?, '{}', ?)
-                    """,
-                    (paper_id, target_id, relation_type, f"Derived from provider relation: {relation_key}", utcnow()),
-                )
+    def _ensure_relationship_graph(self, connection: sqlite3.Connection, seed_paper_id: int, relations: Dict[str, List[Dict[str, Any]]]) -> None:
+        for reference in relations.get("references", []):
+            target = self._ensure_paper(connection, reference, None, automatic=True)
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
+                VALUES (?, ?, 'cites', 1.0, ?, ?, ?)
+                """,
+                (
+                    seed_paper_id,
+                    target["id"],
+                    "Recovered from external references list.",
+                    json_dumps(
+                        {
+                            "edge_kind": "reference",
+                            "retrieved_at": utcnow(),
+                            "source_provider": (reference.get("raw_sources") or [{}])[0].get("provider"),
+                        }
+                    ),
+                    utcnow(),
+                ),
+            )
+        for citation in relations.get("citations", []):
+            source = self._ensure_paper(connection, citation, None, automatic=True)
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
+                VALUES (?, ?, 'cited_by', 1.0, ?, ?, ?)
+                """,
+                (
+                    seed_paper_id,
+                    source["id"],
+                    "Recovered from external citations list.",
+                    json_dumps(
+                        {
+                            "edge_kind": "citation",
+                            "retrieved_at": utcnow(),
+                            "source_provider": (citation.get("raw_sources") or [{}])[0].get("provider"),
+                        }
+                    ),
+                    utcnow(),
+                ),
+            )
 
     def add_paper(
         self,
@@ -1037,9 +1107,9 @@ class ReferenceManagerService:
                     (collection_id, paper["id"], user_id, utcnow()),
                 )
             if paper.get("doi"):
-                relations = self.providers.relations(paper["doi"], credential_states)
+                relations = self.providers.relations(record_data, credential_states)
                 degraded.extend(relations["degraded"])
-                self._ensure_relationships(connection, paper["id"], relations["relations"])
+                self._ensure_relationship_graph(connection, paper["id"], relations["relations"])
                 source_provider = source_provider or relations["provider"]
             connection.commit()
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
@@ -1066,7 +1136,7 @@ class ReferenceManagerService:
             ).fetchall()
             relations = connection.execute(
                 """
-                SELECT paper_relationships.relation_type, papers.id as target_id, papers.title as target_title
+                SELECT paper_relationships.relation_type, papers.id as target_id, papers.title as target_title, paper_relationships.metadata_json
                 FROM paper_relationships
                 JOIN papers ON papers.id = paper_relationships.target_paper_id
                 WHERE paper_relationships.source_paper_id = ?
@@ -1077,11 +1147,16 @@ class ReferenceManagerService:
                 "SELECT topic, label, confidence FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?",
                 (paper_id,),
             ).fetchall()
+            sources = connection.execute(
+                "SELECT provider, provider_paper_id, source_url, is_primary, retrieved_at FROM paper_sources WHERE paper_id = ? ORDER BY is_primary DESC, provider ASC",
+                (paper_id,),
+            ).fetchall()
         paper = self._row_to_paper(row)
         paper["authors"] = [dict(author) for author in authors]
         paper["notes"] = [self._row_to_note(note) for note in notes]
-        paper["relations"] = [dict(relation) for relation in relations]
+        paper["relations"] = [{**dict(relation), "metadata": json_loads(relation["metadata_json"], {})} for relation in relations]
         paper["topics"] = [dict(topic) for topic in topics]
+        paper["sources"] = [dict(source) for source in sources]
         return paper
 
     def search_papers(self, user_id: int, query: str, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
