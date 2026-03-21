@@ -126,7 +126,7 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
             if parsed.path.startswith("/api/papers/"):
                 user = self.service.require_user(self._token())
                 paper_id = int(parsed.path.rsplit("/", 1)[-1])
-                json_response(self, 200, {"paper": self.service.get_paper(paper_id)})
+                json_response(self, 200, {"paper": self.service.get_paper(paper_id, user_id=user["id"])})
                 return
             if parsed.path == "/api/authors":
                 user = self.service.require_user(self._token())
@@ -262,6 +262,17 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                     force_refresh=body.get("force_refresh", False),
                 )
                 json_response(self, 201, result)
+                return
+            if parsed.path == "/api/papers/save":
+                json_response(
+                    self,
+                    200,
+                    self.service.save_discovery_paper(
+                        user["id"],
+                        int(body["discovery_id"]),
+                        collection_id=body.get("collection_id"),
+                    ),
+                )
                 return
             if parsed.path == "/api/papers/refresh":
                 json_response(

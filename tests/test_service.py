@@ -212,6 +212,11 @@ class MockTransport:
             return OPENALEX_FIXTURES["W4406033333"]
         if "api.openalex.org/works/W4406034444" in url:
             return OPENALEX_FIXTURES["W4406034444"]
+        if "api.openalex.org/works?search=" in url:
+            lowered = url.lower()
+            if "titans" in lowered:
+                return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W4406032263"]]}
+            return {"meta": {"count": 2}, "results": [OPENALEX_FIXTURES["W1001"], OPENALEX_FIXTURES["W1004"]]}
         if "api.openalex.org/works/W4406099999" in url:
             return {
                 **OPENALEX_FIXTURES["W4406032263"],
@@ -349,7 +354,27 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertTrue(any(source["provider"] == "openalex" for source in paper["sources"]))
         self.assertIsNotNone(paper["retrieval"])
         workspace_papers = self.service.list_workspace_papers(self.user["id"])
-        self.assertEqual(len(workspace_papers), 3)
+        self.assertEqual(len(workspace_papers), 1)
+        self.assertTrue(workspace_papers[0]["user_context"]["saved_by_user"])
+
+    def test_external_search_results_do_not_enter_library_until_saved(self) -> None:
+        result = self.service.search_papers(self.user["id"], "titans")
+        self.assertGreaterEqual(len(result["external_results"]), 1)
+        self.assertEqual(len(self.service.list_workspace_papers(self.user["id"])), 0)
+        external = result["external_results"][0]
+        self.assertIsNotNone(external["discovery_id"])
+        self.assertTrue(external["user_context"]["discovered_only"])
+        saved = self.service.save_discovery_paper(self.user["id"], external["discovery_id"])
+        self.assertTrue(saved["paper"]["user_context"]["saved_by_user"])
+        self.assertEqual(len(self.service.list_workspace_papers(self.user["id"])), 1)
+
+    def test_collection_membership_implies_library_entry(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        collection = self.service.create_collection(self.user["id"], "Reading Queue", seed_paper_ids=[paper["id"]])
+        self.assertEqual(collection["papers"][0]["id"], paper["id"])
+        library = self.service.list_workspace_papers(self.user["id"])
+        self.assertEqual(len(library), 1)
+        self.assertEqual(library[0]["user_context"]["in_collections_count"], 1)
 
     def test_live_relations_are_fetched_and_cached(self) -> None:
         paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]

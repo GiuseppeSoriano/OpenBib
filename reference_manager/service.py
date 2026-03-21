@@ -241,6 +241,27 @@ class ReferenceManagerService:
                     added_at TEXT NOT NULL,
                     PRIMARY KEY (collection_id, paper_id)
                 );
+                CREATE TABLE IF NOT EXISTS library_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    origin TEXT NOT NULL DEFAULT 'manual',
+                    saved_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (user_id, paper_id)
+                );
+                CREATE TABLE IF NOT EXISTS discovery_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    discovery_key TEXT NOT NULL,
+                    provider TEXT NOT NULL DEFAULT 'provider',
+                    origin TEXT NOT NULL DEFAULT 'search',
+                    record_json TEXT NOT NULL DEFAULT '{}',
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (user_id, discovery_key)
+                );
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     target_type TEXT NOT NULL,
@@ -458,6 +479,19 @@ class ReferenceManagerService:
             )
             self._migrate_legacy_relationships(connection)
             connection.commit()
+
+    def _discovery_key_from_record(self, record: Dict[str, Any]) -> str:
+        doi = normalize_doi(record.get("doi"))
+        if doi:
+            return f"doi:{doi}"
+        external_ids = record.get("external_ids", {}) or {}
+        for provider, value in sorted(external_ids.items()):
+            if value:
+                return f"{provider}:{value}"
+        graph_hints = record.get("graph_hints", {}) or {}
+        if graph_hints.get("openalex_id"):
+            return f"openalex:{graph_hints['openalex_id']}"
+        return canonical_key(record)
 
     def _migrate_legacy_relationships(self, connection: sqlite3.Connection) -> None:
         legacy_rows = connection.execute(
@@ -681,6 +715,7 @@ class ReferenceManagerService:
                 (collection_id, user_id, now),
             )
             for paper_id in seed_paper_ids or []:
+                self._ensure_library_entry(connection, user_id=user_id, paper_id=paper_id, origin="collection_seed")
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO collection_papers (collection_id, paper_id, added_by_user_id, added_at)
@@ -726,18 +761,18 @@ class ReferenceManagerService:
                 "SELECT * FROM collection_snapshots WHERE collection_id = ? ORDER BY created_at DESC",
                 (collection_id,),
             ).fetchall()
-        return {
-            "id": collection["id"],
-            "name": collection["name"],
-            "description": collection["description"],
-            "visibility": collection["visibility"],
-            "status": collection["status"],
-            "tags": json_loads(collection["tags_json"], []),
-            "papers": [self._row_to_paper(row) for row in papers],
-            "notes": [self._row_to_note(row) for row in notes],
-            "members": [dict(row) for row in members],
-            "snapshots": [dict(row) for row in snapshots],
-        }
+            return {
+                "id": collection["id"],
+                "name": collection["name"],
+                "description": collection["description"],
+                "visibility": collection["visibility"],
+                "status": collection["status"],
+                "tags": json_loads(collection["tags_json"], []),
+                "papers": [self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row)) for row in papers],
+                "notes": [self._row_to_note(row) for row in notes],
+                "members": [dict(row) for row in members],
+                "snapshots": [dict(row) for row in snapshots],
+            }
 
     def list_collections(self, user_id: int) -> List[Dict[str, Any]]:
         with self._connect() as connection:
@@ -782,12 +817,15 @@ class ReferenceManagerService:
                 rows = connection.execute(
                     """
                     SELECT papers.*
-                    FROM papers
-                    WHERE papers.merged_into_paper_id IS NULL
-                    ORDER BY COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) DESC, papers.title ASC
+                    FROM library_entries
+                    JOIN papers ON papers.id = library_entries.paper_id
+                    WHERE library_entries.user_id = ? AND papers.merged_into_paper_id IS NULL
+                    ORDER BY library_entries.saved_at DESC, COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) DESC, papers.title ASC
                     """
+                    ,
+                    (user_id,),
                 ).fetchall()
-        return [self._row_to_paper(row) for row in rows]
+            return [self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row)) for row in rows]
 
     def update_collection(self, user_id: int, collection_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         collection = self._require_collection_access(user_id, collection_id, minimum_role="editor")
@@ -1254,6 +1292,175 @@ class ReferenceManagerService:
             "retraction_state": row["retraction_state"],
             "metadata": metadata,
         }
+
+    def _find_paper_row_for_record(self, connection: sqlite3.Connection, record: Dict[str, Any]) -> Optional[sqlite3.Row]:
+        metadata = dict(record)
+        metadata["doi"] = normalize_doi(metadata.get("doi"))
+        return self._find_existing_paper(connection, metadata)
+
+    def _upsert_discovery_cache_record(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: int,
+        record: Dict[str, Any],
+        origin: str,
+        provider: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        discovery_key = self._discovery_key_from_record(record)
+        now = utcnow()
+        connection.execute(
+            """
+            INSERT INTO discovery_cache (
+                user_id, discovery_key, provider, origin, record_json, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, discovery_key) DO UPDATE SET
+                provider = excluded.provider,
+                origin = excluded.origin,
+                record_json = excluded.record_json,
+                expires_at = excluded.expires_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                discovery_key,
+                provider or "provider",
+                origin,
+                json_dumps(record),
+                iso_plus_seconds(ttl_seconds or self.config.search_cache_ttl_seconds),
+                now,
+                now,
+            ),
+        )
+        row = connection.execute(
+            """
+            SELECT * FROM discovery_cache
+            WHERE user_id = ? AND discovery_key = ?
+            """,
+            (user_id, discovery_key),
+        ).fetchone()
+        return {
+            "id": row["id"],
+            "discovery_key": row["discovery_key"],
+            "provider": row["provider"],
+            "origin": row["origin"],
+            "record": json_loads(row["record_json"], {}),
+            "expires_at": row["expires_at"],
+            "stale": not iso_after_now(row["expires_at"]),
+        }
+
+    def _library_entry_for_paper(self, connection: sqlite3.Connection, user_id: int, paper_id: int) -> Optional[sqlite3.Row]:
+        return connection.execute(
+            """
+            SELECT * FROM library_entries
+            WHERE user_id = ? AND paper_id = ?
+            """,
+            (user_id, paper_id),
+        ).fetchone()
+
+    def _ensure_library_entry(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: int,
+        paper_id: int,
+        origin: str,
+    ) -> sqlite3.Row:
+        now = utcnow()
+        connection.execute(
+            """
+            INSERT INTO library_entries (user_id, paper_id, origin, saved_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, paper_id) DO UPDATE SET
+                origin = excluded.origin,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, paper_id, origin, now, now),
+        )
+        return self._library_entry_for_paper(connection, user_id, paper_id)
+
+    def _paper_user_context(
+        self,
+        connection: sqlite3.Connection,
+        user_id: Optional[int],
+        paper_id: int,
+        *,
+        discovery_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        if not user_id:
+            return {
+                "saved_by_user": False,
+                "library_entry_id": None,
+                "saved_at": None,
+                "in_collections_count": 0,
+                "collection_ids": [],
+                "collection_names": [],
+                "is_hidden": False,
+                "is_excluded": False,
+                "is_ignored": False,
+                "discovery_id": discovery_id,
+                "discovered_only": paper_id is None,
+            }
+        library_row = self._library_entry_for_paper(connection, user_id, paper_id)
+        collection_rows = connection.execute(
+            """
+            SELECT collections.id, collections.name
+            FROM collection_papers
+            JOIN collections ON collections.id = collection_papers.collection_id
+            LEFT JOIN collection_members ON collection_members.collection_id = collections.id
+            WHERE collection_papers.paper_id = ? AND (collections.owner_id = ? OR collection_members.user_id = ?)
+            ORDER BY collections.name ASC
+            """,
+            (paper_id, user_id, user_id),
+        ).fetchall()
+        state_rows = connection.execute(
+            """
+            SELECT is_hidden, is_excluded, is_ignored
+            FROM user_paper_state
+            WHERE user_id = ? AND paper_id = ?
+            """,
+            (user_id, paper_id),
+        ).fetchall()
+        return {
+            "saved_by_user": library_row is not None,
+            "library_entry_id": library_row["id"] if library_row else None,
+            "saved_at": library_row["saved_at"] if library_row else None,
+            "in_collections_count": len(collection_rows),
+            "collection_ids": [row["id"] for row in collection_rows],
+            "collection_names": [row["name"] for row in collection_rows],
+            "is_hidden": any(bool(row["is_hidden"]) for row in state_rows),
+            "is_excluded": any(bool(row["is_excluded"]) for row in state_rows),
+            "is_ignored": any(bool(row["is_ignored"]) for row in state_rows),
+            "discovery_id": discovery_id,
+            "discovered_only": library_row is None,
+        }
+
+    def _decorate_paper_for_user(
+        self,
+        connection: sqlite3.Connection,
+        user_id: Optional[int],
+        paper: Dict[str, Any],
+        *,
+        discovery_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        if paper.get("id") is None:
+            paper["user_context"] = {
+                "saved_by_user": False,
+                "library_entry_id": None,
+                "saved_at": None,
+                "in_collections_count": 0,
+                "collection_ids": [],
+                "collection_names": [],
+                "is_hidden": False,
+                "is_excluded": False,
+                "is_ignored": False,
+                "discovery_id": discovery_id,
+                "discovered_only": True,
+            }
+            return paper
+        paper["user_context"] = self._paper_user_context(connection, user_id, paper["id"], discovery_id=discovery_id)
+        return paper
 
     def _row_to_note(self, row: sqlite3.Row) -> Dict[str, Any]:
         return {
@@ -1787,6 +1994,7 @@ class ReferenceManagerService:
             cache_hit = cache_hit and relations.get("cache_hit", False) if identifier_type != "manual" else relations.get("cache_hit", False)
         with self._connect() as connection:
             paper = self._ensure_paper(connection, record_data, user_id)
+            self._ensure_library_entry(connection, user_id=user_id, paper_id=paper["id"], origin=identifier_type)
             if collection_id:
                 connection.execute(
                     """
@@ -1813,7 +2021,44 @@ class ReferenceManagerService:
                 paper_id=paper["id"],
             )
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
-        return {"paper": self.get_paper(paper["id"]), "provider": source_provider, "degraded": degraded}
+        return {"paper": self.get_paper(paper["id"], user_id=user_id), "provider": source_provider, "degraded": degraded}
+
+    def save_discovery_paper(self, user_id: int, discovery_id: int, *, collection_id: Optional[int] = None) -> Dict[str, Any]:
+        if collection_id:
+            self._require_collection_access(user_id, collection_id, minimum_role="editor")
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM discovery_cache
+                WHERE id = ? AND user_id = ?
+                """,
+                (discovery_id, user_id),
+            ).fetchone()
+            if not row:
+                raise ServiceError("Record discovery non trovato.", status=404)
+            record = json_loads(row["record_json"], {})
+            if not record:
+                raise ServiceError("Record discovery non valido.", status=422)
+            paper = self._ensure_paper(connection, record, user_id)
+            self._ensure_library_entry(connection, user_id=user_id, paper_id=paper["id"], origin=row["origin"])
+            if collection_id:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO collection_papers (collection_id, paper_id, added_by_user_id, added_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (collection_id, paper["id"], user_id, utcnow()),
+                )
+            connection.commit()
+        self._audit(
+            user_id,
+            "paper_saved_from_discovery",
+            "paper",
+            paper["id"],
+            "Paper promosso dalla discovery alla libreria.",
+            details={"discovery_id": discovery_id, "collection_id": collection_id},
+        )
+        return {"paper": self.get_paper(paper["id"], user_id=user_id), "saved": True}
 
     def get_live_relations(
         self,
@@ -2018,7 +2263,7 @@ class ReferenceManagerService:
         ]
         return {"references": references, "citations": citations, "summary": summary, "flattened": flattened}
 
-    def get_paper(self, paper_id: int) -> Dict[str, Any]:
+    def get_paper(self, paper_id: int, *, user_id: Optional[int] = None) -> Dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
             if not row:
@@ -2056,27 +2301,27 @@ class ReferenceManagerService:
                 """,
                 (paper_id,),
             ).fetchone()
-        paper = self._row_to_paper(row)
-        paper["authors"] = [dict(author) for author in authors]
-        paper["notes"] = [self._row_to_note(note) for note in notes]
-        paper["relations"] = relations["flattened"]
-        paper["graph"] = {
-            "references": relations["references"],
-            "citations": relations["citations"],
-            "summary": relations["summary"],
-        }
-        paper["topics"] = [dict(topic) for topic in topics]
-        paper["sources"] = [dict(source) for source in sources]
-        paper["retrieval"] = (
-            {
-                **dict(latest_run),
-                "stats": json_loads(latest_run["stats_json"], {}),
-                "degraded": json_loads(latest_run["degraded_json"], []),
+            paper = self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row))
+            paper["authors"] = [dict(author) for author in authors]
+            paper["notes"] = [self._row_to_note(note) for note in notes]
+            paper["relations"] = relations["flattened"]
+            paper["graph"] = {
+                "references": relations["references"],
+                "citations": relations["citations"],
+                "summary": relations["summary"],
             }
-            if latest_run
-            else None
-        )
-        return paper
+            paper["topics"] = [dict(topic) for topic in topics]
+            paper["sources"] = [dict(source) for source in sources]
+            paper["retrieval"] = (
+                {
+                    **dict(latest_run),
+                    "stats": json_loads(latest_run["stats_json"], {}),
+                    "degraded": json_loads(latest_run["degraded_json"], []),
+                }
+                if latest_run
+                else None
+            )
+            return paper
 
     def list_retrieval_runs(self, user_id: int, paper_id: Optional[int] = None) -> List[Dict[str, Any]]:
         with self._connect() as connection:
@@ -2307,9 +2552,18 @@ class ReferenceManagerService:
         query_norm = normalize_text(query)
         local_results: List[Dict[str, Any]] = []
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM papers WHERE merged_into_paper_id IS NULL ORDER BY year DESC, title ASC").fetchall()
+            rows = connection.execute(
+                """
+                SELECT papers.*
+                FROM library_entries
+                JOIN papers ON papers.id = library_entries.paper_id
+                WHERE library_entries.user_id = ? AND papers.merged_into_paper_id IS NULL
+                ORDER BY library_entries.saved_at DESC, papers.year DESC, papers.title ASC
+                """,
+                (user_id,),
+            ).fetchall()
             for row in rows:
-                paper = self._row_to_paper(row)
+                paper = self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row))
                 searchable = " ".join(
                     [
                         paper["title"] or "",
@@ -2353,11 +2607,50 @@ class ReferenceManagerService:
                 """,
                 (user_id, user_id),
             ).fetchall()
+            external_results = []
+            for record in external["results"]:
+                provider_name = ((record.get("raw_sources") or [{}])[0].get("provider") or "provider")
+                cached = self._upsert_discovery_cache_record(
+                    connection,
+                    user_id=user_id,
+                    record=record,
+                    origin="search",
+                    provider=provider_name,
+                    ttl_seconds=self.config.search_cache_ttl_seconds,
+                )
+                existing_row = self._find_paper_row_for_record(connection, record)
+                existing_paper = self._row_to_paper(existing_row) if existing_row else None
+                user_context = (
+                    self._paper_user_context(connection, user_id, existing_row["id"], discovery_id=cached["id"])
+                    if existing_row
+                    else {
+                        "saved_by_user": False,
+                        "library_entry_id": None,
+                        "saved_at": None,
+                        "in_collections_count": 0,
+                        "collection_ids": [],
+                        "collection_names": [],
+                        "is_hidden": False,
+                        "is_excluded": False,
+                        "is_ignored": False,
+                        "discovery_id": cached["id"],
+                        "discovered_only": True,
+                    }
+                )
+                external_results.append(
+                    {
+                        **record,
+                        "provider": provider_name,
+                        "discovery_id": cached["id"],
+                        "persisted_paper_id": existing_paper["id"] if existing_paper else None,
+                        "user_context": user_context,
+                    }
+                )
         for row in memberships:
             collection_presence[row["paper_id"]].append(row["name"])
         for paper in local_results:
             paper["known_in_collections"] = collection_presence.get(paper["id"], [])
-        return {"results": local_results, "external_results": external["results"], "degraded": external["degraded"]}
+        return {"results": local_results, "external_results": external_results, "degraded": external["degraded"]}
 
     def set_paper_state(self, user_id: int, paper_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         status = payload.get("status", "salvato")
@@ -2367,6 +2660,7 @@ class ReferenceManagerService:
         if collection_id:
             self._require_collection_access(user_id, collection_id, minimum_role="viewer")
         with self._connect() as connection:
+            self._ensure_library_entry(connection, user_id=user_id, paper_id=paper_id, origin=payload.get("source", "manual"))
             connection.execute(
                 """
                 INSERT INTO user_paper_state (
@@ -2417,6 +2711,8 @@ class ReferenceManagerService:
         if collection_id:
             self._require_collection_access(user_id, collection_id, minimum_role="viewer")
         with self._connect() as connection:
+            if target_type == "paper":
+                self._ensure_library_entry(connection, user_id=user_id, paper_id=target_id, origin="note")
             cursor = connection.execute(
                 """
                 INSERT INTO notes (target_type, target_id, collection_id, author_user_id, visibility, body, created_at, updated_at)
@@ -2603,6 +2899,7 @@ class ReferenceManagerService:
             for table, foreign_key in (
                 ("collection_papers", "paper_id"),
                 ("user_paper_state", "paper_id"),
+                ("library_entries", "paper_id"),
             ):
                 connection.execute(
                     f"UPDATE OR IGNORE {table} SET {foreign_key} = ? WHERE {foreign_key} = ?",
@@ -3272,7 +3569,9 @@ class ReferenceManagerService:
             counts = {
                 "users": connection.execute("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").fetchone()[0],
                 "collections": connection.execute("SELECT COUNT(*) FROM collections").fetchone()[0],
-                "papers": connection.execute("SELECT COUNT(*) FROM papers WHERE merged_into_paper_id IS NULL").fetchone()[0],
+                "catalog_papers": connection.execute("SELECT COUNT(*) FROM papers WHERE merged_into_paper_id IS NULL").fetchone()[0],
+                "library_entries": connection.execute("SELECT COUNT(*) FROM library_entries").fetchone()[0],
+                "discovery_cache": connection.execute("SELECT COUNT(*) FROM discovery_cache WHERE expires_at > ?", (utcnow(),)).fetchone()[0],
                 "notifications": connection.execute("SELECT COUNT(*) FROM notifications").fetchone()[0],
                 "imports": connection.execute("SELECT COUNT(*) FROM imports").fetchone()[0],
                 "provider_cache_entries": connection.execute("SELECT COUNT(*) FROM provider_cache").fetchone()[0],
