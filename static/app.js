@@ -18,6 +18,8 @@ const state = {
     external: [],
     degraded: [],
   },
+  graphOpsMessage: "Nessuna operazione sul grafo eseguita.",
+  graphOpsTone: "success",
 };
 
 async function api(path, options = {}) {
@@ -85,6 +87,17 @@ function providerName(paper) {
 
 function metaChip(label) {
   return `<span class="meta-chip">${escapeHtml(label)}</span>`;
+}
+
+function setGraphFeedback(message, tone = "success") {
+  state.graphOpsMessage = message;
+  state.graphOpsTone = tone;
+  const target = byId("graph-ops-feedback");
+  if (!target) {
+    return;
+  }
+  target.textContent = message;
+  target.className = `feedback-area ${tone}`;
 }
 
 function renderCards(target, items, renderItem, emptyMessage) {
@@ -284,8 +297,10 @@ function renderActiveCollection() {
   const heading = byId("active-collection-name");
   const meta = byId("active-collection-meta");
   const description = byId("active-collection-description");
+  const refreshButton = byId("refresh-collection-graph");
 
   if (!state.activeCollection) {
+    refreshButton.disabled = true;
     heading.textContent = "Seleziona una collezione";
     meta.innerHTML = "";
     description.textContent = "I paper salvati nella collezione selezionata compariranno qui.";
@@ -298,6 +313,7 @@ function renderActiveCollection() {
     return;
   }
 
+  refreshButton.disabled = false;
   heading.textContent = state.activeCollection.name;
   description.textContent = state.activeCollection.description || "Collezione pronta per ricevere articoli dal backend.";
   meta.innerHTML = [
@@ -351,6 +367,38 @@ function renderWorkspacePapers() {
     `,
     "Nessun paper salvato nel backend.",
   );
+}
+
+function renderRelationItems(items, emptyMessage) {
+  if (!items.length) {
+    return `<div class="relation-empty">${escapeHtml(emptyMessage)}</div>`;
+  }
+  return items
+    .map(
+      (item) => `
+        <article class="relation-card">
+          <div class="relation-top">
+            <div>
+              <h4>${escapeHtml(item.paper.title || "Titolo non disponibile")}</h4>
+              <p>${escapeHtml(item.paper.venue || "Venue n/d")} · ${escapeHtml(item.paper.year || "Anno n/d")}</p>
+            </div>
+            ${metaChip(item.edge.state)}
+          </div>
+          <div class="card-meta">
+            ${item.paper.doi ? metaChip(`DOI ${item.paper.doi}`) : ""}
+            ${metaChip(`evidenze ${item.edge.evidence_count}`)}
+            ${(item.edge.providers || []).map((provider) => metaChip(provider)).join("")}
+          </div>
+          <p class="relation-copy">${escapeHtml(item.edge.explanation || "Relazione persistita nel grafo locale.")}</p>
+          <div class="actions-row">
+            <button class="action-button secondary" type="button" data-action="open-paper" data-paper-id="${item.paper.id}">
+              Apri paper
+            </button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
 }
 
 function renderPaperCard(paper, { mode, compact = false, index = null } = {}) {
@@ -468,6 +516,8 @@ function renderPaperDetail() {
   const sources = paper.sources || paper.raw_sources || [];
   const notes = paper.notes || [];
   const relations = paper.relations || [];
+  const graph = paper.graph || { references: [], citations: [], summary: {} };
+  const isLocal = state.activePaperMode === "local";
   target.className = "detail-panel";
   target.innerHTML = `
     <div class="detail-top">
@@ -477,6 +527,18 @@ function renderPaperDetail() {
       </div>
       ${metaChip(state.activePaperMode === "external" ? "Preview API" : `Paper #${paper.id}`)}
     </div>
+
+    ${
+      isLocal
+        ? `
+          <div class="actions-row detail-actions">
+            <button class="ghost" type="button" data-action="refresh-paper-graph" data-mode="references">Refresh references</button>
+            <button class="ghost" type="button" data-action="refresh-paper-graph" data-mode="citations">Refresh citations</button>
+            <button class="ghost" type="button" data-action="expand-paper-graph">Espandi 1 hop</button>
+          </div>
+        `
+        : ""
+    }
 
     <div class="detail-tags">
       ${paper.venue ? metaChip(paper.venue) : ""}
@@ -517,7 +579,40 @@ function renderPaperDetail() {
       <h3>Relazioni e note</h3>
       <p>Relazioni note: ${escapeHtml(relations.length)}</p>
       <p>Note salvate: ${escapeHtml(notes.length)}</p>
+      ${
+        isLocal
+          ? `
+            <div class="detail-tags">
+              ${metaChip(`references ${graph.summary?.references || 0}`)}
+              ${metaChip(`citations ${graph.summary?.citations || 0}`)}
+              ${metaChip(`retrieved ${((graph.summary?.retrieved_references || 0) + (graph.summary?.retrieved_citations || 0))}`)}
+              ${metaChip(`inferred ${((graph.summary?.inferred_references || 0) + (graph.summary?.inferred_citations || 0))}`)}
+              ${metaChip(`incomplete ${((graph.summary?.incomplete_references || 0) + (graph.summary?.incomplete_citations || 0))}`)}
+            </div>
+          `
+          : ""
+      }
     </div>
+
+    ${
+      isLocal
+        ? `
+          <div class="detail-section">
+            <h3>References</h3>
+            <div class="relation-list">
+              ${renderRelationItems(graph.references || [], "Nessuna reference persistita per questo paper.")}
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h3>Citations</h3>
+            <div class="relation-list">
+              ${renderRelationItems(graph.citations || [], "Nessuna citation persistita per questo paper.")}
+            </div>
+          </div>
+        `
+        : ""
+    }
 
     <div class="detail-links">
       ${paper.canonical_url ? `<a href="${escapeHtml(paper.canonical_url)}" target="_blank" rel="noreferrer">Apri record</a>` : ""}
@@ -542,6 +637,7 @@ function renderAll() {
   renderSearchResults();
   renderPaperDetail();
   renderActivityList(state.bootstrap?.feed || [], "Nessuna activity disponibile nel feed.");
+  setGraphFeedback(state.graphOpsMessage, state.graphOpsTone);
 }
 
 async function loadPaper(paperId) {
@@ -557,6 +653,70 @@ async function selectCollection(collectionId) {
   renderCollections();
   renderActiveCollection();
   renderWorkspacePapers();
+}
+
+async function refreshPaperGraph(mode) {
+  if (!state.activePaper?.id || state.activePaperMode !== "local") {
+    return;
+  }
+  const payload = await api("/api/papers/refresh", {
+    method: "POST",
+    body: JSON.stringify({
+      paper_id: state.activePaper.id,
+      mode,
+      force_refresh: true,
+      rebuild: true,
+    }),
+  });
+  await fetchWorkspace();
+  state.activePaper = payload.paper;
+  state.activePaperMode = "local";
+  renderPaperDetail();
+  setGraphFeedback(`Refresh ${mode} completato per il paper #${payload.paper.id}.`, payload.degraded?.length ? "warning" : "success");
+}
+
+async function expandActivePaperGraph() {
+  if (!state.activePaper?.id || state.activePaperMode !== "local") {
+    return;
+  }
+  const paperId = state.activePaper.id;
+  const payload = await api("/api/papers/expand", {
+    method: "POST",
+    body: JSON.stringify({
+      paper_id: paperId,
+      depth: 1,
+      directions: ["references", "citations"],
+      max_nodes: 50,
+      force_refresh: true,
+      rebuild: false,
+    }),
+  });
+  await fetchWorkspace();
+  await loadPaper(paperId);
+  setGraphFeedback(
+    `Espansione completata: ${payload.expanded_nodes} nodi aggiornati, ${payload.reachable_papers} paper raggiungibili.`,
+    payload.degraded?.length ? "warning" : "success",
+  );
+}
+
+async function refreshActiveCollectionGraph() {
+  if (!state.activeCollection?.id) {
+    return;
+  }
+  const payload = await api("/api/collections/refresh", {
+    method: "POST",
+    body: JSON.stringify({
+      collection_id: state.activeCollection.id,
+      mode: "all",
+      force_refresh: true,
+      rebuild: true,
+    }),
+  });
+  await fetchWorkspace();
+  setGraphFeedback(
+    `Refresh collezione completato: ${payload.stats.refreshed_papers} paper aggiornati.`,
+    payload.degraded?.length ? "warning" : "success",
+  );
 }
 
 async function handleSearch(event) {
@@ -680,6 +840,12 @@ byId("load-audit").addEventListener("click", () => {
   });
 });
 
+byId("refresh-collection-graph").addEventListener("click", () => {
+  refreshActiveCollectionGraph().catch((error) => {
+    alert(error.message);
+  });
+});
+
 document.addEventListener("click", (event) => {
   const actionTarget = event.target.closest("[data-action]");
   if (!actionTarget) {
@@ -692,6 +858,14 @@ document.addEventListener("click", (event) => {
   }
   if (action === "open-paper") {
     loadPaper(actionTarget.dataset.paperId).catch((error) => alert(error.message));
+    return;
+  }
+  if (action === "refresh-paper-graph") {
+    refreshPaperGraph(actionTarget.dataset.mode).catch((error) => alert(error.message));
+    return;
+  }
+  if (action === "expand-paper-graph") {
+    expandActivePaperGraph().catch((error) => alert(error.message));
     return;
   }
   if (action === "preview-external") {
