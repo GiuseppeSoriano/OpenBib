@@ -13,8 +13,8 @@
           <p class="eyebrow">Backend Preview Workspace</p>
           <h1>Reference Manager</h1>
           <p class="lead">
-            Frontend di verifica per il nuovo backend: sessione demo automatica, collezioni, ricerca locale,
-            risultati remoti dai provider e dettaglio articoli in un'unica dashboard.
+            Frontend di verifica per il backend: libreria personale, collezioni curate, discovery temporanea dai provider
+            e promozione esplicita dei paper rilevanti nella library.
           </p>
           <div class="hero-notes">
             <span class="pill">Bozza operativa</span>
@@ -50,7 +50,7 @@
           <div class="panel-head">
             <div>
               <p class="section-kicker">Overview</p>
-              <h2>Stato workspace</h2>
+              <h2>Stato library e catalogo</h2>
             </div>
           </div>
           <div id="stats-grid" class="stats-grid"></div>
@@ -114,12 +114,12 @@
           <div class="panel-head">
             <div>
               <p class="section-kicker">Local Library</p>
-              <h2>Paper presenti nel backend</h2>
+              <h2>Paper salvati in libreria</h2>
             </div>
             <div id="workspace-paper-meta" class="meta-inline"></div>
           </div>
           <p class="muted-copy">
-            Questa lista mostra i paper realmente salvati nel database locale del backend, indipendentemente dalla collezione attiva.
+            Questa lista mostra i paper che l'utente ha salvato esplicitamente nella propria library. I risultati di discovery non compaiono qui finché non vengono salvati.
           </p>
           <div id="workspace-paper-list" class="paper-list"></div>
         </article>
@@ -130,7 +130,7 @@
           <div class="panel-head">
             <div>
               <p class="section-kicker">Ricerca</p>
-              <h2>Paper dal backend e dai provider</h2>
+              <h2>Libreria salvata e discovery remota</h2>
             </div>
           </div>
 
@@ -153,7 +153,7 @@
           <div class="results-grid">
             <section>
               <div class="results-head">
-                <h3>Articoli nel database</h3>
+                <h3>Articoli salvati in libreria</h3>
                 <span id="local-results-count" class="count-chip">0</span>
               </div>
               <div id="search-results-local" class="paper-list"></div>
@@ -161,7 +161,7 @@
 
             <section>
               <div class="results-head">
-                <h3>Articoli recuperati via API</h3>
+                <h3>Articoli scoperti dai provider</h3>
                 <span id="external-results-count" class="count-chip">0</span>
               </div>
               <div id="search-results-external" class="paper-list"></div>
@@ -180,7 +180,7 @@
           </div>
           <div id="graph-ops-feedback" class="feedback-area">Nessuna operazione sul grafo eseguita.</div>
           <div id="paper-detail" class="detail-panel empty-state">
-            Seleziona un paper locale o un risultato esterno per vedere i metadati completi.
+            Seleziona un paper salvato o un risultato di discovery per vedere i metadati completi.
           </div>
         </article>
 

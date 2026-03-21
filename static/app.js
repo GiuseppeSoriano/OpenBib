@@ -83,6 +83,9 @@ function joinAuthors(paper) {
 }
 
 function providerName(paper) {
+  if (paper.provider) {
+    return paper.provider;
+  }
   const rawSource = Array.isArray(paper.raw_sources) ? paper.raw_sources[0] : null;
   const source = Array.isArray(paper.sources) ? paper.sources[0] : null;
   return rawSource?.provider || source?.provider || "workspace";
@@ -90,6 +93,29 @@ function providerName(paper) {
 
 function metaChip(label) {
   return `<span class="meta-chip">${escapeHtml(label)}</span>`;
+}
+
+function userContextBadges(paper, { activeCollectionId = null } = {}) {
+  const context = paper.user_context || {};
+  const badges = [];
+  if (context.saved_by_user) {
+    badges.push(metaChip("Salvato in libreria"));
+  } else if (context.discovery_id) {
+    badges.push(metaChip("Solo discovery"));
+  }
+  if (context.in_collections_count) {
+    badges.push(metaChip(`${context.in_collections_count} collezioni`));
+  }
+  if (activeCollectionId && Array.isArray(context.collection_ids) && context.collection_ids.includes(activeCollectionId)) {
+    badges.push(metaChip("Nella collezione attiva"));
+  }
+  if (context.is_hidden) {
+    badges.push(metaChip("Nascosto"));
+  }
+  if (context.is_excluded) {
+    badges.push(metaChip("Escluso"));
+  }
+  return badges.join("");
 }
 
 function relationSectionEmpty(direction) {
@@ -311,9 +337,10 @@ function renderStats() {
   const items = [
     { label: "Utenti", value: counts.users ?? 0 },
     { label: "Collezioni", value: counts.collections ?? 0 },
-    { label: "Paper nel DB", value: counts.papers ?? 0 },
+    { label: "Paper in libreria", value: counts.library_entries ?? 0 },
+    { label: "Paper catalogo", value: counts.catalog_papers ?? 0 },
+    { label: "Cache discovery", value: counts.discovery_cache ?? 0 },
     { label: "Notifiche", value: counts.notifications ?? 0 },
-    { label: "Import", value: counts.imports ?? 0 },
   ];
   byId("stats-grid").innerHTML = items
     .map(
@@ -405,7 +432,7 @@ function renderWorkspacePapers() {
   const papers = state.workspacePapers || [];
   const collectionPaperIds = new Set((state.activeCollection?.papers || []).map((paper) => paper.id));
   byId("workspace-paper-meta").innerHTML = [
-    metaChip(`${papers.length} paper nel database locale`),
+    metaChip(`${papers.length} paper salvati in libreria`),
     state.activeCollection ? metaChip(`${collectionPaperIds.size} presenti nella collezione aperta`) : metaChip("Nessuna collezione selezionata"),
   ].join("");
 
@@ -428,7 +455,7 @@ function renderWorkspacePapers() {
         </div>
         <div class="card-meta">
           ${paper.doi ? metaChip(`DOI ${paper.doi}`) : ""}
-          ${metaChip(collectionPaperIds.has(paper.id) ? "Nella collezione attiva" : "Solo nel database locale")}
+          ${userContextBadges(paper, { activeCollectionId: state.activeCollection?.id || null })}
           ${metaChip(providerName(paper))}
         </div>
         <button class="action-button secondary" type="button" data-action="open-paper" data-paper-id="${paper.id}">
@@ -436,7 +463,7 @@ function renderWorkspacePapers() {
         </button>
       </article>
     `,
-    "Nessun paper salvato nel backend.",
+    "Nessun paper salvato in libreria.",
   );
 }
 
@@ -497,6 +524,11 @@ function renderPaperCard(paper, { mode, compact = false, index = null } = {}) {
             <button class="action-button secondary" type="button" data-action="preview-external" data-result-index="${index}">
               Anteprima
             </button>
+            ${
+              paper.user_context?.saved_by_user && paper.persisted_paper_id
+                ? `<button class="ghost" type="button" data-action="open-paper" data-paper-id="${paper.persisted_paper_id}">Apri salvato</button>`
+                : ""
+            }
           </div>
         `
       : `
@@ -523,6 +555,9 @@ function renderPaperCard(paper, { mode, compact = false, index = null } = {}) {
         ${paper.quality_state ? metaChip(paper.quality_state) : ""}
         ${paper.reliability_state ? metaChip(paper.reliability_state) : ""}
         ${paper.doi ? metaChip(`DOI ${paper.doi}`) : ""}
+      </div>
+      <div class="card-meta">
+        ${userContextBadges(paper, { activeCollectionId: state.activeCollection?.id || null })}
       </div>
       ${actions}
     </article>
@@ -593,7 +628,7 @@ function renderPaperDetail() {
   const target = byId("paper-detail");
   if (!state.activePaper) {
     target.className = "detail-panel empty-state";
-    target.textContent = "Seleziona un paper locale o un risultato esterno per vedere i metadati completi.";
+    target.textContent = "Seleziona un paper salvato o un risultato di discovery per vedere i metadati completi.";
     return;
   }
 
@@ -621,6 +656,7 @@ function renderPaperDetail() {
     },
   };
   const isLocal = state.activePaperMode === "local";
+  const userContext = paper.user_context || {};
   const relationNotes = [
     referencesSnapshot?.fetched_at ? `references ${referencesSnapshot.stale ? "stale" : "fresh"} @ ${referencesSnapshot.fetched_at}` : null,
     citationsSnapshot?.fetched_at ? `citations ${citationsSnapshot.stale ? "stale" : "fresh"} @ ${citationsSnapshot.fetched_at}` : null,
@@ -639,16 +675,33 @@ function renderPaperDetail() {
     </div>
 
     ${
-      isLocal
+      !isLocal
         ? `
+          <div class="actions-row detail-actions">
+            ${
+              userContext.saved_by_user && paper.persisted_paper_id
+                ? `<button class="ghost" type="button" data-action="open-paper" data-paper-id="${paper.persisted_paper_id}">Apri versione salvata</button>`
+                : `<button class="ghost" type="button" data-action="save-discovery" data-discovery-id="${paper.discovery_id}">Salva in libreria</button>`
+            }
+            ${
+              !userContext.saved_by_user && state.activeCollection?.id
+                ? `<button class="ghost" type="button" data-action="save-discovery-to-collection" data-discovery-id="${paper.discovery_id}" data-collection-id="${state.activeCollection.id}">Salva nella collezione attiva</button>`
+                : ""
+            }
+          </div>
+        `
+        : `
           <div class="actions-row detail-actions">
             <button class="ghost" type="button" data-action="refresh-paper-graph" data-mode="references">Refresh references</button>
             <button class="ghost" type="button" data-action="refresh-paper-graph" data-mode="citations">Refresh citations</button>
             <button class="ghost" type="button" data-action="expand-paper-graph">Espandi 1 hop</button>
           </div>
         `
-        : ""
     }
+
+    <div class="detail-tags">
+      ${userContextBadges(paper, { activeCollectionId: state.activeCollection?.id || null })}
+    </div>
 
     <div class="detail-tags">
       ${paper.venue ? metaChip(paper.venue) : ""}
@@ -873,6 +926,22 @@ async function handleSearch(event) {
   renderPaperDetail();
 }
 
+async function saveDiscoveryPaper(discoveryId, collectionId = null) {
+  const payload = await api("/api/papers/save", {
+    method: "POST",
+    body: JSON.stringify({
+      discovery_id: Number(discoveryId),
+      collection_id: collectionId ? Number(collectionId) : null,
+    }),
+  });
+  await fetchWorkspace();
+  await loadPaper(payload.paper.id);
+  setGraphFeedback(
+    collectionId ? "Paper salvato in libreria e aggiunto alla collezione attiva." : "Paper salvato in libreria.",
+    "success",
+  );
+}
+
 async function handleCollectionCreate(event) {
   event.preventDefault();
   const values = formValues(event.target);
@@ -1006,6 +1075,13 @@ document.addEventListener("click", (event) => {
     state.activePaperMode = "external";
     renderPaperDetail();
     return;
+  }
+  if (action === "save-discovery") {
+    saveDiscoveryPaper(actionTarget.dataset.discoveryId).catch((error) => alert(error.message));
+    return;
+  }
+  if (action === "save-discovery-to-collection") {
+    saveDiscoveryPaper(actionTarget.dataset.discoveryId, actionTarget.dataset.collectionId).catch((error) => alert(error.message));
   }
 });
 initialize(false);
