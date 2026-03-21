@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,164 +8,246 @@
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
-        <div>
-          <p class="eyebrow">Literature Discovery Platform</p>
+      <section class="hero reveal">
+        <div class="hero-copy">
+          <p class="eyebrow">Backend Preview Workspace</p>
           <h1>Reference Manager</h1>
           <p class="lead">
-            A self-contained scholarly discovery workspace with collections, ingest, graph exploration,
-            recommendations, timeline analysis, sharing, import/export, and audit visibility.
+            Frontend di verifica per il nuovo backend: sessione demo automatica, collezioni, ricerca locale,
+            risultati remoti dai provider e dettaglio articoli in un'unica dashboard.
           </p>
-        </div>
-        <div class="hero-card">
-          <div id="session-status">Not authenticated.</div>
-          <button id="refresh-bootstrap" class="ghost">Refresh workspace</button>
-        </div>
-      </section>
-
-      <section class="grid two">
-        <article class="panel">
-          <h2>Account</h2>
-          <form id="register-form" class="stack">
-            <label>Email <input name="email" type="email" required></label>
-            <label>Password <input name="password" type="password" required></label>
-            <label>Display name <input name="display_name" type="text"></label>
-            <button type="submit">Register</button>
-          </form>
-          <form id="login-form" class="stack muted-top">
-            <label>Email <input name="email" type="email" required></label>
-            <label>Password <input name="password" type="password" required></label>
-            <button type="submit">Login</button>
-          </form>
-          <button id="logout-button" class="ghost">Logout</button>
-        </article>
-
-        <article class="panel">
-          <h2>Collection</h2>
-          <form id="collection-form" class="stack">
-            <label>Name <input name="name" type="text" required></label>
-            <label>Description <textarea name="description" rows="3"></textarea></label>
-            <label>Visibility
-              <select name="visibility">
-                <option value="private">Private</option>
-                <option value="shared">Shared</option>
-                <option value="public">Public</option>
-              </select>
-            </label>
-            <button type="submit">Create collection</button>
-          </form>
-          <div id="collections-list" class="list"></div>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="panel">
-          <h2>Add Paper</h2>
-          <form id="paper-form" class="stack">
-            <label>Input mode
-              <select name="identifier_type">
-                <option value="doi">DOI</option>
-                <option value="title">Title</option>
-                <option value="url">URL</option>
-                <option value="manual">Manual</option>
-              </select>
-            </label>
-            <label>Value <input name="value" type="text"></label>
-            <label>Target collection ID <input name="collection_id" type="number"></label>
-            <label>Manual title <input name="title" type="text"></label>
-            <label>Manual authors <input name="authors" type="text" placeholder="Alice; Bob"></label>
-            <label>Manual year <input name="year" type="number"></label>
-            <label>Manual abstract <textarea name="abstract" rows="3"></textarea></label>
-            <button type="submit">Ingest paper</button>
-          </form>
-          <pre id="paper-result" class="output"></pre>
-        </article>
-
-        <article class="panel">
-          <h2>Search</h2>
-          <form id="search-form" class="stack">
-            <label>Query <input name="q" type="text" required></label>
-            <button type="submit">Search</button>
-          </form>
-          <div id="search-results" class="list"></div>
-        </article>
-      </section>
-
-      <section class="grid three">
-        <article class="panel">
-          <h2>Recommendations</h2>
-          <form id="recommend-form" class="stack">
-            <label>Collection ID <input name="collection_id" type="number"></label>
-            <label>Seed paper IDs <input name="seed" type="text" placeholder="1,2,3"></label>
-            <button type="submit">Generate</button>
-          </form>
-          <div id="recommendations-list" class="list"></div>
-        </article>
-
-        <article class="panel">
-          <h2>Timeline</h2>
-          <form id="timeline-form" class="stack">
-            <label>Collection ID <input name="collection_id" type="number"></label>
-            <label>Topic <input name="topic" type="text"></label>
-            <label>Seed paper ID <input name="seed_paper_id" type="number"></label>
-            <button type="submit">Load timeline</button>
-          </form>
-          <pre id="timeline-output" class="output small"></pre>
-        </article>
-
-        <article class="panel">
-          <h2>Graph</h2>
-          <form id="graph-form" class="stack">
-            <label>Seed paper IDs <input name="seed" type="text" placeholder="1,2"></label>
-            <label>Depth <input name="depth" type="number" value="1" min="1" max="3"></label>
-            <button type="submit">Load graph</button>
-          </form>
-          <pre id="graph-output" class="output small"></pre>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="panel">
-          <h2>Import / Export</h2>
-          <form id="import-form" class="stack">
-            <label>Source type
-              <select name="source_type">
-                <option value="identifiers">DOI list</option>
-                <option value="titles">Title list</option>
-                <option value="json">JSON records</option>
-                <option value="bibtex">BibTeX</option>
-              </select>
-            </label>
-            <label>Collection ID <input name="collection_id" type="number"></label>
-            <label>Content <textarea name="content" rows="6"></textarea></label>
-            <button type="submit">Run import</button>
-          </form>
-          <form id="export-form" class="stack muted-top">
-            <label>Collection ID <input name="collection_id" type="number" required></label>
-            <label>Format
-              <select name="format">
-                <option value="json">JSON</option>
-                <option value="bibtex">BibTeX</option>
-                <option value="backup">Backup</option>
-              </select>
-            </label>
-            <button type="submit">Export collection</button>
-          </form>
-          <pre id="import-export-output" class="output"></pre>
-        </article>
-
-        <article class="panel">
-          <h2>Feed / Notifications / Audit</h2>
-          <div class="actions-row">
-            <button id="load-feed">Feed</button>
-            <button id="load-notifications">Notifications</button>
-            <button id="load-audit">Audit</button>
+          <div class="hero-notes">
+            <span class="pill">Bozza operativa</span>
+            <span class="pill">Login reale disattivato</span>
+            <span class="pill">Preview API articles</span>
           </div>
-          <pre id="ops-output" class="output"></pre>
+        </div>
+
+        <aside class="hero-panel reveal">
+          <div class="hero-panel-head">
+            <p class="section-kicker">Sessione</p>
+            <div id="session-status" class="status-line">Connessione al backend in corso.</div>
+          </div>
+
+          <div class="credentials-card">
+            <p class="credentials-label">Credenziali demo in uso</p>
+            <div id="demo-credentials" class="credentials-value">Preparazione account di test...</div>
+          </div>
+
+          <div class="hero-actions">
+            <button id="refresh-workspace" type="button">Aggiorna workspace</button>
+            <button id="reset-demo" type="button" class="ghost">Reinizializza demo</button>
+          </div>
+
+          <p id="session-subtext" class="hero-footnote">
+            Il frontend registra o riusa automaticamente un account fake di test per questa fase.
+          </p>
+        </aside>
+      </section>
+
+      <section class="overview-grid reveal">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Overview</p>
+              <h2>Stato workspace</h2>
+            </div>
+          </div>
+          <div id="stats-grid" class="stats-grid"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Providers</p>
+              <h2>Connettori backend</h2>
+            </div>
+          </div>
+          <div id="providers-list" class="provider-list"></div>
+        </article>
+      </section>
+
+      <section class="workspace-grid reveal">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Collections</p>
+              <h2>Collezioni disponibili</h2>
+            </div>
+          </div>
+
+          <form id="collection-form" class="stack compact-form">
+            <label>
+              Nome
+              <input name="name" type="text" required placeholder="AI Literature Watch">
+            </label>
+            <label>
+              Descrizione
+              <textarea name="description" rows="3" placeholder="Bozza per testare ingest e browsing."></textarea>
+            </label>
+            <label>
+              Visibilità
+              <select name="visibility">
+                <option value="private">Privata</option>
+                <option value="shared">Condivisa</option>
+                <option value="public">Pubblica</option>
+              </select>
+            </label>
+            <button type="submit">Crea collezione</button>
+          </form>
+
+          <div id="collections-list" class="collection-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Collection Detail</p>
+              <h2 id="active-collection-name">Seleziona una collezione</h2>
+            </div>
+            <div id="active-collection-meta" class="meta-inline"></div>
+          </div>
+
+          <p id="active-collection-description" class="muted-copy">
+            I paper salvati nella collezione selezionata compariranno qui.
+          </p>
+
+          <div id="collection-paper-list" class="paper-list paper-list-dense"></div>
+        </article>
+      </section>
+
+      <section class="search-grid reveal">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Ricerca</p>
+              <h2>Locale + provider esterni</h2>
+            </div>
+          </div>
+
+          <form id="search-form" class="stack search-form">
+            <label>
+              Query
+              <input name="q" type="text" required placeholder="graph neural networks for literature review">
+            </label>
+            <label>
+              Limita alla collezione attiva
+              <select name="collection_id" id="search-collection-id">
+                <option value="">Tutto il workspace</option>
+              </select>
+            </label>
+            <button type="submit">Cerca articoli</button>
+          </form>
+
+          <div id="search-feedback" class="feedback-area"></div>
+
+          <div class="results-grid">
+            <section>
+              <div class="results-head">
+                <h3>Articoli nel database</h3>
+                <span id="local-results-count" class="count-chip">0</span>
+              </div>
+              <div id="search-results-local" class="paper-list"></div>
+            </section>
+
+            <section>
+              <div class="results-head">
+                <h3>Articoli recuperati via API</h3>
+                <span id="external-results-count" class="count-chip">0</span>
+              </div>
+              <div id="search-results-external" class="paper-list"></div>
+            </section>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Ingest</p>
+              <h2>Aggiungi un articolo</h2>
+            </div>
+          </div>
+
+          <form id="paper-form" class="stack">
+            <label>
+              Modalità
+              <select name="identifier_type" id="identifier-type">
+                <option value="doi">DOI</option>
+                <option value="title">Titolo</option>
+                <option value="url">URL</option>
+                <option value="manual">Manuale</option>
+              </select>
+            </label>
+
+            <label>
+              Valore
+              <input name="value" id="identifier-value" type="text" placeholder="10.1000/example oppure titolo articolo">
+            </label>
+
+            <label>
+              Collezione target
+              <select name="collection_id" id="paper-collection-id">
+                <option value="">Nessuna collezione</option>
+              </select>
+            </label>
+
+            <div id="manual-fields" class="manual-fields hidden">
+              <label>
+                Titolo manuale
+                <input name="title" type="text" placeholder="Manual fallback paper">
+              </label>
+              <label>
+                Autori
+                <input name="authors" type="text" placeholder="Alice; Bob; Charlie">
+              </label>
+              <label>
+                Anno
+                <input name="year" type="number" placeholder="2026">
+              </label>
+              <label>
+                Abstract
+                <textarea name="abstract" rows="4" placeholder="Descrizione sintetica del record."></textarea>
+              </label>
+            </div>
+
+            <button type="submit">Esegui ingest</button>
+          </form>
+
+          <pre id="paper-result" class="output">Nessun ingest ancora eseguito.</pre>
+        </article>
+      </section>
+
+      <section class="detail-grid reveal">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Dettaglio</p>
+              <h2>Articolo selezionato</h2>
+            </div>
+          </div>
+          <div id="paper-detail" class="detail-panel empty-state">
+            Seleziona un paper locale o un risultato esterno per vedere i metadati completi.
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Activity</p>
+              <h2>Feed, notifiche e audit</h2>
+            </div>
+            <div class="actions-row">
+              <button id="load-feed" type="button" class="ghost">Feed</button>
+              <button id="load-notifications" type="button" class="ghost">Notifiche</button>
+              <button id="load-audit" type="button" class="ghost">Audit</button>
+            </div>
+          </div>
+          <div id="activity-list" class="activity-list"></div>
+          <pre id="ops-output" class="output small">Nessun log caricato.</pre>
         </article>
       </section>
     </main>
+
     <script src="/app.js"></script>
   </body>
 </html>
-
