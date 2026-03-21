@@ -107,7 +107,11 @@ OPENALEX_FIXTURES = {
 
 
 class MockTransport:
+    def __init__(self) -> None:
+        self.calls: dict[str, int] = {}
+
     def get_json(self, url: str, *, headers=None, timeout: int = 20) -> dict:
+        self.calls[url] = self.calls.get(url, 0) + 1
         if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2020.001" in url:
             return OPENALEX_FIXTURES["W1001"]
         if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2021.004" in url:
@@ -168,8 +172,11 @@ class ReferenceManagerServiceTest(unittest.TestCase):
             europepmc_email="tests@example.com",
             request_timeout_seconds=5,
             max_related_works=25,
+            provider_cache_ttl_seconds=3600,
+            search_cache_ttl_seconds=1800,
         )
-        self.providers = ProviderRegistry(self.config, transport=MockTransport())
+        self.transport = MockTransport()
+        self.providers = ProviderRegistry(self.config, transport=self.transport)
         self.service = ReferenceManagerService(self.db_path, config=self.config, providers=self.providers)
         self.user = self.service.register_user("owner@example.com", "secret123", "Owner")["user"]
         self.other = self.service.register_user("editor@example.com", "secret123", "Editor")["user"]
@@ -205,6 +212,7 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertIn("cites", relation_types)
         self.assertIn("cited_by", relation_types)
         self.assertTrue(any(source["provider"] == "openalex" for source in paper["sources"]))
+        self.assertIsNotNone(paper["retrieval"])
 
     def test_recommendations_reduce_reappearance_of_excluded_papers(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
@@ -237,6 +245,21 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         payload = json.loads(exported["content"])
         self.assertEqual(payload["collection"]["id"], collection["id"])
         self.assertEqual(payload["papers"][0]["id"], paper["id"])
+
+    def test_provider_lookup_and_relations_are_cached(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        first_call_count = sum(self.transport.calls.values())
+        refreshed = self.service.refresh_paper_graph(self.user["id"], paper["id"], force_refresh=False)
+        second_call_count = sum(self.transport.calls.values())
+        self.assertTrue(refreshed["cache_hit"])
+        self.assertEqual(first_call_count, second_call_count)
+
+    def test_retrieval_runs_are_listed(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        self.service.refresh_paper_graph(self.user["id"], paper["id"], force_refresh=True)
+        runs = self.service.list_retrieval_runs(self.user["id"], paper_id=paper["id"])
+        self.assertGreaterEqual(len(runs), 2)
+        self.assertTrue(any(run["operation"] == "graph_refresh" for run in runs))
 
 
 if __name__ == "__main__":

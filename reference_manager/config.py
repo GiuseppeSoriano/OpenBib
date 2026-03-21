@@ -37,6 +37,8 @@ class AppConfig:
     europepmc_email: Optional[str]
     request_timeout_seconds: int
     max_related_works: int
+    provider_cache_ttl_seconds: int
+    search_cache_ttl_seconds: int
 
     @classmethod
     def from_env(cls, env_path: str = ".env") -> "AppConfig":
@@ -48,5 +50,6 @@ class AppConfig:
             europepmc_email=os.getenv("EUROPEPMC_EMAIL") or os.getenv("CROSSREF_MAILTO"),
             request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20")),
             max_related_works=int(os.getenv("MAX_RELATED_WORKS", "100")),
+            provider_cache_ttl_seconds=int(os.getenv("PROVIDER_CACHE_TTL_SECONDS", "86400")),
+            search_cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "3600")),
         )
-

@@ -30,6 +30,19 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def iso_after_now(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        return datetime.fromisoformat(value) > datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+
+def iso_plus_seconds(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
+
+
 def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
 
@@ -313,6 +326,29 @@ class ReferenceManagerService:
                     payload_json TEXT NOT NULL DEFAULT '{}',
                     retrieved_at TEXT NOT NULL,
                     UNIQUE (paper_id, provider, provider_paper_id)
+                );
+                CREATE TABLE IF NOT EXISTS provider_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation TEXT NOT NULL,
+                    cache_key TEXT NOT NULL UNIQUE,
+                    request_json TEXT NOT NULL DEFAULT '{}',
+                    response_json TEXT NOT NULL DEFAULT '{}',
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS retrieval_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    paper_id INTEGER REFERENCES papers(id) ON DELETE SET NULL,
+                    operation TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    cache_hit INTEGER NOT NULL DEFAULT 0,
+                    request_json TEXT NOT NULL DEFAULT '{}',
+                    stats_json TEXT NOT NULL DEFAULT '{}',
+                    degraded_json TEXT NOT NULL DEFAULT '[]',
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS collection_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -747,6 +783,123 @@ class ReferenceManagerService:
             ).fetchall()
         return {row["provider"]: row["state"] for row in rows}
 
+    def _cache_key(self, operation: str, payload: Dict[str, Any]) -> str:
+        digest = hashlib.sha256(json_dumps({"operation": operation, "payload": payload}).encode("utf-8")).hexdigest()
+        return f"{operation}:{digest}"
+
+    def _cache_get(self, operation: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT response_json, expires_at FROM provider_cache WHERE cache_key = ? AND operation = ?",
+                (self._cache_key(operation, payload), operation),
+            ).fetchone()
+        if not row or not iso_after_now(row["expires_at"]):
+            return None
+        return json_loads(row["response_json"], {})
+
+    def _cache_set(self, operation: str, payload: Dict[str, Any], response: Dict[str, Any], ttl_seconds: int) -> None:
+        now = utcnow()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO provider_cache (operation, cache_key, request_json, response_json, expires_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (cache_key) DO UPDATE SET
+                    request_json = excluded.request_json,
+                    response_json = excluded.response_json,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    operation,
+                    self._cache_key(operation, payload),
+                    json_dumps(payload),
+                    json_dumps(response),
+                    iso_plus_seconds(ttl_seconds),
+                    now,
+                    now,
+                ),
+            )
+
+    def _cached_provider_lookup(self, identifier_type: str, value: str, credential_states: Dict[str, str], *, force_refresh: bool = False) -> Dict[str, Any]:
+        payload = {"identifier_type": identifier_type, "value": value}
+        if not force_refresh:
+            cached = self._cache_get("lookup", payload)
+            if cached:
+                return {**cached, "cache_hit": True}
+        response = self.providers.lookup(identifier_type, value, credential_states)
+        self._cache_set("lookup", payload, response, self.config.provider_cache_ttl_seconds)
+        return {**response, "cache_hit": False}
+
+    def _cached_provider_search(self, query: str, credential_states: Dict[str, str], *, force_refresh: bool = False) -> Dict[str, Any]:
+        payload = {"query": query}
+        if not force_refresh:
+            cached = self._cache_get("search", payload)
+            if cached:
+                return {**cached, "cache_hit": True}
+        response = self.providers.search(query, credential_states)
+        self._cache_set("search", payload, response, self.config.search_cache_ttl_seconds)
+        return {**response, "cache_hit": False}
+
+    def _cached_provider_relations(self, seed_record: Dict[str, Any], credential_states: Dict[str, str], *, force_refresh: bool = False) -> Dict[str, Any]:
+        payload = {
+            "doi": seed_record.get("doi"),
+            "title": seed_record.get("title"),
+            "external_ids": seed_record.get("external_ids", {}),
+            "graph_hints": seed_record.get("graph_hints", {}),
+        }
+        if not force_refresh:
+            cached = self._cache_get("relations", payload)
+            if cached:
+                return {**cached, "cache_hit": True}
+        response = self.providers.relations(seed_record, credential_states)
+        self._cache_set("relations", payload, response, self.config.provider_cache_ttl_seconds)
+        return {**response, "cache_hit": False}
+
+    def _start_retrieval_run(self, user_id: Optional[int], paper_id: Optional[int], operation: str, request_payload: Dict[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO retrieval_runs (user_id, paper_id, operation, status, request_json, started_at)
+                VALUES (?, ?, ?, 'running', ?, ?)
+                """,
+                (user_id, paper_id, operation, json_dumps(request_payload), utcnow()),
+            )
+        return cursor.lastrowid
+
+    def _finish_retrieval_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        stats: Optional[Dict[str, Any]] = None,
+        degraded: Optional[List[str]] = None,
+        cache_hit: bool = False,
+        paper_id: Optional[int] = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE retrieval_runs
+                SET paper_id = COALESCE(?, paper_id),
+                    status = ?,
+                    cache_hit = ?,
+                    stats_json = ?,
+                    degraded_json = ?,
+                    completed_at = ?
+                WHERE id = ?
+                """,
+                (
+                    paper_id,
+                    status,
+                    int(cache_hit),
+                    json_dumps(stats or {}),
+                    json_dumps(degraded or []),
+                    utcnow(),
+                    run_id,
+                ),
+            )
+
     def list_provider_statuses(self, user_id: Optional[int]) -> List[Dict[str, Any]]:
         states = self._credential_states(user_id)
         result = []
@@ -1073,6 +1226,7 @@ class ReferenceManagerService:
         value: Optional[str] = None,
         collection_id: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         if collection_id:
             self._require_collection_access(user_id, collection_id, minimum_role="editor")
@@ -1080,10 +1234,20 @@ class ReferenceManagerService:
         degraded: List[str] = []
         source_provider = None
         record_data = metadata or {}
+        retrieval_run_id: Optional[int] = None
+        cache_hit = False
+        relations: Optional[Dict[str, Any]] = None
         if identifier_type != "manual":
-            lookup = self.providers.lookup(identifier_type, value or "", credential_states)
+            retrieval_run_id = self._start_retrieval_run(
+                user_id,
+                None,
+                "paper_ingest",
+                {"identifier_type": identifier_type, "value": value, "collection_id": collection_id, "force_refresh": force_refresh},
+            )
+            lookup = self._cached_provider_lookup(identifier_type, value or "", credential_states, force_refresh=force_refresh)
             degraded = lookup["degraded"]
             source_provider = lookup["provider"]
+            cache_hit = lookup.get("cache_hit", False)
             if lookup["record"]:
                 record_data = dict(lookup["record"])
             elif identifier_type in {"doi", "title", "url"}:
@@ -1095,7 +1259,15 @@ class ReferenceManagerService:
                     "quality_note": "Manual fallback due to unresolved external lookup.",
                 }
         if not record_data.get("title") and not record_data.get("doi"):
+            if retrieval_run_id:
+                self._finish_retrieval_run(retrieval_run_id, status="failed", degraded=["Record minimo non valido."], cache_hit=cache_hit)
             raise ServiceError("Record minimo non valido.", status=422)
+        if record_data.get("doi") or record_data.get("graph_hints") or record_data.get("external_ids"):
+            relations = self._cached_provider_relations(record_data, credential_states, force_refresh=force_refresh)
+            degraded.extend(relations["degraded"])
+            if lookup := relations.get("provider"):
+                source_provider = source_provider or lookup
+            cache_hit = cache_hit and relations.get("cache_hit", False) if identifier_type != "manual" else relations.get("cache_hit", False)
         with self._connect() as connection:
             paper = self._ensure_paper(connection, record_data, user_id)
             if collection_id:
@@ -1106,12 +1278,23 @@ class ReferenceManagerService:
                     """,
                     (collection_id, paper["id"], user_id, utcnow()),
                 )
-            if paper.get("doi"):
-                relations = self.providers.relations(record_data, credential_states)
-                degraded.extend(relations["degraded"])
+            if relations:
                 self._ensure_relationship_graph(connection, paper["id"], relations["relations"])
-                source_provider = source_provider or relations["provider"]
             connection.commit()
+        if retrieval_run_id:
+            relation_summary = self.get_paper(paper["id"])
+            self._finish_retrieval_run(
+                retrieval_run_id,
+                status="completed",
+                stats={
+                    "paper_id": paper["id"],
+                    "references": sum(1 for item in relation_summary["relations"] if item["relation_type"] == "cites"),
+                    "citations": sum(1 for item in relation_summary["relations"] if item["relation_type"] == "cited_by"),
+                },
+                degraded=degraded,
+                cache_hit=cache_hit,
+                paper_id=paper["id"],
+            )
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
         return {"paper": self.get_paper(paper["id"]), "provider": source_provider, "degraded": degraded}
 
@@ -1151,13 +1334,128 @@ class ReferenceManagerService:
                 "SELECT provider, provider_paper_id, source_url, is_primary, retrieved_at FROM paper_sources WHERE paper_id = ? ORDER BY is_primary DESC, provider ASC",
                 (paper_id,),
             ).fetchall()
+            latest_run = connection.execute(
+                """
+                SELECT id, operation, status, cache_hit, stats_json, degraded_json, started_at, completed_at
+                FROM retrieval_runs
+                WHERE paper_id = ?
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                (paper_id,),
+            ).fetchone()
         paper = self._row_to_paper(row)
         paper["authors"] = [dict(author) for author in authors]
         paper["notes"] = [self._row_to_note(note) for note in notes]
         paper["relations"] = [{**dict(relation), "metadata": json_loads(relation["metadata_json"], {})} for relation in relations]
         paper["topics"] = [dict(topic) for topic in topics]
         paper["sources"] = [dict(source) for source in sources]
+        paper["retrieval"] = (
+            {
+                **dict(latest_run),
+                "stats": json_loads(latest_run["stats_json"], {}),
+                "degraded": json_loads(latest_run["degraded_json"], []),
+            }
+            if latest_run
+            else None
+        )
         return paper
+
+    def list_retrieval_runs(self, user_id: int, paper_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self._connect() as connection:
+            if paper_id is not None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM retrieval_runs
+                    WHERE paper_id = ?
+                    ORDER BY started_at DESC
+                    LIMIT 50
+                    """,
+                    (paper_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM retrieval_runs
+                    WHERE user_id = ?
+                    ORDER BY started_at DESC
+                    LIMIT 100
+                    """,
+                    (user_id,),
+                ).fetchall()
+        return [
+            {
+                **dict(row),
+                "request": json_loads(row["request_json"], {}),
+                "stats": json_loads(row["stats_json"], {}),
+                "degraded": json_loads(row["degraded_json"], []),
+            }
+            for row in rows
+        ]
+
+    def refresh_paper_graph(self, user_id: int, paper_id: int, *, force_refresh: bool = True) -> Dict[str, Any]:
+        paper = self.get_paper(paper_id)
+        request_payload = {"paper_id": paper_id, "doi": paper.get("doi"), "force_refresh": force_refresh}
+        run_id = self._start_retrieval_run(user_id, paper_id, "graph_refresh", request_payload)
+        if not paper.get("doi"):
+            self._finish_retrieval_run(run_id, status="failed", degraded=["Paper privo di DOI o identificatore provider sufficiente."], cache_hit=False, paper_id=paper_id)
+            raise ServiceError("Il paper non ha un identificatore sufficiente per refresh del grafo.", status=422)
+        relations = self._cached_provider_relations(paper["metadata"], self._credential_states(user_id), force_refresh=force_refresh)
+        with self._connect() as connection:
+            self._ensure_relationship_graph(connection, paper_id, relations["relations"])
+        refreshed = self.get_paper(paper_id)
+        stats = {
+            "references": sum(1 for item in refreshed["relations"] if item["relation_type"] == "cites"),
+            "citations": sum(1 for item in refreshed["relations"] if item["relation_type"] == "cited_by"),
+        }
+        self._finish_retrieval_run(
+            run_id,
+            status="completed",
+            stats=stats,
+            degraded=relations["degraded"],
+            cache_hit=relations.get("cache_hit", False),
+            paper_id=paper_id,
+        )
+        self._audit(user_id, "paper_graph_refreshed", "paper", paper_id, "Grafo paper aggiornato dal backend.")
+        return {"paper": self.get_paper(paper_id), "degraded": relations["degraded"], "cache_hit": relations.get("cache_hit", False)}
+
+    def expand_paper_graph(self, user_id: int, seed_paper_id: int, *, depth: int = 1, force_refresh: bool = False) -> Dict[str, Any]:
+        visited = {seed_paper_id}
+        frontier = [seed_paper_id]
+        run_id = self._start_retrieval_run(
+            user_id,
+            seed_paper_id,
+            "graph_expand",
+            {"paper_id": seed_paper_id, "depth": depth, "force_refresh": force_refresh},
+        )
+        degraded: List[str] = []
+        expanded = 0
+        for _ in range(depth):
+            next_frontier: List[int] = []
+            for paper_id in frontier:
+                result = self.refresh_paper_graph(user_id, paper_id, force_refresh=force_refresh)
+                degraded.extend(result["degraded"])
+                expanded += 1
+                graph = self.get_graph(user_id, [paper_id], depth=1, limit=self.config.max_related_works)
+                for node in graph["nodes"]:
+                    if node["type"] != "paper":
+                        continue
+                    related_id = int(node["id"].split(":")[1])
+                    if related_id not in visited:
+                        visited.add(related_id)
+                        next_frontier.append(related_id)
+            frontier = next_frontier
+            if not frontier:
+                break
+        self._finish_retrieval_run(
+            run_id,
+            status="completed",
+            stats={"expanded_nodes": expanded, "reachable_papers": len(visited)},
+            degraded=degraded,
+            cache_hit=not force_refresh,
+            paper_id=seed_paper_id,
+        )
+        return {"graph": self.get_graph(user_id, [seed_paper_id], depth=max(depth, 1), limit=self.config.max_related_works), "expanded_nodes": expanded, "degraded": degraded}
 
     def search_papers(self, user_id: int, query: str, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         filters = filters or {}
@@ -1197,7 +1495,7 @@ class ReferenceManagerService:
                     if not state:
                         continue
                 local_results.append(paper)
-        external = self.providers.search(query, self._credential_states(user_id))
+        external = self._cached_provider_search(query, self._credential_states(user_id))
         collection_presence = defaultdict(list)
         with self._connect() as connection:
             memberships = connection.execute(
@@ -2107,6 +2405,8 @@ class ReferenceManagerService:
                 "papers": connection.execute("SELECT COUNT(*) FROM papers WHERE merged_into_paper_id IS NULL").fetchone()[0],
                 "notifications": connection.execute("SELECT COUNT(*) FROM notifications").fetchone()[0],
                 "imports": connection.execute("SELECT COUNT(*) FROM imports").fetchone()[0],
+                "provider_cache_entries": connection.execute("SELECT COUNT(*) FROM provider_cache").fetchone()[0],
+                "retrieval_runs": connection.execute("SELECT COUNT(*) FROM retrieval_runs").fetchone()[0],
             }
         return {"counts": counts, "providers": self.providers.docs()}
 

@@ -18,6 +18,8 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 - deduplication, merge lineage, record-quality states, notes, statuses, tags, and feedback;
 - backend retrieval adapters for OpenAlex, Crossref, and Europe PMC with `.env` configuration;
 - persistence of references, citations, and provider provenance for each retrieved paper;
+- persistent backend cache for provider lookup/search/relations responses;
+- retrieval-run tracking for ingest, refresh, and graph expansion workflows;
 - graph exploration, recommendations, timelines, feed, notifications, provider documentation, and external-library sync hooks.
 
 ## Environment
@@ -35,4 +37,5 @@ EUROPEPMC_EMAIL=you@example.com
 
 - runtime retrieval is designed for real external providers; tests use a mocked HTTP transport so the suite remains offline and deterministic;
 - the HTTP API is exposed under `/api/*`;
+- retrieval-oriented endpoints currently include `/api/papers/add`, `/api/papers/refresh`, `/api/papers/expand`, and `/api/retrieval-runs`;
 - the test suite uses `unittest` and runs with `python3 -m unittest`.

@@ -148,6 +148,12 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                 collection_id = int(params["collection_id"][0]) if params.get("collection_id") else None
                 json_response(self, 200, {"events": self.service.get_audit_log(user["id"], collection_id=collection_id)})
                 return
+            if parsed.path == "/api/retrieval-runs":
+                user = self.service.require_user(self._token())
+                params = parse_qs(parsed.query)
+                paper_id = int(params["paper_id"][0]) if params.get("paper_id") else None
+                json_response(self, 200, {"runs": self.service.list_retrieval_runs(user["id"], paper_id=paper_id)})
+                return
             if parsed.path == "/api/providers":
                 user = self._user()
                 json_response(self, 200, {"providers": self.service.list_provider_statuses(user["id"]) if user else self.service.providers.docs()})
@@ -227,8 +233,28 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                     value=body.get("value"),
                     collection_id=body.get("collection_id"),
                     metadata=body.get("metadata"),
+                    force_refresh=body.get("force_refresh", False),
                 )
                 json_response(self, 201, result)
+                return
+            if parsed.path == "/api/papers/refresh":
+                json_response(
+                    self,
+                    200,
+                    self.service.refresh_paper_graph(user["id"], int(body["paper_id"]), force_refresh=body.get("force_refresh", True)),
+                )
+                return
+            if parsed.path == "/api/papers/expand":
+                json_response(
+                    self,
+                    200,
+                    self.service.expand_paper_graph(
+                        user["id"],
+                        int(body["paper_id"]),
+                        depth=int(body.get("depth", 1)),
+                        force_refresh=body.get("force_refresh", False),
+                    ),
+                )
                 return
             if parsed.path == "/api/papers/state":
                 json_response(self, 200, self.service.set_paper_state(user["id"], int(body["paper_id"]), body))
@@ -304,4 +330,3 @@ def create_server(host: str, port: int, *, db_path: str, static_dir: str) -> Thr
     handler.service = service
     handler.static_dir = Path(static_dir)
     return ThreadingHTTPServer((host, port), handler)
-
