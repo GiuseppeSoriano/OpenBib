@@ -211,10 +211,23 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         relation_types = {item["relation_type"] for item in paper["relations"]}
         self.assertIn("cites", relation_types)
         self.assertIn("cited_by", relation_types)
+        self.assertEqual(len(paper["graph"]["references"]), 1)
+        self.assertEqual(len(paper["graph"]["citations"]), 1)
+        self.assertEqual(paper["graph"]["references"][0]["edge"]["state"], "retrieved")
+        self.assertEqual(paper["graph"]["citations"][0]["edge"]["state"], "retrieved")
         self.assertTrue(any(source["provider"] == "openalex" for source in paper["sources"]))
         self.assertIsNotNone(paper["retrieval"])
         workspace_papers = self.service.list_workspace_papers(self.user["id"])
         self.assertEqual(len(workspace_papers), 3)
+
+    def test_graph_edge_state_becomes_retrieved_after_directional_refresh(self) -> None:
+        seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004")["paper"]
+        cited = self.service.get_paper(seed["graph"]["references"][0]["paper"]["id"])
+        self.assertEqual(cited["graph"]["citations"][0]["edge"]["state"], "inferred")
+        refreshed = self.service.refresh_paper_graph(self.user["id"], cited["id"], mode="citations", force_refresh=True, rebuild=True)
+        citation_entry = refreshed["paper"]["graph"]["citations"][0]
+        self.assertEqual(citation_entry["paper"]["id"], seed["id"])
+        self.assertEqual(citation_entry["edge"]["state"], "retrieved")
 
     def test_recommendations_reduce_reappearance_of_excluded_papers(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
@@ -262,6 +275,15 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         runs = self.service.list_retrieval_runs(self.user["id"], paper_id=paper["id"])
         self.assertGreaterEqual(len(runs), 2)
         self.assertTrue(any(run["operation"] == "graph_refresh" for run in runs))
+
+    def test_collection_graph_refresh_refreshes_saved_papers(self) -> None:
+        collection = self.service.create_collection(self.user["id"], "Seed Graph")
+        first = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001", collection_id=collection["id"])["paper"]
+        second = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004", collection_id=collection["id"])["paper"]
+        refreshed = self.service.refresh_collection_graph(self.user["id"], collection["id"], mode="all", force_refresh=True, rebuild=True)
+        self.assertEqual(refreshed["stats"]["refreshed_papers"], 2)
+        collection_papers = {paper["id"] for paper in refreshed["collection"]["papers"]}
+        self.assertEqual(collection_papers, {first["id"], second["id"]})
 
 
 if __name__ == "__main__":

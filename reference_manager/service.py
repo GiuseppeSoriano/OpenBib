@@ -25,6 +25,9 @@ VALID_STATES = {
     "escluso",
 }
 
+GRAPH_MODES = {"references", "citations"}
+GRAPH_RELATION_TYPE = "cites"
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -219,6 +222,8 @@ class ReferenceManagerService:
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_paper_relationship
                 ON paper_relationships(source_paper_id, target_paper_id, relation_type);
+                CREATE INDEX IF NOT EXISTS idx_paper_relationship_target
+                ON paper_relationships(target_paper_id, relation_type);
                 CREATE TABLE IF NOT EXISTS collection_papers (
                     collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
                     paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
@@ -428,6 +433,48 @@ class ReferenceManagerService:
                 );
                 """
             )
+            self._migrate_legacy_relationships(connection)
+            connection.commit()
+
+    def _migrate_legacy_relationships(self, connection: sqlite3.Connection) -> None:
+        legacy_rows = connection.execute(
+            """
+            SELECT * FROM paper_relationships
+            WHERE relation_type = 'cited_by'
+            """
+        ).fetchall()
+        for row in legacy_rows:
+            metadata = json_loads(row["metadata_json"], {})
+            metadata.setdefault("evidence", [])
+            metadata["evidence"] = [
+                {
+                    "discovered_from_paper_id": row["source_paper_id"],
+                    "observed_as": "citation",
+                    "provider": metadata.get("source_provider"),
+                    "providers": [metadata.get("source_provider")] if metadata.get("source_provider") else [],
+                    "retrieved_at": metadata.get("retrieved_at") or row["created_at"],
+                    "edge_state": metadata.get("edge_state", "retrieved"),
+                    "record_identifier_state": metadata.get("record_identifier_state", "resolved"),
+                }
+            ]
+            finalized = self._finalize_edge_metadata(metadata)
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO paper_relationships (
+                    source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["target_paper_id"],
+                    row["source_paper_id"],
+                    GRAPH_RELATION_TYPE,
+                    row["confidence"],
+                    row["explanation"],
+                    json_dumps(finalized),
+                    row["created_at"],
+                ),
+            )
+            connection.execute("DELETE FROM paper_relationships WHERE id = ?", (row["id"],))
 
     def bootstrap(self, token: Optional[str]) -> Dict[str, Any]:
         user = self.get_user_from_token(token) if token else None
@@ -1199,49 +1246,220 @@ class ReferenceManagerService:
             "updated_at": row["updated_at"],
         }
 
-    def _ensure_relationship_graph(self, connection: sqlite3.Connection, seed_paper_id: int, relations: Dict[str, List[Dict[str, Any]]]) -> None:
-        for reference in relations.get("references", []):
-            target = self._ensure_paper(connection, reference, None, automatic=True)
+    def _graph_modes(self, mode: str) -> List[str]:
+        if mode == "all":
+            return ["references", "citations"]
+        if mode not in GRAPH_MODES:
+            raise ServiceError("Modalita di refresh grafo non valida.", status=422)
+        return [mode]
+
+    def _edge_state_for_record(self, record: Dict[str, Any]) -> str:
+        has_identifier = bool(normalize_doi(record.get("doi")) or any(record.get("external_ids", {}).values()))
+        quality, _reliability = self._classify_quality(record)
+        if not has_identifier:
+            return "incomplete"
+        if quality in {"ambiguo", "parziale", "manuale"}:
+            return "partial"
+        return "retrieved"
+
+    def _evidence_key(self, evidence: Dict[str, Any]) -> Tuple[Any, ...]:
+        return (
+            evidence.get("discovered_from_paper_id"),
+            evidence.get("observed_as"),
+            evidence.get("provider"),
+        )
+
+    def _finalize_edge_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        evidence = metadata.get("evidence", []) or []
+        providers = []
+        discovered_via = []
+        last_retrieved_at = None
+        edge_states = set()
+        for item in evidence:
+            provider = item.get("provider")
+            if provider and provider not in providers:
+                providers.append(provider)
+            observed_as = item.get("observed_as")
+            if observed_as and observed_as not in discovered_via:
+                discovered_via.append(observed_as)
+            retrieved_at = item.get("retrieved_at")
+            if retrieved_at and (last_retrieved_at is None or retrieved_at > last_retrieved_at):
+                last_retrieved_at = retrieved_at
+            if item.get("edge_state"):
+                edge_states.add(item["edge_state"])
+        metadata["source_providers"] = providers
+        metadata["discovered_via"] = discovered_via
+        metadata["last_retrieved_at"] = last_retrieved_at
+        metadata["evidence_count"] = len(evidence)
+        if "incomplete" in edge_states:
+            metadata["aggregate_state"] = "incomplete"
+        elif "partial" in edge_states:
+            metadata["aggregate_state"] = "partial"
+        elif evidence:
+            metadata["aggregate_state"] = "retrieved"
+        else:
+            metadata["aggregate_state"] = "unknown"
+        return metadata
+
+    def _upsert_graph_edge(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        source_paper_id: int,
+        target_paper_id: int,
+        confidence: float,
+        explanation: str,
+        evidence: Dict[str, Any],
+    ) -> None:
+        if source_paper_id == target_paper_id:
+            return
+        existing = connection.execute(
+            """
+            SELECT * FROM paper_relationships
+            WHERE source_paper_id = ? AND target_paper_id = ? AND relation_type = ?
+            """,
+            (source_paper_id, target_paper_id, GRAPH_RELATION_TYPE),
+        ).fetchone()
+        if existing:
+            metadata = json_loads(existing["metadata_json"], {})
+            evidence_list = metadata.get("evidence", []) or []
+            evidence_index = {self._evidence_key(item): item for item in evidence_list}
+            evidence_index[self._evidence_key(evidence)] = evidence
+            metadata["evidence"] = list(evidence_index.values())
+            finalized = self._finalize_edge_metadata(metadata)
             connection.execute(
                 """
-                INSERT OR IGNORE INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
-                VALUES (?, ?, 'cites', 1.0, ?, ?, ?)
+                UPDATE paper_relationships
+                SET confidence = ?, explanation = ?, metadata_json = ?
+                WHERE id = ?
                 """,
                 (
-                    seed_paper_id,
-                    target["id"],
-                    "Recovered from external references list.",
-                    json_dumps(
-                        {
-                            "edge_kind": "reference",
-                            "retrieved_at": utcnow(),
-                            "source_provider": (reference.get("raw_sources") or [{}])[0].get("provider"),
-                        }
-                    ),
-                    utcnow(),
+                    max(existing["confidence"], confidence),
+                    explanation,
+                    json_dumps(finalized),
+                    existing["id"],
                 ),
             )
-        for citation in relations.get("citations", []):
-            source = self._ensure_paper(connection, citation, None, automatic=True)
-            connection.execute(
+            return
+        metadata = self._finalize_edge_metadata({"evidence": [evidence]})
+        connection.execute(
+            """
+            INSERT INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (source_paper_id, target_paper_id, GRAPH_RELATION_TYPE, confidence, explanation, json_dumps(metadata), utcnow()),
+        )
+
+    def _prune_graph_observations(self, connection: sqlite3.Connection, seed_paper_id: int, modes: Sequence[str]) -> int:
+        deleted = 0
+        if "references" in modes:
+            rows = connection.execute(
                 """
-                INSERT OR IGNORE INTO paper_relationships (source_paper_id, target_paper_id, relation_type, confidence, explanation, metadata_json, created_at)
-                VALUES (?, ?, 'cited_by', 1.0, ?, ?, ?)
+                SELECT * FROM paper_relationships
+                WHERE relation_type = ? AND source_paper_id = ?
                 """,
-                (
-                    seed_paper_id,
-                    source["id"],
-                    "Recovered from external citations list.",
-                    json_dumps(
-                        {
-                            "edge_kind": "citation",
-                            "retrieved_at": utcnow(),
-                            "source_provider": (citation.get("raw_sources") or [{}])[0].get("provider"),
-                        }
-                    ),
-                    utcnow(),
-                ),
-            )
+                (GRAPH_RELATION_TYPE, seed_paper_id),
+            ).fetchall()
+            deleted += self._prune_rows_by_evidence(connection, rows, seed_paper_id, "reference")
+        if "citations" in modes:
+            rows = connection.execute(
+                """
+                SELECT * FROM paper_relationships
+                WHERE relation_type = ? AND target_paper_id = ?
+                """,
+                (GRAPH_RELATION_TYPE, seed_paper_id),
+            ).fetchall()
+            deleted += self._prune_rows_by_evidence(connection, rows, seed_paper_id, "citation")
+        return deleted
+
+    def _prune_rows_by_evidence(
+        self,
+        connection: sqlite3.Connection,
+        rows: Sequence[sqlite3.Row],
+        seed_paper_id: int,
+        observed_as: str,
+    ) -> int:
+        deleted = 0
+        for row in rows:
+            metadata = json_loads(row["metadata_json"], {})
+            evidence = metadata.get("evidence", []) or []
+            filtered = [
+                item
+                for item in evidence
+                if not (
+                    item.get("discovered_from_paper_id") == seed_paper_id
+                    and item.get("observed_as") == observed_as
+                )
+            ]
+            if filtered:
+                metadata["evidence"] = filtered
+                finalized = self._finalize_edge_metadata(metadata)
+                connection.execute(
+                    "UPDATE paper_relationships SET metadata_json = ? WHERE id = ?",
+                    (json_dumps(finalized), row["id"]),
+                )
+                continue
+            connection.execute("DELETE FROM paper_relationships WHERE id = ?", (row["id"],))
+            deleted += 1
+        return deleted
+
+    def _ensure_relationship_graph(
+        self,
+        connection: sqlite3.Connection,
+        seed_paper_id: int,
+        relations: Dict[str, List[Dict[str, Any]]],
+        *,
+        modes: Sequence[str],
+        rebuild: bool,
+    ) -> Dict[str, int]:
+        created = 0
+        pruned = self._prune_graph_observations(connection, seed_paper_id, modes) if rebuild else 0
+        now = utcnow()
+        if "references" in modes:
+            for reference in relations.get("references", []):
+                target = self._ensure_paper(connection, reference, None, automatic=True)
+                self._upsert_graph_edge(
+                    connection,
+                    source_paper_id=seed_paper_id,
+                    target_paper_id=target["id"],
+                    confidence=1.0,
+                    explanation="Recovered from external references list.",
+                    evidence={
+                        "discovered_from_paper_id": seed_paper_id,
+                        "observed_as": "reference",
+                        "provider": (reference.get("raw_sources") or [{}])[0].get("provider"),
+                        "providers": [item.get("provider") for item in reference.get("raw_sources", []) if item.get("provider")],
+                        "retrieved_at": now,
+                        "edge_state": self._edge_state_for_record(reference),
+                        "record_identifier_state": "resolved"
+                        if normalize_doi(reference.get("doi")) or any(reference.get("external_ids", {}).values())
+                        else "unresolved",
+                    },
+                )
+                created += 1
+        if "citations" in modes:
+            for citation in relations.get("citations", []):
+                source = self._ensure_paper(connection, citation, None, automatic=True)
+                self._upsert_graph_edge(
+                    connection,
+                    source_paper_id=source["id"],
+                    target_paper_id=seed_paper_id,
+                    confidence=1.0,
+                    explanation="Recovered from external citations list.",
+                    evidence={
+                        "discovered_from_paper_id": seed_paper_id,
+                        "observed_as": "citation",
+                        "provider": (citation.get("raw_sources") or [{}])[0].get("provider"),
+                        "providers": [item.get("provider") for item in citation.get("raw_sources", []) if item.get("provider")],
+                        "retrieved_at": now,
+                        "edge_state": self._edge_state_for_record(citation),
+                        "record_identifier_state": "resolved"
+                        if normalize_doi(citation.get("doi")) or any(citation.get("external_ids", {}).values())
+                        else "unresolved",
+                    },
+                )
+                created += 1
+        return {"upserted": created, "pruned": pruned}
 
     def add_paper(
         self,
@@ -1304,7 +1522,7 @@ class ReferenceManagerService:
                     (collection_id, paper["id"], user_id, utcnow()),
                 )
             if relations:
-                self._ensure_relationship_graph(connection, paper["id"], relations["relations"])
+                self._ensure_relationship_graph(connection, paper["id"], relations["relations"], modes=["references", "citations"], rebuild=False)
             connection.commit()
         if retrieval_run_id:
             relation_summary = self.get_paper(paper["id"])
@@ -1322,6 +1540,118 @@ class ReferenceManagerService:
             )
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
         return {"paper": self.get_paper(paper["id"]), "provider": source_provider, "degraded": degraded}
+
+    def _relation_state_for_paper(self, paper_id: int, direction: str, metadata: Dict[str, Any], related_quality_state: Optional[str]) -> str:
+        evidence = metadata.get("evidence", []) or []
+        observed_as = "reference" if direction == "references" else "citation"
+        directly_observed = any(
+            item.get("discovered_from_paper_id") == paper_id and item.get("observed_as") == observed_as
+            for item in evidence
+        )
+        if any(item.get("edge_state") == "incomplete" for item in evidence):
+            return "incomplete"
+        if related_quality_state in {"manuale", "parziale", "ambiguo"}:
+            return "incomplete"
+        if directly_observed:
+            return "retrieved"
+        if any(item.get("edge_state") == "partial" for item in evidence):
+            return "partial"
+        return "inferred"
+
+    def _relation_entry_from_row(self, paper_id: int, direction: str, row: sqlite3.Row) -> Dict[str, Any]:
+        metadata = json_loads(row["metadata_json"], {})
+        related = {
+            "id": row["related_id"],
+            "doi": row["related_doi"],
+            "title": row["related_title"],
+            "venue": row["related_venue"],
+            "year": row["related_year"],
+            "published_at": row["related_published_at"],
+            "quality_state": row["related_quality_state"],
+            "reliability_state": row["related_reliability_state"],
+        }
+        state = self._relation_state_for_paper(paper_id, direction, metadata, row["related_quality_state"])
+        return {
+            "direction": direction,
+            "relation_type": "cites" if direction == "references" else "cited_by",
+            "paper": related,
+            "edge": {
+                "id": row["id"],
+                "state": state,
+                "confidence": row["confidence"],
+                "explanation": row["explanation"],
+                "providers": metadata.get("source_providers", []),
+                "discovered_via": metadata.get("discovered_via", []),
+                "retrieved_at": metadata.get("last_retrieved_at"),
+                "evidence_count": metadata.get("evidence_count", 0),
+                "metadata": metadata,
+            },
+        }
+
+    def _paper_relations(self, connection: sqlite3.Connection, paper_id: int) -> Dict[str, Any]:
+        outgoing_rows = connection.execute(
+            """
+            SELECT
+                paper_relationships.*,
+                papers.id AS related_id,
+                papers.doi AS related_doi,
+                papers.title AS related_title,
+                papers.venue AS related_venue,
+                papers.year AS related_year,
+                papers.published_at AS related_published_at,
+                papers.quality_state AS related_quality_state,
+                papers.reliability_state AS related_reliability_state
+            FROM paper_relationships
+            JOIN papers ON papers.id = paper_relationships.target_paper_id
+            WHERE paper_relationships.source_paper_id = ? AND paper_relationships.relation_type = ? AND papers.merged_into_paper_id IS NULL
+            ORDER BY COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) DESC, papers.title ASC
+            """,
+            (paper_id, GRAPH_RELATION_TYPE),
+        ).fetchall()
+        incoming_rows = connection.execute(
+            """
+            SELECT
+                paper_relationships.*,
+                papers.id AS related_id,
+                papers.doi AS related_doi,
+                papers.title AS related_title,
+                papers.venue AS related_venue,
+                papers.year AS related_year,
+                papers.published_at AS related_published_at,
+                papers.quality_state AS related_quality_state,
+                papers.reliability_state AS related_reliability_state
+            FROM paper_relationships
+            JOIN papers ON papers.id = paper_relationships.source_paper_id
+            WHERE paper_relationships.target_paper_id = ? AND paper_relationships.relation_type = ? AND papers.merged_into_paper_id IS NULL
+            ORDER BY COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) DESC, papers.title ASC
+            """,
+            (paper_id, GRAPH_RELATION_TYPE),
+        ).fetchall()
+        references = [self._relation_entry_from_row(paper_id, "references", row) for row in outgoing_rows]
+        citations = [self._relation_entry_from_row(paper_id, "citations", row) for row in incoming_rows]
+        summary = {
+            "references": len(references),
+            "citations": len(citations),
+            "retrieved_references": sum(1 for item in references if item["edge"]["state"] == "retrieved"),
+            "retrieved_citations": sum(1 for item in citations if item["edge"]["state"] == "retrieved"),
+            "inferred_references": sum(1 for item in references if item["edge"]["state"] == "inferred"),
+            "inferred_citations": sum(1 for item in citations if item["edge"]["state"] == "inferred"),
+            "partial_references": sum(1 for item in references if item["edge"]["state"] == "partial"),
+            "partial_citations": sum(1 for item in citations if item["edge"]["state"] == "partial"),
+            "incomplete_references": sum(1 for item in references if item["edge"]["state"] == "incomplete"),
+            "incomplete_citations": sum(1 for item in citations if item["edge"]["state"] == "incomplete"),
+        }
+        flattened = [
+            {
+                "relation_type": entry["relation_type"],
+                "target_id": entry["paper"]["id"],
+                "target_title": entry["paper"]["title"],
+                "state": entry["edge"]["state"],
+                "metadata": entry["edge"]["metadata"],
+            }
+            for entry in references + citations
+        ]
+        return {"references": references, "citations": citations, "summary": summary, "flattened": flattened}
 
     def get_paper(self, paper_id: int) -> Dict[str, Any]:
         with self._connect() as connection:
@@ -1342,15 +1672,7 @@ class ReferenceManagerService:
                 "SELECT * FROM notes WHERE target_type = 'paper' AND target_id = ? ORDER BY updated_at DESC",
                 (paper_id,),
             ).fetchall()
-            relations = connection.execute(
-                """
-                SELECT paper_relationships.relation_type, papers.id as target_id, papers.title as target_title, paper_relationships.metadata_json
-                FROM paper_relationships
-                JOIN papers ON papers.id = paper_relationships.target_paper_id
-                WHERE paper_relationships.source_paper_id = ?
-                """,
-                (paper_id,),
-            ).fetchall()
+            relations = self._paper_relations(connection, paper_id)
             topics = connection.execute(
                 "SELECT topic, label, confidence FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?",
                 (paper_id,),
@@ -1372,7 +1694,12 @@ class ReferenceManagerService:
         paper = self._row_to_paper(row)
         paper["authors"] = [dict(author) for author in authors]
         paper["notes"] = [self._row_to_note(note) for note in notes]
-        paper["relations"] = [{**dict(relation), "metadata": json_loads(relation["metadata_json"], {})} for relation in relations]
+        paper["relations"] = relations["flattened"]
+        paper["graph"] = {
+            "references": relations["references"],
+            "citations": relations["citations"],
+            "summary": relations["summary"],
+        }
         paper["topics"] = [dict(topic) for topic in topics]
         paper["sources"] = [dict(source) for source in sources]
         paper["retrieval"] = (
@@ -1418,20 +1745,40 @@ class ReferenceManagerService:
             for row in rows
         ]
 
-    def refresh_paper_graph(self, user_id: int, paper_id: int, *, force_refresh: bool = True) -> Dict[str, Any]:
+    def refresh_paper_graph(
+        self,
+        user_id: int,
+        paper_id: int,
+        *,
+        mode: str = "all",
+        force_refresh: bool = True,
+        rebuild: bool = True,
+    ) -> Dict[str, Any]:
         paper = self.get_paper(paper_id)
-        request_payload = {"paper_id": paper_id, "doi": paper.get("doi"), "force_refresh": force_refresh}
+        modes = self._graph_modes(mode)
+        seed_record = {
+            **paper.get("metadata", {}),
+            "doi": paper.get("doi"),
+            "title": paper.get("title"),
+            "external_ids": paper.get("metadata", {}).get("external_ids", {}),
+            "graph_hints": paper.get("metadata", {}).get("graph_hints", {}),
+        }
+        request_payload = {"paper_id": paper_id, "doi": paper.get("doi"), "force_refresh": force_refresh, "mode": modes, "rebuild": rebuild}
         run_id = self._start_retrieval_run(user_id, paper_id, "graph_refresh", request_payload)
-        if not paper.get("doi"):
+        if not (seed_record.get("doi") or seed_record.get("graph_hints") or seed_record.get("external_ids")):
             self._finish_retrieval_run(run_id, status="failed", degraded=["Paper privo di DOI o identificatore provider sufficiente."], cache_hit=False, paper_id=paper_id)
             raise ServiceError("Il paper non ha un identificatore sufficiente per refresh del grafo.", status=422)
-        relations = self._cached_provider_relations(paper["metadata"], self._credential_states(user_id), force_refresh=force_refresh)
+        relations = self._cached_provider_relations(seed_record, self._credential_states(user_id), force_refresh=force_refresh)
         with self._connect() as connection:
-            self._ensure_relationship_graph(connection, paper_id, relations["relations"])
+            mutations = self._ensure_relationship_graph(connection, paper_id, relations["relations"], modes=modes, rebuild=rebuild)
+            connection.commit()
         refreshed = self.get_paper(paper_id)
         stats = {
-            "references": sum(1 for item in refreshed["relations"] if item["relation_type"] == "cites"),
-            "citations": sum(1 for item in refreshed["relations"] if item["relation_type"] == "cited_by"),
+            "mode": modes,
+            "references": refreshed["graph"]["summary"]["references"],
+            "citations": refreshed["graph"]["summary"]["citations"],
+            "upserted_edges": mutations["upserted"],
+            "pruned_edges": mutations["pruned"],
         }
         self._finish_retrieval_run(
             run_id,
@@ -1442,45 +1789,153 @@ class ReferenceManagerService:
             paper_id=paper_id,
         )
         self._audit(user_id, "paper_graph_refreshed", "paper", paper_id, "Grafo paper aggiornato dal backend.")
-        return {"paper": self.get_paper(paper_id), "degraded": relations["degraded"], "cache_hit": relations.get("cache_hit", False)}
+        return {
+            "paper": self.get_paper(paper_id),
+            "degraded": relations["degraded"],
+            "cache_hit": relations.get("cache_hit", False),
+            "mutations": mutations,
+            "mode": modes,
+        }
 
-    def expand_paper_graph(self, user_id: int, seed_paper_id: int, *, depth: int = 1, force_refresh: bool = False) -> Dict[str, Any]:
+    def _neighbor_paper_ids(self, connection: sqlite3.Connection, paper_id: int, directions: Sequence[str]) -> List[int]:
+        neighbors: List[int] = []
+        if "references" in directions:
+            rows = connection.execute(
+                """
+                SELECT target_paper_id
+                FROM paper_relationships
+                WHERE source_paper_id = ? AND relation_type = ?
+                ORDER BY id ASC
+                """,
+                (paper_id, GRAPH_RELATION_TYPE),
+            ).fetchall()
+            neighbors.extend(row["target_paper_id"] for row in rows)
+        if "citations" in directions:
+            rows = connection.execute(
+                """
+                SELECT source_paper_id
+                FROM paper_relationships
+                WHERE target_paper_id = ? AND relation_type = ?
+                ORDER BY id ASC
+                """,
+                (paper_id, GRAPH_RELATION_TYPE),
+            ).fetchall()
+            neighbors.extend(row["source_paper_id"] for row in rows)
+        deduped: List[int] = []
+        seen: set[int] = set()
+        for item in neighbors:
+            if item not in seen:
+                seen.add(item)
+                deduped.append(item)
+        return deduped
+
+    def expand_paper_graph(
+        self,
+        user_id: int,
+        seed_paper_id: int,
+        *,
+        depth: int = 1,
+        directions: Optional[Sequence[str]] = None,
+        max_nodes: Optional[int] = None,
+        force_refresh: bool = False,
+        rebuild: bool = False,
+    ) -> Dict[str, Any]:
+        expansion_modes = list(dict.fromkeys(directions or ["references", "citations"]))
+        for direction in expansion_modes:
+            if direction not in GRAPH_MODES:
+                raise ServiceError("Direzione di espansione non valida.", status=422)
+        max_nodes = max_nodes or self.config.max_related_works
         visited = {seed_paper_id}
         frontier = [seed_paper_id]
         run_id = self._start_retrieval_run(
             user_id,
             seed_paper_id,
             "graph_expand",
-            {"paper_id": seed_paper_id, "depth": depth, "force_refresh": force_refresh},
+            {
+                "paper_id": seed_paper_id,
+                "depth": depth,
+                "directions": expansion_modes,
+                "max_nodes": max_nodes,
+                "force_refresh": force_refresh,
+                "rebuild": rebuild,
+            },
         )
         degraded: List[str] = []
         expanded = 0
-        for _ in range(depth):
+        levels: List[Dict[str, Any]] = []
+        for level in range(depth):
             next_frontier: List[int] = []
             for paper_id in frontier:
-                result = self.refresh_paper_graph(user_id, paper_id, force_refresh=force_refresh)
+                result = self.refresh_paper_graph(
+                    user_id,
+                    paper_id,
+                    mode="all" if len(expansion_modes) == 2 else expansion_modes[0],
+                    force_refresh=force_refresh,
+                    rebuild=rebuild,
+                )
                 degraded.extend(result["degraded"])
                 expanded += 1
-                graph = self.get_graph(user_id, [paper_id], depth=1, limit=self.config.max_related_works)
-                for node in graph["nodes"]:
-                    if node["type"] != "paper":
-                        continue
-                    related_id = int(node["id"].split(":")[1])
-                    if related_id not in visited:
-                        visited.add(related_id)
-                        next_frontier.append(related_id)
+                with self._connect() as connection:
+                    for related_id in self._neighbor_paper_ids(connection, paper_id, expansion_modes):
+                        if related_id not in visited:
+                            visited.add(related_id)
+                            next_frontier.append(related_id)
+                        if len(visited) >= max_nodes:
+                            break
+                if len(visited) >= max_nodes:
+                    degraded.append("Espansione troncata al limite massimo di nodi configurato.")
+                    break
+            levels.append({"depth": level + 1, "frontier_size": len(frontier), "discovered": len(next_frontier)})
             frontier = next_frontier
-            if not frontier:
+            if not frontier or len(visited) >= max_nodes:
                 break
         self._finish_retrieval_run(
             run_id,
             status="completed",
-            stats={"expanded_nodes": expanded, "reachable_papers": len(visited)},
+            stats={"expanded_nodes": expanded, "reachable_papers": len(visited), "levels": levels},
             degraded=degraded,
             cache_hit=not force_refresh,
             paper_id=seed_paper_id,
         )
-        return {"graph": self.get_graph(user_id, [seed_paper_id], depth=max(depth, 1), limit=self.config.max_related_works), "expanded_nodes": expanded, "degraded": degraded}
+        return {
+            "graph": self.get_graph(user_id, [seed_paper_id], depth=max(depth, 1), limit=max_nodes),
+            "expanded_nodes": expanded,
+            "reachable_papers": len(visited),
+            "levels": levels,
+            "degraded": degraded,
+        }
+
+    def refresh_collection_graph(
+        self,
+        user_id: int,
+        collection_id: int,
+        *,
+        mode: str = "all",
+        force_refresh: bool = True,
+        rebuild: bool = True,
+    ) -> Dict[str, Any]:
+        collection = self.get_collection(user_id, collection_id)
+        modes = self._graph_modes(mode)
+        run_id = self._start_retrieval_run(
+            user_id,
+            None,
+            "collection_graph_refresh",
+            {"collection_id": collection_id, "mode": modes, "force_refresh": force_refresh, "rebuild": rebuild},
+        )
+        refreshed = 0
+        degraded: List[str] = []
+        skipped: List[int] = []
+        for paper in collection["papers"]:
+            if not paper.get("doi") and not paper.get("metadata", {}).get("graph_hints"):
+                skipped.append(paper["id"])
+                continue
+            result = self.refresh_paper_graph(user_id, paper["id"], mode=mode, force_refresh=force_refresh, rebuild=rebuild)
+            refreshed += 1
+            degraded.extend(result["degraded"])
+        stats = {"collection_id": collection_id, "refreshed_papers": refreshed, "skipped_papers": skipped, "mode": modes}
+        self._finish_retrieval_run(run_id, status="completed", stats=stats, degraded=degraded, cache_hit=not force_refresh)
+        self._audit(user_id, "collection_graph_refreshed", "collection", collection_id, "Grafo collezione aggiornato dal backend.")
+        return {"collection": self.get_collection(user_id, collection_id), "stats": stats, "degraded": list(dict.fromkeys(degraded))}
 
     def search_papers(self, user_id: int, query: str, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         filters = filters or {}
@@ -1825,6 +2280,7 @@ class ReferenceManagerService:
     def get_graph(self, user_id: int, seed_paper_ids: Sequence[int], depth: int = 1, limit: int = 50) -> Dict[str, Any]:
         nodes: Dict[str, Dict[str, Any]] = {}
         edges: List[Dict[str, Any]] = []
+        seen_edges: set[Tuple[str, str, str]] = set()
         frontier = list(seed_paper_ids)
         seen = set(frontier)
         with self._connect() as connection:
@@ -1838,14 +2294,15 @@ class ReferenceManagerService:
                     relations = connection.execute(
                         """
                         SELECT * FROM paper_relationships
-                        WHERE source_paper_id = ? OR target_paper_id = ?
+                        WHERE (source_paper_id = ? OR target_paper_id = ?) AND relation_type = ?
                         LIMIT ?
                         """,
-                        (paper_id, paper_id, limit),
+                        (paper_id, paper_id, GRAPH_RELATION_TYPE, limit),
                     ).fetchall()
                     for relation in relations:
                         source_id = relation["source_paper_id"]
                         target_id = relation["target_paper_id"]
+                        metadata = json_loads(relation["metadata_json"], {})
                         for target in (source_id, target_id):
                             if target not in seen and len(nodes) < limit:
                                 row = connection.execute("SELECT * FROM papers WHERE id = ?", (target,)).fetchone()
@@ -1854,14 +2311,19 @@ class ReferenceManagerService:
                                     seen.add(target)
                                     next_frontier.append(target)
                         if len(edges) < limit:
-                            edges.append(
-                                {
-                                    "source": f"paper:{source_id}",
-                                    "target": f"paper:{target_id}",
-                                    "type": relation["relation_type"],
-                                    "explanation": relation["explanation"],
-                                }
-                            )
+                            edge_key = (f"paper:{source_id}", f"paper:{target_id}", GRAPH_RELATION_TYPE)
+                            if edge_key not in seen_edges:
+                                seen_edges.add(edge_key)
+                                edges.append(
+                                    {
+                                        "source": f"paper:{source_id}",
+                                        "target": f"paper:{target_id}",
+                                        "type": GRAPH_RELATION_TYPE,
+                                        "explanation": relation["explanation"],
+                                        "state": metadata.get("aggregate_state", "unknown"),
+                                        "providers": metadata.get("source_providers", []),
+                                    }
+                                )
                     author_rows = connection.execute(
                         """
                         SELECT authors.id, authors.canonical_name
@@ -1873,7 +2335,10 @@ class ReferenceManagerService:
                     ).fetchall()
                     for author in author_rows:
                         nodes[f"author:{author['id']}"] = {"id": f"author:{author['id']}", "type": "author", "label": author["canonical_name"]}
-                        edges.append({"source": f"author:{author['id']}", "target": f"paper:{paper_id}", "type": "authored"})
+                        edge_key = (f"author:{author['id']}", f"paper:{paper_id}", "authored")
+                        if edge_key not in seen_edges and len(edges) < limit:
+                            seen_edges.add(edge_key)
+                            edges.append({"source": f"author:{author['id']}", "target": f"paper:{paper_id}", "type": "authored"})
                     topic_rows = connection.execute(
                         "SELECT topic FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?",
                         (paper_id,),
@@ -1881,7 +2346,10 @@ class ReferenceManagerService:
                     for topic in topic_rows:
                         topic_id = normalize_text(topic["topic"])
                         nodes[f"topic:{topic_id}"] = {"id": f"topic:{topic_id}", "type": "topic", "label": topic["topic"]}
-                        edges.append({"source": f"paper:{paper_id}", "target": f"topic:{topic_id}", "type": "topic"})
+                        edge_key = (f"paper:{paper_id}", f"topic:{topic_id}", "topic")
+                        if edge_key not in seen_edges and len(edges) < limit:
+                            seen_edges.add(edge_key)
+                            edges.append({"source": f"paper:{paper_id}", "target": f"topic:{topic_id}", "type": "topic"})
                 frontier = next_frontier
                 if not frontier or len(nodes) >= limit:
                     break
@@ -1990,16 +2458,28 @@ class ReferenceManagerService:
             for seed_id in seen_papers:
                 relations = connection.execute(
                     """
-                    SELECT target_paper_id, relation_type FROM paper_relationships
-                    WHERE source_paper_id = ?
+                    SELECT target_paper_id FROM paper_relationships
+                    WHERE source_paper_id = ? AND relation_type = ?
                     """,
-                    (seed_id,),
+                    (seed_id, GRAPH_RELATION_TYPE),
                 ).fetchall()
                 for relation in relations:
                     if relation["target_paper_id"] in seen_papers:
                         continue
-                    candidate_scores[relation["target_paper_id"]] += {"similar": 3.0, "cites": 2.0, "cited_by": 2.5}.get(relation["relation_type"], 1.0)
-                    explanations[relation["target_paper_id"]].append(f"Collegato ai seed tramite relazione {relation['relation_type']}.")
+                    candidate_scores[relation["target_paper_id"]] += 2.0
+                    explanations[relation["target_paper_id"]].append("Collegato ai seed tramite references persistite nel grafo.")
+                incoming_relations = connection.execute(
+                    """
+                    SELECT source_paper_id FROM paper_relationships
+                    WHERE target_paper_id = ? AND relation_type = ?
+                    """,
+                    (seed_id, GRAPH_RELATION_TYPE),
+                ).fetchall()
+                for relation in incoming_relations:
+                    if relation["source_paper_id"] in seen_papers:
+                        continue
+                    candidate_scores[relation["source_paper_id"]] += 2.5
+                    explanations[relation["source_paper_id"]].append("Collegato ai seed tramite citations persistite nel grafo.")
                 topic_rows = connection.execute(
                     """
                     SELECT topic FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?

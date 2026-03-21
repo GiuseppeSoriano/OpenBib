@@ -247,7 +247,13 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                 json_response(
                     self,
                     200,
-                    self.service.refresh_paper_graph(user["id"], int(body["paper_id"]), force_refresh=body.get("force_refresh", True)),
+                    self.service.refresh_paper_graph(
+                        user["id"],
+                        int(body["paper_id"]),
+                        mode=body.get("mode", "all"),
+                        force_refresh=body.get("force_refresh", True),
+                        rebuild=body.get("rebuild", True),
+                    ),
                 )
                 return
             if parsed.path == "/api/papers/expand":
@@ -258,7 +264,23 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                         user["id"],
                         int(body["paper_id"]),
                         depth=int(body.get("depth", 1)),
+                        directions=body.get("directions"),
+                        max_nodes=body.get("max_nodes"),
                         force_refresh=body.get("force_refresh", False),
+                        rebuild=body.get("rebuild", False),
+                    ),
+                )
+                return
+            if parsed.path == "/api/collections/refresh":
+                json_response(
+                    self,
+                    200,
+                    self.service.refresh_collection_graph(
+                        user["id"],
+                        int(body["collection_id"]),
+                        mode=body.get("mode", "all"),
+                        force_refresh=body.get("force_refresh", True),
+                        rebuild=body.get("rebuild", True),
                     ),
                 )
                 return
