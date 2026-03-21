@@ -113,7 +113,14 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                 json_response(
                     self,
                     200,
-                    self.service.get_live_relations(user["id"], paper_id, direction=direction, force_refresh=refresh_flag),
+                    self.service.get_live_relations(
+                        user["id"],
+                        paper_id,
+                        direction=direction,
+                        force_refresh=refresh_flag,
+                        citation_page=int(params.get("citation_page", ["1"])[0]),
+                        citation_page_size=int(params.get("citation_page_size", ["20"])[0]),
+                    ),
                 )
                 return
             if parsed.path.startswith("/api/papers/"):

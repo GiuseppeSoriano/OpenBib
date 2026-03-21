@@ -42,6 +42,16 @@ def iso_after_now(value: Optional[str]) -> bool:
         return False
 
 
+def iso_age_seconds(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        delta = datetime.now(timezone.utc) - datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return max(0, int(delta.total_seconds()))
+
+
 def iso_plus_seconds(seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
 
@@ -1338,19 +1348,107 @@ class ReferenceManagerService:
             "inferred": sum(1 for item in items if item["edge"]["state"] == "inferred"),
         }
 
+    def _coverage_summary(
+        self,
+        items: Sequence[Dict[str, Any]],
+        *,
+        available_sources: Sequence[str],
+        degraded: Sequence[str],
+    ) -> List[Dict[str, Any]]:
+        counts: Dict[str, int] = {}
+        for item in items:
+            for provider in item.get("edge", {}).get("providers", []):
+                counts[provider] = counts.get(provider, 0) + 1
+        degraded_text = " ".join(degraded).lower()
+        coverage = []
+        for provider in dict.fromkeys(available_sources):
+            if counts.get(provider, 0) > 0:
+                status = "covered"
+            elif provider in degraded_text:
+                status = "degraded"
+            else:
+                status = "queried"
+            coverage.append({"provider": provider, "count": counts.get(provider, 0), "status": status})
+        for provider, count in counts.items():
+            if provider not in {item["provider"] for item in coverage}:
+                coverage.append({"provider": provider, "count": count, "status": "covered"})
+        return coverage
+
+    def _relation_snapshot_status(
+        self,
+        *,
+        summary: Dict[str, Any],
+        degraded: Sequence[str],
+        expected_count: Optional[int],
+    ) -> str:
+        if degraded:
+            return "incomplete"
+        if summary["incomplete"] or summary["partial"]:
+            return "incomplete"
+        if expected_count is not None and expected_count > summary["count"]:
+            return "partial"
+        if summary["count"] == 0:
+            return "empty"
+        return "fresh"
+
+    def _paginate_snapshot_items(self, snapshot: Dict[str, Any], *, page: int, page_size: int) -> Dict[str, Any]:
+        total = len(snapshot.get("items", []))
+        current_page = max(1, page)
+        per_page = max(1, min(page_size, 100))
+        start = (current_page - 1) * per_page
+        end = start + per_page
+        return {
+            **snapshot,
+            "items": snapshot.get("items", [])[start:end],
+            "pagination": {
+                "page": current_page,
+                "page_size": per_page,
+                "total_items": total,
+                "total_pages": max(1, (total + per_page - 1) // per_page),
+                "has_next": end < total,
+                "has_previous": current_page > 1,
+            },
+        }
+
     def _snapshot_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
         stale = not iso_after_now(row["expires_at"])
+        coverage = json_loads(row["source_summary_json"], [])
         return {
             "direction": row["direction"],
             "status": row["status"],
             "items": json_loads(row["items_json"], []),
             "summary": json_loads(row["summary_json"], {}),
-            "sources_used": json_loads(row["source_summary_json"], []),
+            "coverage": coverage,
+            "sources_used": [item["provider"] for item in coverage if isinstance(item, dict) and item.get("provider")],
             "degraded": json_loads(row["degraded_json"], []),
             "fetched_at": row["fetched_at"],
             "expires_at": row["expires_at"],
             "stale": stale,
         }
+
+    def _should_refresh_snapshot(
+        self,
+        snapshot: Optional[Dict[str, Any]],
+        *,
+        expected_count: Optional[int],
+        direction: str,
+    ) -> bool:
+        if snapshot is None or snapshot["stale"]:
+            return True
+        if snapshot.get("summary", {}).get("count", 0) == 0 and not snapshot.get("sources_used"):
+            return True
+        cooldown = max(900, self._relation_snapshot_ttl_seconds(direction) // 4)
+        age_seconds = iso_age_seconds(snapshot.get("fetched_at"))
+        if (
+            snapshot.get("summary", {}).get("count", 0) == 0
+            and isinstance(expected_count, int)
+            and expected_count > 0
+            and (age_seconds is None or age_seconds >= cooldown)
+        ):
+            return True
+        if snapshot.get("status") in {"partial", "incomplete"}:
+            return age_seconds is None or age_seconds >= cooldown
+        return False
 
     def _load_relation_snapshot(self, connection: sqlite3.Connection, paper_id: int, direction: str) -> Optional[Dict[str, Any]]:
         row = connection.execute(
@@ -1371,6 +1469,7 @@ class ReferenceManagerService:
         items: Sequence[Dict[str, Any]],
         degraded: Sequence[str],
         sources_used: Optional[Sequence[str]] = None,
+        expected_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         fetched_at = utcnow()
         expires_at = iso_plus_seconds(self._relation_snapshot_ttl_seconds(direction))
@@ -1381,7 +1480,8 @@ class ReferenceManagerService:
                     if provider not in normalized_sources:
                         normalized_sources.append(provider)
         summary = self._relation_summary_from_items(items)
-        status = "fresh"
+        coverage = self._coverage_summary(items, available_sources=normalized_sources, degraded=degraded)
+        status = self._relation_snapshot_status(summary=summary, degraded=degraded, expected_count=expected_count)
         connection.execute(
             """
             INSERT INTO paper_relation_snapshots (
@@ -1404,7 +1504,7 @@ class ReferenceManagerService:
                 status,
                 json_dumps(list(items)),
                 json_dumps(summary),
-                json_dumps(normalized_sources),
+                json_dumps(coverage),
                 json_dumps(list(dict.fromkeys(degraded))),
                 fetched_at,
                 expires_at,
@@ -1722,6 +1822,8 @@ class ReferenceManagerService:
         *,
         direction: str = "all",
         force_refresh: bool = False,
+        citation_page: int = 1,
+        citation_page_size: int = 20,
     ) -> Dict[str, Any]:
         directions = self._graph_modes(direction)
         credential_states = self._credential_states(user_id)
@@ -1744,17 +1846,7 @@ class ReferenceManagerService:
                 item
                 for item, snapshot in snapshots.items()
                 if force_refresh
-                or snapshot is None
-                or snapshot["stale"]
-                or (
-                    snapshot.get("summary", {}).get("count", 0) == 0
-                    and not snapshot.get("sources_used")
-                )
-                or (
-                    snapshot.get("summary", {}).get("count", 0) == 0
-                    and isinstance(relation_hints.get(item), int)
-                    and relation_hints.get(item, 0) > 0
-                )
+                or self._should_refresh_snapshot(snapshot, expected_count=relation_hints.get(item), direction=item)
             ]
             seed_record = self._build_relation_seed_record(connection, paper_row)
         degraded: List[str] = []
@@ -1784,6 +1876,7 @@ class ReferenceManagerService:
                         items=relation_items,
                         degraded=degraded,
                         sources_used=available_sources,
+                        expected_count=relation_hints.get(item),
                     )
                     refreshed.append(item)
                 connection.commit()
@@ -1800,12 +1893,16 @@ class ReferenceManagerService:
                 cache_hit=False,
                 paper_id=paper_id,
             )
+        references_snapshot = snapshots.get("references")
+        citations_snapshot = snapshots.get("citations")
+        if citations_snapshot:
+            citations_snapshot = self._paginate_snapshot_items(citations_snapshot, page=citation_page, page_size=citation_page_size)
         return {
             "paper_id": paper_id,
             "cache_hit": cache_hit,
             "refreshed": refreshed,
-            "references": snapshots.get("references"),
-            "citations": snapshots.get("citations"),
+            "references": references_snapshot,
+            "citations": citations_snapshot,
             "degraded": degraded,
         }
 

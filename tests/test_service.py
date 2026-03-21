@@ -358,6 +358,7 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertEqual(live["references"]["summary"]["count"], 1)
         self.assertEqual(live["citations"]["summary"]["count"], 1)
         self.assertIn("openalex", live["references"]["sources_used"])
+        self.assertTrue(any(item["provider"] == "openalex" for item in live["references"]["coverage"]))
         second_call_count = sum(self.transport.calls.values())
         self.assertGreater(second_call_count, first_call_count)
         cached = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=False)
@@ -426,6 +427,52 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertIn("10.1000/opencitations.ref.001", reference_dois)
         self.assertIn("10.1000/opencitations.cite.001", citation_dois)
         self.assertGreaterEqual(live["references"]["summary"]["count"], 1)
+        self.assertGreaterEqual(live["citations"]["summary"]["count"], 1)
+
+    def test_citation_pagination_returns_slice_and_metadata(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.48550/arxiv.2501.00663")["paper"]
+        with self.service._connect() as connection:
+            self.service._save_relation_snapshot(
+                connection,
+                paper_id=paper["id"],
+                direction="citations",
+                items=[
+                    {
+                        "direction": "citations",
+                        "relation_type": "cited_by",
+                        "paper": {"id": index, "doi": f"10.1000/pagination.{index}", "title": f"Citation {index}", "venue": None, "year": 2025, "published_at": None, "quality_state": "completo", "reliability_state": "affidabile"},
+                        "edge": {"state": "retrieved", "confidence": 1.0, "explanation": "test", "providers": ["openalex"], "discovered_via": ["citation"], "retrieved_at": "2026-03-21T00:00:00+00:00", "evidence_count": 1},
+                    }
+                    for index in range(1, 26)
+                ],
+                degraded=[],
+                sources_used=["openalex"],
+                expected_count=25,
+            )
+            connection.commit()
+        page_one = self.service.get_live_relations(self.user["id"], paper["id"], direction="citations", force_refresh=False, citation_page=1, citation_page_size=10)
+        page_two = self.service.get_live_relations(self.user["id"], paper["id"], direction="citations", force_refresh=False, citation_page=2, citation_page_size=10)
+        self.assertEqual(len(page_one["citations"]["items"]), 10)
+        self.assertEqual(len(page_two["citations"]["items"]), 10)
+        self.assertEqual(page_one["citations"]["pagination"]["total_items"], 25)
+        self.assertTrue(page_one["citations"]["pagination"]["has_next"])
+        self.assertEqual(page_two["citations"]["items"][0]["paper"]["doi"], "10.1000/pagination.11")
+
+    def test_partial_snapshot_is_refreshed_automatically_on_open(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.48550/arxiv.2501.00663")["paper"]
+        with self.service._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO paper_relation_snapshots (
+                    paper_id, direction, status, items_json, summary_json, source_summary_json,
+                    degraded_json, fetched_at, expires_at, updated_at
+                ) VALUES (?, 'citations', 'partial', '[]', '{\"count\":0,\"partial\":0,\"incomplete\":0,\"retrieved\":0,\"inferred\":0}', '[{\"provider\":\"openalex\",\"count\":0,\"status\":\"queried\"}]', '[]', '2026-03-21T00:00:00+00:00', '2099-01-01T00:00:00+00:00', '2026-03-21T00:00:00+00:00')
+                """,
+                (paper["id"],),
+            )
+            connection.commit()
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="citations", force_refresh=False)
+        self.assertFalse(live["cache_hit"])
         self.assertGreaterEqual(live["citations"]["summary"]["count"], 1)
 
     def test_graph_edge_state_becomes_retrieved_after_directional_refresh(self) -> None:
