@@ -243,33 +243,6 @@ function renderStats() {
     .join("");
 }
 
-function renderProviders() {
-  const providers = state.bootstrap?.providers || state.system?.providers || [];
-  renderCards(
-    byId("providers-list"),
-    providers,
-    (provider) => `
-      <article class="provider-card" data-state="${escapeHtml(provider.credential_state || "unavailable")}">
-        <div class="provider-top">
-          <div>
-            <h3 class="provider-title">${escapeHtml(provider.name)}</h3>
-            <p class="provider-copy">${escapeHtml(provider.absent_credential_behavior || "Provider disponibile.")}</p>
-          </div>
-          ${metaChip(provider.credential_state || "n/a")}
-        </div>
-        <div class="provider-features">
-          ${(provider.data_provided || []).slice(0, 4).map((feature) => metaChip(feature)).join("")}
-        </div>
-        <div class="provider-meta">
-          ${metaChip(`ID: ${(provider.supported_identifiers || []).join(", ") || "n/a"}`)}
-          ${metaChip(`Trust ${provider.trust_priority ?? "-"}`)}
-        </div>
-      </article>
-    `,
-    "Nessun provider disponibile.",
-  );
-}
-
 function renderCollections() {
   const collections = state.bootstrap?.collections || [];
   renderCards(
@@ -300,11 +273,9 @@ function renderCollections() {
   const options = collections
     .map((collection) => `<option value="${collection.id}">${escapeHtml(collection.name)}</option>`)
     .join("");
-  byId("paper-collection-id").innerHTML = `<option value="">Nessuna collezione</option>${options}`;
   byId("search-collection-id").innerHTML = `<option value="">Tutto il workspace</option>${options}`;
 
   if (state.activeCollection?.id) {
-    byId("paper-collection-id").value = String(state.activeCollection.id);
     byId("search-collection-id").value = String(state.activeCollection.id);
   }
 }
@@ -390,9 +361,6 @@ function renderPaperCard(paper, { mode, compact = false, index = null } = {}) {
           <div class="actions-row">
             <button class="action-button secondary" type="button" data-action="preview-external" data-result-index="${index}">
               Anteprima
-            </button>
-            <button class="action-button" type="button" data-action="import-external" data-result-index="${index}">
-              Importa nel workspace
             </button>
           </div>
         `
@@ -568,23 +536,12 @@ function renderAll() {
   );
   renderDemoCredentials();
   renderStats();
-  renderProviders();
   renderCollections();
   renderActiveCollection();
   renderWorkspacePapers();
   renderSearchResults();
   renderPaperDetail();
   renderActivityList(state.bootstrap?.feed || [], "Nessuna activity disponibile nel feed.");
-}
-
-function inferImportPayload(paper) {
-  if (paper.doi) {
-    return { identifier_type: "doi", value: paper.doi };
-  }
-  if (paper.canonical_url) {
-    return { identifier_type: "url", value: paper.canonical_url };
-  }
-  return { identifier_type: "title", value: paper.title };
 }
 
 async function loadPaper(paperId) {
@@ -643,67 +600,6 @@ async function handleCollectionCreate(event) {
   await fetchWorkspace();
 }
 
-function syncManualFields() {
-  const isManual = byId("identifier-type").value === "manual";
-  byId("manual-fields").classList.toggle("hidden", !isManual);
-  byId("identifier-value").placeholder = isManual
-    ? "Per il fallback manuale puoi lasciare vuoto questo campo"
-    : "10.1000/example oppure titolo articolo";
-}
-
-async function handlePaperIngest(event) {
-  event.preventDefault();
-  const raw = formValues(event.target);
-  const payload = {
-    identifier_type: raw.identifier_type,
-    value: raw.value || null,
-    collection_id: numberOrNull(raw.collection_id),
-  };
-
-  if (raw.identifier_type === "manual") {
-    payload.metadata = {
-      title: raw.title,
-      authors: raw.authors
-        ? raw.authors
-            .split(";")
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : [],
-      year: numberOrNull(raw.year),
-      abstract: raw.abstract || null,
-      manual: true,
-    };
-  }
-
-  const result = await api("/api/papers/add", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  setOutput(byId("paper-result"), result);
-  await fetchWorkspace();
-  if (result.paper?.id) {
-    await loadPaper(result.paper.id);
-  }
-}
-
-async function importExternalResult(index) {
-  const paper = state.search.external[index];
-  if (!paper) {
-    return;
-  }
-  const importPayload = inferImportPayload(paper);
-  importPayload.collection_id = state.activeCollection?.id || null;
-  const result = await api("/api/papers/add", {
-    method: "POST",
-    body: JSON.stringify(importPayload),
-  });
-  setOutput(byId("paper-result"), result);
-  await fetchWorkspace();
-  if (result.paper?.id) {
-    await loadPaper(result.paper.id);
-  }
-}
-
 async function handleActivity(kind) {
   if (kind === "feed") {
     const payload = await api("/api/feed");
@@ -753,14 +649,6 @@ byId("search-form").addEventListener("submit", (event) => {
     alert(error.message);
   });
 });
-
-byId("paper-form").addEventListener("submit", (event) => {
-  handlePaperIngest(event).catch((error) => {
-    alert(error.message);
-  });
-});
-
-byId("identifier-type").addEventListener("change", syncManualFields);
 
 byId("refresh-workspace").addEventListener("click", () => {
   initialize(false).catch((error) => {
@@ -816,10 +704,5 @@ document.addEventListener("click", (event) => {
     renderPaperDetail();
     return;
   }
-  if (action === "import-external") {
-    importExternalResult(Number(actionTarget.dataset.resultIndex)).catch((error) => alert(error.message));
-  }
 });
-
-syncManualFields();
 initialize(false);

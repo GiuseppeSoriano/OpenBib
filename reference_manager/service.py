@@ -711,22 +711,11 @@ class ReferenceManagerService:
             else:
                 rows = connection.execute(
                     """
-                    SELECT DISTINCT papers.*
+                    SELECT papers.*
                     FROM papers
-                    LEFT JOIN collection_papers ON collection_papers.paper_id = papers.id
-                    LEFT JOIN collections ON collections.id = collection_papers.collection_id
-                    LEFT JOIN collection_members ON collection_members.collection_id = collections.id
                     WHERE papers.merged_into_paper_id IS NULL
-                      AND (
-                        collections.owner_id = ?
-                        OR collection_members.user_id = ?
-                        OR papers.id IN (
-                          SELECT paper_id FROM user_paper_state WHERE user_id = ?
-                        )
-                      )
                     ORDER BY COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) DESC, papers.title ASC
-                    """,
-                    (user_id, user_id, user_id),
+                    """
                 ).fetchall()
         return [self._row_to_paper(row) for row in rows]
 

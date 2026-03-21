@@ -55,16 +55,6 @@
           </div>
           <div id="stats-grid" class="stats-grid"></div>
         </article>
-
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="section-kicker">Providers</p>
-              <h2>Connettori backend</h2>
-            </div>
-          </div>
-          <div id="providers-list" class="provider-list"></div>
-        </article>
       </section>
 
       <section class="workspace-grid reveal">
@@ -133,11 +123,11 @@
       </section>
 
       <section class="search-grid reveal">
-        <article class="panel">
+        <article class="panel panel-full">
           <div class="panel-head">
             <div>
               <p class="section-kicker">Ricerca</p>
-              <h2>Locale + provider esterni</h2>
+              <h2>Paper dal backend e dai provider</h2>
             </div>
           </div>
 
@@ -174,62 +164,6 @@
               <div id="search-results-external" class="paper-list"></div>
             </section>
           </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="section-kicker">Ingest</p>
-              <h2>Aggiungi un articolo</h2>
-            </div>
-          </div>
-
-          <form id="paper-form" class="stack">
-            <label>
-              Modalità
-              <select name="identifier_type" id="identifier-type">
-                <option value="doi">DOI</option>
-                <option value="title">Titolo</option>
-                <option value="url">URL</option>
-                <option value="manual">Manuale</option>
-              </select>
-            </label>
-
-            <label>
-              Valore
-              <input name="value" id="identifier-value" type="text" placeholder="10.1000/example oppure titolo articolo">
-            </label>
-
-            <label>
-              Collezione target
-              <select name="collection_id" id="paper-collection-id">
-                <option value="">Nessuna collezione</option>
-              </select>
-            </label>
-
-            <div id="manual-fields" class="manual-fields hidden">
-              <label>
-                Titolo manuale
-                <input name="title" type="text" placeholder="Manual fallback paper">
-              </label>
-              <label>
-                Autori
-                <input name="authors" type="text" placeholder="Alice; Bob; Charlie">
-              </label>
-              <label>
-                Anno
-                <input name="year" type="number" placeholder="2026">
-              </label>
-              <label>
-                Abstract
-                <textarea name="abstract" rows="4" placeholder="Descrizione sintetica del record."></textarea>
-              </label>
-            </div>
-
-            <button type="submit">Esegui ingest</button>
-          </form>
-
-          <pre id="paper-result" class="output">Nessun ingest ancora eseguito.</pre>
         </article>
       </section>
 

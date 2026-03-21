@@ -213,6 +213,8 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertIn("cited_by", relation_types)
         self.assertTrue(any(source["provider"] == "openalex" for source in paper["sources"]))
         self.assertIsNotNone(paper["retrieval"])
+        workspace_papers = self.service.list_workspace_papers(self.user["id"])
+        self.assertEqual(len(workspace_papers), 3)
 
     def test_recommendations_reduce_reappearance_of_excluded_papers(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
