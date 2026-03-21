@@ -9,6 +9,7 @@ const state = {
   system: null,
   activeCollection: null,
   activePaper: null,
+  activeRelations: null,
   activePaperMode: "empty",
   demoCredentials: null,
   workspacePapers: [],
@@ -87,6 +88,23 @@ function providerName(paper) {
 
 function metaChip(label) {
   return `<span class="meta-chip">${escapeHtml(label)}</span>`;
+}
+
+function relationSectionEmpty(direction) {
+  return direction === "references"
+    ? "Nessuna reference disponibile dai provider per questo paper."
+    : "Nessuna citation disponibile dai provider per questo paper.";
+}
+
+function mergeRelationsPayload(current, incoming) {
+  return {
+    paper_id: incoming.paper_id || current?.paper_id || null,
+    cache_hit: incoming.cache_hit ?? current?.cache_hit ?? false,
+    refreshed: incoming.refreshed || current?.refreshed || [],
+    degraded: incoming.degraded || current?.degraded || [],
+    references: incoming.references || current?.references || null,
+    citations: incoming.citations || current?.citations || null,
+  };
 }
 
 function setGraphFeedback(message, tone = "success") {
@@ -224,6 +242,21 @@ async function fetchWorkspace() {
 
   await refreshActiveCollection();
   renderAll();
+}
+
+async function loadPaperRelations(paperId, { direction = "all", forceRefresh = false } = {}) {
+  const params = new URLSearchParams();
+  params.set("direction", direction);
+  if (forceRefresh) {
+    params.set("refresh", "1");
+  }
+  const payload = await api(`/api/papers/${paperId}/relations?${params.toString()}`);
+  if (state.activePaper?.id !== paperId) {
+    return payload;
+  }
+  state.activeRelations = mergeRelationsPayload(state.activeRelations, payload);
+  renderPaperDetail();
+  return payload;
 }
 
 async function refreshActiveCollection() {
@@ -516,8 +549,31 @@ function renderPaperDetail() {
   const sources = paper.sources || paper.raw_sources || [];
   const notes = paper.notes || [];
   const relations = paper.relations || [];
-  const graph = paper.graph || { references: [], citations: [], summary: {} };
+  const liveRelations = state.activeRelations || {};
+  const referencesSnapshot = liveRelations.references;
+  const citationsSnapshot = liveRelations.citations;
+  const graph = {
+    references: referencesSnapshot?.items || [],
+    citations: citationsSnapshot?.items || [],
+    summary: {
+      references: referencesSnapshot?.summary?.count || 0,
+      citations: citationsSnapshot?.summary?.count || 0,
+      retrieved_references: referencesSnapshot?.summary?.retrieved || 0,
+      retrieved_citations: citationsSnapshot?.summary?.retrieved || 0,
+      inferred_references: referencesSnapshot?.summary?.inferred || 0,
+      inferred_citations: citationsSnapshot?.summary?.inferred || 0,
+      incomplete_references: referencesSnapshot?.summary?.incomplete || 0,
+      incomplete_citations: citationsSnapshot?.summary?.incomplete || 0,
+    },
+  };
   const isLocal = state.activePaperMode === "local";
+  const relationNotes = [
+    referencesSnapshot?.fetched_at ? `references ${referencesSnapshot.stale ? "stale" : "fresh"} @ ${referencesSnapshot.fetched_at}` : null,
+    citationsSnapshot?.fetched_at ? `citations ${citationsSnapshot.stale ? "stale" : "fresh"} @ ${citationsSnapshot.fetched_at}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const degradedNotes = (liveRelations.degraded || []).join(" · ");
   target.className = "detail-panel";
   target.innerHTML = `
     <div class="detail-top">
@@ -579,6 +635,8 @@ function renderPaperDetail() {
       <h3>Relazioni e note</h3>
       <p>Relazioni note: ${escapeHtml(relations.length)}</p>
       <p>Note salvate: ${escapeHtml(notes.length)}</p>
+      ${relationNotes ? `<p>Snapshot live: ${escapeHtml(relationNotes)}</p>` : ""}
+      ${degradedNotes ? `<p>Note provider: ${escapeHtml(degradedNotes)}</p>` : ""}
       ${
         isLocal
           ? `
@@ -599,15 +657,17 @@ function renderPaperDetail() {
         ? `
           <div class="detail-section">
             <h3>References</h3>
+            <p class="muted-copy">${escapeHtml((referencesSnapshot?.sources_used || []).join(", ") || "Provider non ancora interrogati.")}</p>
             <div class="relation-list">
-              ${renderRelationItems(graph.references || [], "Nessuna reference persistita per questo paper.")}
+              ${renderRelationItems(graph.references || [], relationSectionEmpty("references"))}
             </div>
           </div>
 
           <div class="detail-section">
             <h3>Citations</h3>
+            <p class="muted-copy">${escapeHtml((citationsSnapshot?.sources_used || []).join(", ") || "Provider non ancora interrogati.")}</p>
             <div class="relation-list">
-              ${renderRelationItems(graph.citations || [], "Nessuna citation persistita per questo paper.")}
+              ${renderRelationItems(graph.citations || [], relationSectionEmpty("citations"))}
             </div>
           </div>
         `
@@ -643,8 +703,10 @@ function renderAll() {
 async function loadPaper(paperId) {
   const payload = await api(`/api/papers/${paperId}`);
   state.activePaper = payload.paper;
+  state.activeRelations = null;
   state.activePaperMode = "local";
   renderPaperDetail();
+  await loadPaperRelations(payload.paper.id);
 }
 
 async function selectCollection(collectionId) {
@@ -659,20 +721,13 @@ async function refreshPaperGraph(mode) {
   if (!state.activePaper?.id || state.activePaperMode !== "local") {
     return;
   }
-  const payload = await api("/api/papers/refresh", {
-    method: "POST",
-    body: JSON.stringify({
-      paper_id: state.activePaper.id,
-      mode,
-      force_refresh: true,
-      rebuild: true,
-    }),
-  });
+  const payload = await loadPaperRelations(state.activePaper.id, { direction: mode, forceRefresh: true });
   await fetchWorkspace();
-  state.activePaper = payload.paper;
-  state.activePaperMode = "local";
-  renderPaperDetail();
-  setGraphFeedback(`Refresh ${mode} completato per il paper #${payload.paper.id}.`, payload.degraded?.length ? "warning" : "success");
+  await loadPaper(state.activePaper.id);
+  setGraphFeedback(
+    `Refresh ${mode} completato per il paper #${state.activePaper.id}.`,
+    payload.degraded?.length ? "warning" : "success",
+  );
 }
 
 async function expandActivePaperGraph() {
@@ -739,10 +794,12 @@ async function handleSearch(event) {
     await loadPaper(state.search.local[0].id);
   } else if (state.search.external[0]) {
     state.activePaper = state.search.external[0];
+    state.activeRelations = null;
     state.activePaperMode = "external";
     renderPaperDetail();
   } else {
     state.activePaper = null;
+    state.activeRelations = null;
     state.activePaperMode = "empty";
   }
   renderSearchResults();
@@ -874,6 +931,7 @@ document.addEventListener("click", (event) => {
       return;
     }
     state.activePaper = paper;
+    state.activeRelations = null;
     state.activePaperMode = "external";
     renderPaperDetail();
     return;
