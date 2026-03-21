@@ -39,6 +39,8 @@ class AppConfig:
     max_related_works: int
     provider_cache_ttl_seconds: int
     search_cache_ttl_seconds: int
+    reference_cache_ttl_seconds: int
+    citation_cache_ttl_seconds: int
 
     @classmethod
     def from_env(cls, env_path: str = ".env") -> "AppConfig":
@@ -52,4 +54,6 @@ class AppConfig:
             max_related_works=int(os.getenv("MAX_RELATED_WORKS", "100")),
             provider_cache_ttl_seconds=int(os.getenv("PROVIDER_CACHE_TTL_SECONDS", "86400")),
             search_cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "3600")),
+            reference_cache_ttl_seconds=int(os.getenv("REFERENCE_CACHE_TTL_SECONDS", str(7 * 24 * 3600))),
+            citation_cache_ttl_seconds=int(os.getenv("CITATION_CACHE_TTL_SECONDS", str(12 * 3600))),
         )

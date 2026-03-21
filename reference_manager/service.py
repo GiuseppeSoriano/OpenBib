@@ -342,6 +342,19 @@ class ReferenceManagerService:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS paper_relation_snapshots (
+                    paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    direction TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'fresh',
+                    items_json TEXT NOT NULL DEFAULT '[]',
+                    summary_json TEXT NOT NULL DEFAULT '{}',
+                    source_summary_json TEXT NOT NULL DEFAULT '[]',
+                    degraded_json TEXT NOT NULL DEFAULT '[]',
+                    fetched_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (paper_id, direction)
+                );
                 CREATE TABLE IF NOT EXISTS retrieval_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -1246,6 +1259,165 @@ class ReferenceManagerService:
             "updated_at": row["updated_at"],
         }
 
+    def _relation_snapshot_ttl_seconds(self, direction: str) -> int:
+        if direction == "references":
+            return self.config.reference_cache_ttl_seconds
+        if direction == "citations":
+            return self.config.citation_cache_ttl_seconds
+        raise ServiceError("Direzione snapshot non valida.", status=422)
+
+    def _build_relation_seed_record(self, connection: sqlite3.Connection, paper_row: sqlite3.Row) -> Dict[str, Any]:
+        metadata = json_loads(paper_row["metadata_json"], {})
+        external_ids = dict(metadata.get("external_ids", {}))
+        graph_hints = dict(metadata.get("graph_hints", {}))
+        source_rows = connection.execute(
+            """
+            SELECT provider, provider_paper_id, source_url
+            FROM paper_sources
+            WHERE paper_id = ?
+            ORDER BY is_primary DESC, provider ASC
+            """,
+            (paper_row["id"],),
+        ).fetchall()
+        for source in source_rows:
+            if source["provider"] == "openalex":
+                openalex_id = source["provider_paper_id"] or source["source_url"]
+                if openalex_id:
+                    external_ids.setdefault("openalex", openalex_id)
+                    graph_hints.setdefault("openalex_id", openalex_id)
+        return {
+            **metadata,
+            "doi": paper_row["doi"],
+            "title": paper_row["title"],
+            "external_ids": external_ids,
+            "graph_hints": graph_hints,
+        }
+
+    def _relation_item_from_record(
+        self,
+        connection: sqlite3.Connection,
+        direction: str,
+        related_record: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        paper = self._ensure_paper(connection, related_record, None, automatic=True)
+        related_row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper["id"],)).fetchone()
+        related_paper = self._row_to_paper(related_row)
+        providers = [item.get("provider") for item in related_record.get("raw_sources", []) if item.get("provider")]
+        providers = list(dict.fromkeys(providers))
+        edge_state = self._edge_state_for_record(related_record)
+        return {
+            "direction": direction,
+            "relation_type": "cites" if direction == "references" else "cited_by",
+            "paper": {
+                "id": related_paper["id"],
+                "doi": related_paper["doi"],
+                "title": related_paper["title"],
+                "venue": related_paper["venue"],
+                "year": related_paper["year"],
+                "published_at": related_paper["published_at"],
+                "quality_state": related_paper["quality_state"],
+                "reliability_state": related_paper["reliability_state"],
+            },
+            "edge": {
+                "state": edge_state,
+                "confidence": 1.0,
+                "explanation": "Fetched live from external providers and normalized by the backend.",
+                "providers": providers,
+                "discovered_via": [direction[:-1] if direction.endswith("s") else direction],
+                "retrieved_at": utcnow(),
+                "evidence_count": max(1, len(providers)),
+            },
+        }
+
+    def _relation_summary_from_items(self, items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "count": len(items),
+            "retrieved": sum(1 for item in items if item["edge"]["state"] == "retrieved"),
+            "partial": sum(1 for item in items if item["edge"]["state"] == "partial"),
+            "incomplete": sum(1 for item in items if item["edge"]["state"] == "incomplete"),
+            "inferred": sum(1 for item in items if item["edge"]["state"] == "inferred"),
+        }
+
+    def _snapshot_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
+        stale = not iso_after_now(row["expires_at"])
+        return {
+            "direction": row["direction"],
+            "status": row["status"],
+            "items": json_loads(row["items_json"], []),
+            "summary": json_loads(row["summary_json"], {}),
+            "sources_used": json_loads(row["source_summary_json"], []),
+            "degraded": json_loads(row["degraded_json"], []),
+            "fetched_at": row["fetched_at"],
+            "expires_at": row["expires_at"],
+            "stale": stale,
+        }
+
+    def _load_relation_snapshot(self, connection: sqlite3.Connection, paper_id: int, direction: str) -> Optional[Dict[str, Any]]:
+        row = connection.execute(
+            """
+            SELECT * FROM paper_relation_snapshots
+            WHERE paper_id = ? AND direction = ?
+            """,
+            (paper_id, direction),
+        ).fetchone()
+        return self._snapshot_payload(row) if row else None
+
+    def _save_relation_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        paper_id: int,
+        direction: str,
+        items: Sequence[Dict[str, Any]],
+        degraded: Sequence[str],
+    ) -> Dict[str, Any]:
+        fetched_at = utcnow()
+        expires_at = iso_plus_seconds(self._relation_snapshot_ttl_seconds(direction))
+        sources_used = []
+        for item in items:
+            for provider in item.get("edge", {}).get("providers", []):
+                if provider not in sources_used:
+                    sources_used.append(provider)
+        summary = self._relation_summary_from_items(items)
+        status = "fresh"
+        connection.execute(
+            """
+            INSERT INTO paper_relation_snapshots (
+                paper_id, direction, status, items_json, summary_json, source_summary_json,
+                degraded_json, fetched_at, expires_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (paper_id, direction) DO UPDATE SET
+                status = excluded.status,
+                items_json = excluded.items_json,
+                summary_json = excluded.summary_json,
+                source_summary_json = excluded.source_summary_json,
+                degraded_json = excluded.degraded_json,
+                fetched_at = excluded.fetched_at,
+                expires_at = excluded.expires_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                paper_id,
+                direction,
+                status,
+                json_dumps(list(items)),
+                json_dumps(summary),
+                json_dumps(sources_used),
+                json_dumps(list(dict.fromkeys(degraded))),
+                fetched_at,
+                expires_at,
+                fetched_at,
+            ),
+        )
+        row = connection.execute(
+            """
+            SELECT * FROM paper_relation_snapshots
+            WHERE paper_id = ? AND direction = ?
+            """,
+            (paper_id, direction),
+        ).fetchone()
+        return self._snapshot_payload(row)
+
     def _graph_modes(self, mode: str) -> List[str]:
         if mode == "all":
             return ["references", "citations"]
@@ -1540,6 +1712,77 @@ class ReferenceManagerService:
             )
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
         return {"paper": self.get_paper(paper["id"]), "provider": source_provider, "degraded": degraded}
+
+    def get_live_relations(
+        self,
+        user_id: int,
+        paper_id: int,
+        *,
+        direction: str = "all",
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        directions = self._graph_modes(direction)
+        with self._connect() as connection:
+            paper_row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not paper_row:
+                raise ServiceError("Paper non trovato.", status=404)
+            snapshots = {item: self._load_relation_snapshot(connection, paper_id, item) for item in directions}
+            stale_directions = [
+                item
+                for item, snapshot in snapshots.items()
+                if force_refresh or snapshot is None or snapshot["stale"]
+            ]
+            seed_record = self._build_relation_seed_record(connection, paper_row)
+        degraded: List[str] = []
+        cache_hit = not stale_directions
+        refreshed: List[str] = []
+        if stale_directions:
+            if not (seed_record.get("doi") or seed_record.get("graph_hints") or seed_record.get("external_ids")):
+                raise ServiceError("Il paper non ha identificatori sufficienti per recuperare relations live.", status=422)
+            run_id = self._start_retrieval_run(
+                user_id,
+                paper_id,
+                "paper_relations_live_refresh",
+                {"paper_id": paper_id, "directions": stale_directions, "force_refresh": force_refresh},
+            )
+            relations_payload = self._cached_provider_relations(seed_record, self._credential_states(user_id), force_refresh=True)
+            degraded = relations_payload.get("degraded", [])
+            with self._connect() as connection:
+                for item in stale_directions:
+                    relation_items = [
+                        self._relation_item_from_record(connection, item, record)
+                        for record in relations_payload["relations"].get(item, [])
+                    ]
+                    snapshots[item] = self._save_relation_snapshot(
+                        connection,
+                        paper_id=paper_id,
+                        direction=item,
+                        items=relation_items,
+                        degraded=degraded,
+                    )
+                    refreshed.append(item)
+                connection.commit()
+            self._finish_retrieval_run(
+                run_id,
+                status="completed",
+                stats={
+                    "paper_id": paper_id,
+                    "directions": stale_directions,
+                    "references": snapshots.get("references", {}).get("summary", {}).get("count", 0),
+                    "citations": snapshots.get("citations", {}).get("summary", {}).get("count", 0),
+                },
+                degraded=degraded,
+                cache_hit=False,
+                paper_id=paper_id,
+            )
+        return {
+            "paper_id": paper_id,
+            "cache_hit": cache_hit,
+            "refreshed": refreshed,
+            "references": snapshots.get("references"),
+            "citations": snapshots.get("citations"),
+            "degraded": degraded,
+        }
 
     def _relation_state_for_paper(self, paper_id: int, direction: str, metadata: Dict[str, Any], related_quality_state: Optional[str]) -> str:
         evidence = metadata.get("evidence", []) or []

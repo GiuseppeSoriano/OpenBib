@@ -174,6 +174,8 @@ class ReferenceManagerServiceTest(unittest.TestCase):
             max_related_works=25,
             provider_cache_ttl_seconds=3600,
             search_cache_ttl_seconds=1800,
+            reference_cache_ttl_seconds=7200,
+            citation_cache_ttl_seconds=1800,
         )
         self.transport = MockTransport()
         self.providers = ProviderRegistry(self.config, transport=self.transport)
@@ -219,6 +221,34 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertIsNotNone(paper["retrieval"])
         workspace_papers = self.service.list_workspace_papers(self.user["id"])
         self.assertEqual(len(workspace_papers), 3)
+
+    def test_live_relations_are_fetched_and_cached(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        first_call_count = sum(self.transport.calls.values())
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=True)
+        self.assertEqual(live["references"]["summary"]["count"], 1)
+        self.assertEqual(live["citations"]["summary"]["count"], 1)
+        self.assertIn("openalex", live["references"]["sources_used"])
+        second_call_count = sum(self.transport.calls.values())
+        self.assertGreater(second_call_count, first_call_count)
+        cached = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=False)
+        self.assertTrue(cached["cache_hit"])
+        self.assertEqual(sum(self.transport.calls.values()), second_call_count)
+
+    def test_live_relations_refresh_openalex_work_when_graph_hints_are_missing(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        with self.service._connect() as connection:
+            metadata = dict(paper["metadata"])
+            metadata["graph_hints"] = {"openalex_id": "https://openalex.org/W1001", "referenced_works": [], "cited_by_api_url": None}
+            connection.execute(
+                "UPDATE papers SET metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata), paper["id"]),
+            )
+            connection.execute("DELETE FROM paper_relation_snapshots WHERE paper_id = ?", (paper["id"],))
+            connection.commit()
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=True)
+        self.assertEqual(live["references"]["summary"]["count"], 1)
+        self.assertEqual(live["citations"]["summary"]["count"], 1)
 
     def test_graph_edge_state_becomes_retrieved_after_directional_refresh(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004")["paper"]

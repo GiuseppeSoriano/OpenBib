@@ -103,6 +103,19 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                 }
                 json_response(self, 200, self.service.search_papers(user["id"], params.get("q", [""])[0], filters))
                 return
+            if parsed.path.startswith("/api/papers/") and parsed.path.endswith("/relations"):
+                user = self.service.require_user(self._token())
+                parts = [item for item in parsed.path.split("/") if item]
+                paper_id = int(parts[2])
+                params = parse_qs(parsed.query)
+                direction = params.get("direction", ["all"])[0]
+                refresh_flag = params.get("refresh", ["0"])[0].lower() in {"1", "true", "yes"}
+                json_response(
+                    self,
+                    200,
+                    self.service.get_live_relations(user["id"], paper_id, direction=direction, force_refresh=refresh_flag),
+                )
+                return
             if parsed.path.startswith("/api/papers/"):
                 user = self.service.require_user(self._token())
                 paper_id = int(parsed.path.rsplit("/", 1)[-1])

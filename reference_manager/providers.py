@@ -284,6 +284,12 @@ class OpenAlexProvider(BaseProvider):
             openalex_id = looked_up.get("graph_hints", {}).get("openalex_id") if looked_up else None
             if looked_up:
                 seed_record = looked_up
+        referenced = seed_record.get("graph_hints", {}).get("referenced_works")
+        cited_by_url = seed_record.get("graph_hints", {}).get("cited_by_api_url")
+        if openalex_id and (referenced is None or cited_by_url is None or (not referenced and not cited_by_url)):
+            refreshed = self._get_work(openalex_id)
+            if refreshed:
+                seed_record = self._normalize_work(refreshed)
         if not openalex_id:
             return {"references": [], "citations": [], "degraded": ["OpenAlex ID non disponibile per recuperare il grafo."]}
         referenced = seed_record.get("graph_hints", {}).get("referenced_works") or []
