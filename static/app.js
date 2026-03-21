@@ -23,6 +23,8 @@ const state = {
   graphOpsTone: "success",
 };
 
+const CITATION_PAGE_SIZE = 10;
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -97,13 +99,31 @@ function relationSectionEmpty(direction) {
 }
 
 function mergeRelationsPayload(current, incoming) {
+  const currentCitations = current?.citations;
+  const incomingCitations = incoming.citations;
+  let mergedCitations = incomingCitations || currentCitations || null;
+  if (currentCitations && incomingCitations) {
+    const incomingPage = incomingCitations.pagination?.page || 1;
+    if (incomingPage > 1) {
+      const seen = new Set();
+      const mergedItems = [...(currentCitations.items || []), ...(incomingCitations.items || [])].filter((item) => {
+        const key = item.paper?.id || item.paper?.doi || item.paper?.title;
+        if (!key || seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+      mergedCitations = { ...incomingCitations, items: mergedItems };
+    }
+  }
   return {
     paper_id: incoming.paper_id || current?.paper_id || null,
     cache_hit: incoming.cache_hit ?? current?.cache_hit ?? false,
     refreshed: incoming.refreshed || current?.refreshed || [],
     degraded: incoming.degraded || current?.degraded || [],
     references: incoming.references || current?.references || null,
-    citations: incoming.citations || current?.citations || null,
+    citations: mergedCitations,
   };
 }
 
@@ -247,6 +267,7 @@ async function fetchWorkspace() {
 async function loadPaperRelations(paperId, { direction = "all", forceRefresh = false } = {}) {
   const params = new URLSearchParams();
   params.set("direction", direction);
+  params.set("citation_page_size", String(CITATION_PAGE_SIZE));
   if (forceRefresh) {
     params.set("refresh", "1");
   }
@@ -257,6 +278,23 @@ async function loadPaperRelations(paperId, { direction = "all", forceRefresh = f
   state.activeRelations = mergeRelationsPayload(state.activeRelations, payload);
   renderPaperDetail();
   return payload;
+}
+
+async function loadMoreCitations() {
+  if (!state.activePaper?.id || state.activePaperMode !== "local") {
+    return;
+  }
+  const nextPage = (state.activeRelations?.citations?.pagination?.page || 1) + 1;
+  const params = new URLSearchParams();
+  params.set("direction", "citations");
+  params.set("citation_page", String(nextPage));
+  params.set("citation_page_size", String(CITATION_PAGE_SIZE));
+  const payload = await api(`/api/papers/${state.activePaper.id}/relations?${params.toString()}`);
+  if (state.activePaper?.id !== payload.paper_id) {
+    return;
+  }
+  state.activeRelations = mergeRelationsPayload(state.activeRelations, payload);
+  renderPaperDetail();
 }
 
 async function refreshActiveCollection() {
@@ -432,6 +470,22 @@ function renderRelationItems(items, emptyMessage) {
       `,
     )
     .join("");
+}
+
+function renderCoverageBadges(coverage) {
+  if (!coverage?.length) {
+    return '<p class="muted-copy">Copertura provider non ancora disponibile.</p>';
+  }
+  return `
+    <div class="card-meta">
+      ${coverage
+        .map((item) => {
+          const suffix = item.count ? ` ${item.count}` : "";
+          return `<span class="meta-chip source-badge source-${escapeHtml(item.status)}">${escapeHtml(item.provider)}${escapeHtml(suffix)}</span>`;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function renderPaperCard(paper, { mode, compact = false, index = null } = {}) {
@@ -658,6 +712,7 @@ function renderPaperDetail() {
           <div class="detail-section">
             <h3>References</h3>
             <p class="muted-copy">${escapeHtml((referencesSnapshot?.sources_used || []).join(", ") || "Provider non ancora interrogati.")}</p>
+            ${renderCoverageBadges(referencesSnapshot?.coverage)}
             <div class="relation-list">
               ${renderRelationItems(graph.references || [], relationSectionEmpty("references"))}
             </div>
@@ -666,9 +721,21 @@ function renderPaperDetail() {
           <div class="detail-section">
             <h3>Citations</h3>
             <p class="muted-copy">${escapeHtml((citationsSnapshot?.sources_used || []).join(", ") || "Provider non ancora interrogati.")}</p>
+            ${renderCoverageBadges(citationsSnapshot?.coverage)}
             <div class="relation-list">
               ${renderRelationItems(graph.citations || [], relationSectionEmpty("citations"))}
             </div>
+            ${
+              citationsSnapshot?.pagination?.has_next
+                ? `
+                  <div class="actions-row">
+                    <button class="ghost" type="button" data-action="load-more-citations">
+                      Carica altre citations (${citationsSnapshot.pagination.total_items})
+                    </button>
+                  </div>
+                `
+                : ""
+            }
           </div>
         `
         : ""
@@ -923,6 +990,10 @@ document.addEventListener("click", (event) => {
   }
   if (action === "expand-paper-graph") {
     expandActivePaperGraph().catch((error) => alert(error.message));
+    return;
+  }
+  if (action === "load-more-citations") {
+    loadMoreCitations().catch((error) => alert(error.message));
     return;
   }
   if (action === "preview-external") {

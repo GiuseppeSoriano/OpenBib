@@ -400,6 +400,18 @@ body::before {
   background: var(--accent-soft);
 }
 
+.source-badge.source-covered {
+  background: rgba(45, 106, 79, 0.12);
+}
+
+.source-badge.source-queried {
+  background: rgba(27, 106, 115, 0.1);
+}
+
+.source-badge.source-degraded {
+  background: rgba(148, 47, 47, 0.12);
+}
+
 .provider-card[data-state="configured"] .meta-chip,
 .provider-card[data-state="valid"] .meta-chip {
   background: rgba(45, 106, 79, 0.12);
