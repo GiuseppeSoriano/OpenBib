@@ -11,6 +11,7 @@ const state = {
   activePaper: null,
   activePaperMode: "empty",
   demoCredentials: null,
+  workspacePapers: [],
   search: {
     query: "",
     local: [],
@@ -199,6 +200,9 @@ async function fetchWorkspace() {
     throw new Error("Sessione demo non disponibile.");
   }
 
+  const papersPayload = await api("/api/papers");
+  state.workspacePapers = papersPayload.papers || [];
+
   const existingIds = new Set((state.bootstrap.collections || []).map((collection) => collection.id));
   if (!existingIds.has(state.activeCollection?.id)) {
     const preferred = state.bootstrap.collections?.[0] || null;
@@ -223,7 +227,7 @@ function renderStats() {
   const items = [
     { label: "Utenti", value: counts.users ?? 0 },
     { label: "Collezioni", value: counts.collections ?? 0 },
-    { label: "Paper", value: counts.papers ?? 0 },
+    { label: "Paper nel DB", value: counts.papers ?? 0 },
     { label: "Notifiche", value: counts.notifications ?? 0 },
     { label: "Import", value: counts.imports ?? 0 },
   ];
@@ -328,7 +332,7 @@ function renderActiveCollection() {
   meta.innerHTML = [
     metaChip(state.activeCollection.visibility),
     metaChip(state.activeCollection.status),
-    metaChip(`${state.activeCollection.papers.length} paper`),
+    metaChip(`${state.activeCollection.papers.length} paper in collezione`),
   ].join("");
 
   renderCards(
@@ -336,6 +340,45 @@ function renderActiveCollection() {
     state.activeCollection.papers || [],
     (paper) => renderPaperCard(paper, { mode: "local", compact: true }),
     "Questa collezione non contiene ancora articoli.",
+  );
+}
+
+function renderWorkspacePapers() {
+  const papers = state.workspacePapers || [];
+  const collectionPaperIds = new Set((state.activeCollection?.papers || []).map((paper) => paper.id));
+  byId("workspace-paper-meta").innerHTML = [
+    metaChip(`${papers.length} paper nel database locale`),
+    state.activeCollection ? metaChip(`${collectionPaperIds.size} presenti nella collezione aperta`) : metaChip("Nessuna collezione selezionata"),
+  ].join("");
+
+  renderCards(
+    byId("workspace-paper-list"),
+    papers,
+    (paper) => `
+      <article class="paper-card ${collectionPaperIds.has(paper.id) ? "paper-card-highlight" : ""}">
+        <div class="paper-top">
+          <div>
+            <h3 class="paper-title">${escapeHtml(paper.title || "Titolo non disponibile")}</h3>
+            <p class="paper-copy">${escapeHtml(truncate(paper.abstract || paper.metadata?.quality_note || "Metadati essenziali disponibili.", 180))}</p>
+          </div>
+          ${metaChip(`#${paper.id}`)}
+        </div>
+        <div class="card-meta">
+          ${metaChip(paper.venue || "Venue n/a")}
+          ${metaChip(paper.year || "Anno n/a")}
+          ${metaChip(joinAuthors(paper))}
+        </div>
+        <div class="card-meta">
+          ${paper.doi ? metaChip(`DOI ${paper.doi}`) : ""}
+          ${metaChip(collectionPaperIds.has(paper.id) ? "Nella collezione attiva" : "Solo nel database locale")}
+          ${metaChip(providerName(paper))}
+        </div>
+        <button class="action-button secondary" type="button" data-action="open-paper" data-paper-id="${paper.id}">
+          Apri dettaglio
+        </button>
+      </article>
+    `,
+    "Nessun paper salvato nel backend.",
   );
 }
 
@@ -528,6 +571,7 @@ function renderAll() {
   renderProviders();
   renderCollections();
   renderActiveCollection();
+  renderWorkspacePapers();
   renderSearchResults();
   renderPaperDetail();
   renderActivityList(state.bootstrap?.feed || [], "Nessuna activity disponibile nel feed.");
@@ -555,6 +599,7 @@ async function selectCollection(collectionId) {
   await refreshActiveCollection();
   renderCollections();
   renderActiveCollection();
+  renderWorkspacePapers();
 }
 
 async function handleSearch(event) {

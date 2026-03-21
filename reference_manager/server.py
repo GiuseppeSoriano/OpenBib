@@ -82,6 +82,12 @@ class ReferenceManagerHandler(BaseHTTPRequestHandler):
                 user = self.service.require_user(self._token())
                 json_response(self, 200, {"collections": self.service.list_collections(user["id"])})
                 return
+            if parsed.path == "/api/papers":
+                user = self.service.require_user(self._token())
+                params = parse_qs(parsed.query)
+                collection_id = int(params["collection_id"][0]) if params.get("collection_id") else None
+                json_response(self, 200, {"papers": self.service.list_workspace_papers(user["id"], collection_id=collection_id)})
+                return
             if parsed.path.startswith("/api/collections/"):
                 user = self.service.require_user(self._token())
                 collection_id = int(parsed.path.rsplit("/", 1)[-1])
