@@ -75,12 +75,12 @@ class ProviderError(Exception):
 
 
 class HttpTransport:
-    def get_json(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: int = 20) -> Dict[str, Any]:
+    def get_json(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: int = 20) -> Any:
         raise NotImplementedError
 
 
 class UrllibHttpTransport(HttpTransport):
-    def get_json(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: int = 20) -> Dict[str, Any]:
+    def get_json(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: int = 20) -> Any:
         request = Request(url, headers=headers or {})
         try:
             with urlopen(request, timeout=timeout) as response:
@@ -141,6 +141,9 @@ class OpenAlexProvider(BaseProvider):
 
     def is_enabled(self) -> bool:
         return bool(self.config.openalex_api_key)
+
+    def _work_id(self, openalex_id: str) -> str:
+        return openalex_id.rsplit("/", 1)[-1] if "/" in openalex_id else openalex_id
 
     def _request(self, path_or_url: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.config.openalex_api_key:
@@ -275,6 +278,10 @@ class OpenAlexProvider(BaseProvider):
             page += 1
         return records[: self.config.max_related_works]
 
+    def _relation_filter_page(self, *, filter_value: str) -> List[Dict[str, Any]]:
+        payload = self._request("/works", params={"filter": filter_value, "per-page": min(200, self.config.max_related_works or 100)})
+        return [self._normalize_work(item) for item in payload.get("results", [])[: self.config.max_related_works]]
+
     def relations(self, seed_record: Dict[str, Any]) -> Dict[str, Any]:
         if not self.is_enabled():
             return {"references": [], "citations": [], "degraded": ["OpenAlex non configurato."]}
@@ -292,19 +299,99 @@ class OpenAlexProvider(BaseProvider):
                 seed_record = self._normalize_work(refreshed)
         if not openalex_id:
             return {"references": [], "citations": [], "degraded": ["OpenAlex ID non disponibile per recuperare il grafo."]}
+        work_id = self._work_id(openalex_id)
         referenced = seed_record.get("graph_hints", {}).get("referenced_works") or []
-        cited_by_url = seed_record.get("graph_hints", {}).get("cited_by_api_url")
         references: List[Dict[str, Any]] = []
-        for raw_id in referenced[: self.config.max_related_works]:
-            raw = self._get_work(raw_id)
-            if raw:
-                references.append(self._normalize_work(raw))
         citations: List[Dict[str, Any]] = []
-        if cited_by_url:
-            citations = [self._normalize_work(item) for item in self._paginate_url(cited_by_url)]
         degraded: List[str] = []
+        try:
+            references = self._relation_filter_page(filter_value=f"cited_by:{work_id}")
+        except ProviderError as error:
+            degraded.append(f"openalex references filter failed: {error.message}")
+            for raw_id in referenced[: self.config.max_related_works]:
+                raw = self._get_work(raw_id)
+                if raw:
+                    references.append(self._normalize_work(raw))
+        try:
+            citations = self._relation_filter_page(filter_value=f"cites:{work_id}")
+        except ProviderError as error:
+            degraded.append(f"openalex citations filter failed: {error.message}")
+            cited_by_url = seed_record.get("graph_hints", {}).get("cited_by_api_url")
+            if cited_by_url:
+                citations = [self._normalize_work(item) for item in self._paginate_url(cited_by_url)]
         if len(referenced) > self.config.max_related_works:
             degraded.append("Lista references troncata al limite configurato.")
+        return {"references": references, "citations": citations, "degraded": degraded}
+
+
+class OpenCitationsProvider(BaseProvider):
+    capability = ProviderCapability(
+        name="opencitations",
+        requires_credentials=False,
+        credential_type="access_token",
+        supported_identifiers=["doi"],
+        features=["references", "citations", "reference_count", "citation_count"],
+        trust_priority=55,
+        limitations=["DOI-based coverage only", "metadata payload is sparse compared with OpenAlex"],
+        absent_credential_behavior="available without credentials; token is optional but recommended for API usage",
+        base_url="https://api.opencitations.net/index/v2",
+    )
+
+    def _request(self, path: str) -> List[Dict[str, Any]]:
+        headers = {"authorization": self.config.opencitations_access_token} if self.config.opencitations_access_token else None
+        payload = self.transport.get_json(f"{self.capability.base_url}{path}", headers=headers, timeout=self.config.request_timeout_seconds)
+        if isinstance(payload, list):
+            return payload
+        raise ProviderError(self.capability.name, "Unexpected OpenCitations response format.")
+
+    def _normalize_relation_row(self, row: Dict[str, Any], *, direction: str) -> Optional[Dict[str, Any]]:
+        field = "cited" if direction == "references" else "citing"
+        identifier_blob = row.get(field, "")
+        doi = extract_doi_from_text(identifier_blob or "")
+        if not doi:
+            return None
+        return {
+            "doi": doi,
+            "title": None,
+            "authors": [],
+            "year": int(str(row.get("creation", ""))[:4]) if str(row.get("creation", ""))[:4].isdigit() else None,
+            "published_at": row.get("creation"),
+            "manual": False,
+            "raw_sources": [
+                {
+                    "provider": self.capability.name,
+                    "provider_id": row.get("oci") or doi,
+                    "source_url": f"{self.capability.base_url}/{direction}/doi:{quote(doi, safe='')}",
+                    "retrieved_at": utcnow(),
+                    "is_primary": False,
+                    "payload": row,
+                }
+            ],
+        }
+
+    def lookup(self, identifier_type: str, value: str) -> Optional[Dict[str, Any]]:
+        return None
+
+    def search(self, query: str) -> List[Dict[str, Any]]:
+        return []
+
+    def relations(self, seed_record: Dict[str, Any]) -> Dict[str, Any]:
+        doi = normalize_doi(seed_record.get("doi"))
+        if not doi:
+            return {"references": [], "citations": [], "degraded": []}
+        try:
+            reference_rows = self._request(f"/references/doi:{quote(doi, safe='')}")
+        except ProviderError as error:
+            return {"references": [], "citations": [], "degraded": [f"opencitations references failed: {error.message}"]}
+        try:
+            citation_rows = self._request(f"/citations/doi:{quote(doi, safe='')}")
+        except ProviderError as error:
+            citation_rows = []
+            degraded = [f"opencitations citations failed: {error.message}"]
+        else:
+            degraded = []
+        references = [item for item in (self._normalize_relation_row(row, direction="references") for row in reference_rows) if item]
+        citations = [item for item in (self._normalize_relation_row(row, direction="citations") for row in citation_rows) if item]
         return {"references": references, "citations": citations, "degraded": degraded}
 
 
@@ -533,6 +620,7 @@ class ProviderRegistry:
         self.providers: List[BaseProvider] = [
             OpenAlexProvider(config, transport),
             CrossrefProvider(config, transport),
+            OpenCitationsProvider(config, transport),
             EuropePMCProvider(config, transport),
         ]
 
@@ -606,7 +694,23 @@ class ProviderRegistry:
             references = self._merge_relation_lists(references, payload.get("references", []))
             citations = self._merge_relation_lists(citations, payload.get("citations", []))
             degraded.extend(payload.get("degraded", []))
+        references = self._enrich_sparse_relations(references, credential_states)
+        citations = self._enrich_sparse_relations(citations, credential_states)
         return {"relations": {"references": references, "citations": citations, "similar": []}, "provider": "aggregated", "degraded": degraded}
+
+    def _enrich_sparse_relations(self, items: List[Dict[str, Any]], credential_states: Dict[str, str]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+        for item in items:
+            if item.get("title") or not item.get("doi"):
+                enriched.append(item)
+                continue
+            lookup = self.lookup("doi", item["doi"], credential_states)
+            record = lookup.get("record")
+            if record:
+                enriched.append(self._merge_record(item, [record]))
+            else:
+                enriched.append(item)
+        return enriched
 
     def _merge_record(self, seed: Dict[str, Any], enrichments: List[Dict[str, Any]]) -> Dict[str, Any]:
         merged = dict(seed)

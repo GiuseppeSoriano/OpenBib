@@ -32,6 +32,7 @@ def load_dotenv(env_path: str = ".env") -> Dict[str, str]:
 @dataclass(frozen=True)
 class AppConfig:
     openalex_api_key: Optional[str]
+    opencitations_access_token: Optional[str]
     crossref_mailto: Optional[str]
     europepmc_enabled: bool
     europepmc_email: Optional[str]
@@ -47,6 +48,7 @@ class AppConfig:
         load_dotenv(env_path)
         return cls(
             openalex_api_key=os.getenv("OPENALEX_API_KEY"),
+            opencitations_access_token=os.getenv("OPENCITATIONS_ACCESS_TOKEN"),
             crossref_mailto=os.getenv("CROSSREF_MAILTO"),
             europepmc_enabled=_parse_bool(os.getenv("EUROPEPMC_ENABLED"), True),
             europepmc_email=os.getenv("EUROPEPMC_EMAIL") or os.getenv("CROSSREF_MAILTO"),

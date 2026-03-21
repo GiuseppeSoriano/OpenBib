@@ -19,7 +19,8 @@ def openalex_work(
     venue: str,
     authors: list[str],
     referenced: list[str],
-    cited_by_filter: str,
+    cited_by_filter: str | None,
+    cited_by_count: int = 3,
 ) -> dict:
     return {
         "id": f"https://openalex.org/{work_id}",
@@ -43,12 +44,12 @@ def openalex_work(
             for index, name in enumerate(authors)
         ],
         "referenced_works": [f"https://openalex.org/{item}" for item in referenced],
-        "cited_by_api_url": f"https://api.openalex.org/works?filter=cites:{cited_by_filter}",
+        "cited_by_api_url": f"https://api.openalex.org/works?filter=cites:{cited_by_filter}" if cited_by_filter else None,
         "topics": [{"display_name": "literature discovery"}],
         "keywords": [{"display_name": "citation graph"}],
         "concepts": [{"display_name": "academic search"}],
         "abstract_inverted_index": {"Visual": [0], "scholarly": [1], "discovery": [2]},
-        "cited_by_count": 3,
+        "cited_by_count": cited_by_count,
     }
 
 
@@ -103,6 +104,61 @@ OPENALEX_FIXTURES = {
         referenced=["W1003"],
         cited_by_filter="W1009",
     ),
+    "W4406032263": openalex_work(
+        "W4406032263",
+        "10.48550/arxiv.2501.00663",
+        "Titans: Learning to Memorize at Test Time",
+        2024,
+        venue="arXiv (Cornell University)",
+        authors=["Ali Behrouz", "Peilin Zhong", "Vahab Mirrokni"],
+        referenced=[],
+        cited_by_filter=None,
+        cited_by_count=6,
+    ),
+    "W4406031111": openalex_work(
+        "W4406031111",
+        "10.1000/titans.ref.001",
+        "Memory-Augmented Sequence Models for Long Contexts",
+        2023,
+        venue="Neural Sequence Journal",
+        authors=["A. Researcher"],
+        referenced=[],
+        cited_by_filter=None,
+        cited_by_count=1,
+    ),
+    "W4406032222": openalex_work(
+        "W4406032222",
+        "10.1000/titans.cite.001",
+        "Evaluating Titans for Extended Context Benchmarks",
+        2025,
+        venue="Benchmarks Letters",
+        authors=["B. Evaluator"],
+        referenced=[],
+        cited_by_filter=None,
+        cited_by_count=0,
+    ),
+    "W4406033333": openalex_work(
+        "W4406033333",
+        "10.1000/opencitations.ref.001",
+        "Citation Graph Recovery with Open Data",
+        2022,
+        venue="Open Citation Systems",
+        authors=["C. Graph"],
+        referenced=[],
+        cited_by_filter=None,
+        cited_by_count=0,
+    ),
+    "W4406034444": openalex_work(
+        "W4406034444",
+        "10.1000/opencitations.cite.001",
+        "Incoming Citation Discovery Beyond Primary Providers",
+        2025,
+        venue="Open Citation Systems",
+        authors=["D. Fallback"],
+        referenced=[],
+        cited_by_filter=None,
+        cited_by_count=0,
+    ),
 }
 
 
@@ -110,7 +166,7 @@ class MockTransport:
     def __init__(self) -> None:
         self.calls: dict[str, int] = {}
 
-    def get_json(self, url: str, *, headers=None, timeout: int = 20) -> dict:
+    def get_json(self, url: str, *, headers=None, timeout: int = 20):
         self.calls[url] = self.calls.get(url, 0) + 1
         if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2020.001" in url:
             return OPENALEX_FIXTURES["W1001"]
@@ -120,6 +176,22 @@ class MockTransport:
             return OPENALEX_FIXTURES["W1008"]
         if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Flitdisc.2024.009" in url:
             return OPENALEX_FIXTURES["W1009"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.48550%2Farxiv.2501.00663" in url:
+            return OPENALEX_FIXTURES["W4406032263"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Fopencitations.ref.001" in url:
+            return OPENALEX_FIXTURES["W4406033333"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Fopencitations.cite.001" in url:
+            return OPENALEX_FIXTURES["W4406034444"]
+        if "api.openalex.org/works/https%3A%2F%2Fdoi.org%2F10.1000%2Fopencitations.missing.001" in url:
+            return {
+                **OPENALEX_FIXTURES["W4406032263"],
+                "id": "https://openalex.org/W4406099999",
+                "doi": "https://doi.org/10.1000/opencitations.missing.001",
+                "display_name": "Sparse Provider Coverage for Citation Testing",
+                "referenced_works": [],
+                "cited_by_api_url": None,
+                "cited_by_count": 0,
+            }
         if "api.openalex.org/works/W1001" in url:
             return OPENALEX_FIXTURES["W1001"]
         if "api.openalex.org/works/W1003" in url:
@@ -130,13 +202,49 @@ class MockTransport:
             return OPENALEX_FIXTURES["W1008"]
         if "api.openalex.org/works/W1009" in url:
             return OPENALEX_FIXTURES["W1009"]
+        if "api.openalex.org/works/W4406032263" in url:
+            return OPENALEX_FIXTURES["W4406032263"]
+        if "api.openalex.org/works/W4406031111" in url:
+            return OPENALEX_FIXTURES["W4406031111"]
+        if "api.openalex.org/works/W4406032222" in url:
+            return OPENALEX_FIXTURES["W4406032222"]
+        if "api.openalex.org/works/W4406033333" in url:
+            return OPENALEX_FIXTURES["W4406033333"]
+        if "api.openalex.org/works/W4406034444" in url:
+            return OPENALEX_FIXTURES["W4406034444"]
+        if "api.openalex.org/works/W4406099999" in url:
+            return {
+                **OPENALEX_FIXTURES["W4406032263"],
+                "id": "https://openalex.org/W4406099999",
+                "doi": "https://doi.org/10.1000/opencitations.missing.001",
+                "display_name": "Sparse Provider Coverage for Citation Testing",
+                "referenced_works": [],
+                "cited_by_api_url": None,
+                "cited_by_count": 0,
+            }
         if "filter=cites%3AW1001" in url or "filter=cites:W1001" in url:
             return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1004"]]}
+        if "filter=cited_by%3AW1001" in url or "filter=cited_by:W1001" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1003"]]}
         if "filter=cites%3AW1004" in url or "filter=cites:W1004" in url:
             return {"meta": {"count": 0}, "results": []}
+        if "filter=cited_by%3AW1004" in url or "filter=cited_by:W1004" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1001"]]}
         if "filter=cites%3AW1008" in url or "filter=cites:W1008" in url:
             return {"meta": {"count": 0}, "results": []}
+        if "filter=cited_by%3AW1008" in url or "filter=cited_by:W1008" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1004"]]}
         if "filter=cites%3AW1009" in url or "filter=cites:W1009" in url:
+            return {"meta": {"count": 0}, "results": []}
+        if "filter=cited_by%3AW1009" in url or "filter=cited_by:W1009" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W1003"]]}
+        if "filter=cited_by%3AW4406032263" in url or "filter=cited_by:W4406032263" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W4406031111"]]}
+        if "filter=cites%3AW4406032263" in url or "filter=cites:W4406032263" in url:
+            return {"meta": {"count": 1}, "results": [OPENALEX_FIXTURES["W4406032222"]]}
+        if "filter=cited_by%3AW4406099999" in url or "filter=cited_by:W4406099999" in url:
+            return {"meta": {"count": 0}, "results": []}
+        if "filter=cites%3AW4406099999" in url or "filter=cites:W4406099999" in url:
             return {"meta": {"count": 0}, "results": []}
         if "api.crossref.org/works/" in url:
             doi = url.split("/works/", 1)[1].split("?", 1)[0].replace("%2F", "/")
@@ -156,6 +264,26 @@ class MockTransport:
             }
         if "api.crossref.org/works?" in url:
             return {"message": {"items": []}}
+        if "api.opencitations.net/index/v2/references/doi:10.1000/opencitations.missing.001" in url or "api.opencitations.net/index/v2/references/doi:10.1000%2Fopencitations.missing.001" in url:
+            return [
+                {
+                    "oci": "oci:1-1",
+                    "citing": "doi:10.1000/opencitations.missing.001",
+                    "cited": "doi:10.1000/opencitations.ref.001",
+                    "creation": "2024-01-01",
+                }
+            ]
+        if "api.opencitations.net/index/v2/citations/doi:10.1000/opencitations.missing.001" in url or "api.opencitations.net/index/v2/citations/doi:10.1000%2Fopencitations.missing.001" in url:
+            return [
+                {
+                    "oci": "oci:1-2",
+                    "citing": "doi:10.1000/opencitations.cite.001",
+                    "cited": "doi:10.1000/opencitations.missing.001",
+                    "creation": "2025-01-01",
+                }
+            ]
+        if "api.opencitations.net/index/v2/references/" in url or "api.opencitations.net/index/v2/citations/" in url:
+            return []
         if "europepmc" in url:
             return {"resultList": {"result": []}}
         raise AssertionError(f"Unexpected URL requested in test: {url}")
@@ -167,6 +295,7 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.db_path = str(Path(self.tempdir.name) / "test.sqlite3")
         self.config = AppConfig(
             openalex_api_key="test-openalex-key",
+            opencitations_access_token=None,
             crossref_mailto="tests@example.com",
             europepmc_enabled=True,
             europepmc_email="tests@example.com",
@@ -249,6 +378,55 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=True)
         self.assertEqual(live["references"]["summary"]["count"], 1)
         self.assertEqual(live["citations"]["summary"]["count"], 1)
+
+    def test_titans_relations_are_recovered_from_openalex_filters(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.48550/arxiv.2501.00663")["paper"]
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=True)
+        reference_titles = {item["paper"]["title"] for item in live["references"]["items"]}
+        citation_titles = {item["paper"]["title"] for item in live["citations"]["items"]}
+        self.assertIn(OPENALEX_FIXTURES["W4406031111"]["display_name"], reference_titles)
+        self.assertIn(OPENALEX_FIXTURES["W4406032222"]["display_name"], citation_titles)
+        self.assertGreaterEqual(live["references"]["summary"]["count"], 1)
+        self.assertGreaterEqual(live["citations"]["summary"]["count"], 1)
+
+    def test_empty_legacy_snapshots_are_invalidated_and_reloaded(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.48550/arxiv.2501.00663")["paper"]
+        with self.service._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO paper_relation_snapshots (
+                    paper_id, direction, status, items_json, summary_json, source_summary_json,
+                    degraded_json, fetched_at, expires_at, updated_at
+                ) VALUES (?, 'references', 'fresh', '[]', '{\"count\":0}', '[]', '[]', '2026-03-21T00:00:00+00:00', '2099-01-01T00:00:00+00:00', '2026-03-21T00:00:00+00:00')
+                """,
+                (paper["id"],),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO paper_relation_snapshots (
+                    paper_id, direction, status, items_json, summary_json, source_summary_json,
+                    degraded_json, fetched_at, expires_at, updated_at
+                ) VALUES (?, 'citations', 'fresh', '[]', '{\"count\":0}', '[]', '[]', '2026-03-21T00:00:00+00:00', '2099-01-01T00:00:00+00:00', '2026-03-21T00:00:00+00:00')
+                """,
+                (paper["id"],),
+            )
+            connection.commit()
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=False)
+        self.assertFalse(live["cache_hit"])
+        reference_titles = {item["paper"]["title"] for item in live["references"]["items"]}
+        citation_titles = {item["paper"]["title"] for item in live["citations"]["items"]}
+        self.assertIn(OPENALEX_FIXTURES["W4406031111"]["display_name"], reference_titles)
+        self.assertIn(OPENALEX_FIXTURES["W4406032222"]["display_name"], citation_titles)
+
+    def test_opencitations_fallback_recovers_missing_openalex_relations(self) -> None:
+        paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/opencitations.missing.001")["paper"]
+        live = self.service.get_live_relations(self.user["id"], paper["id"], direction="all", force_refresh=True)
+        reference_dois = {item["paper"]["doi"] for item in live["references"]["items"]}
+        citation_dois = {item["paper"]["doi"] for item in live["citations"]["items"]}
+        self.assertIn("10.1000/opencitations.ref.001", reference_dois)
+        self.assertIn("10.1000/opencitations.cite.001", citation_dois)
+        self.assertGreaterEqual(live["references"]["summary"]["count"], 1)
+        self.assertGreaterEqual(live["citations"]["summary"]["count"], 1)
 
     def test_graph_edge_state_becomes_retrieved_after_directional_refresh(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004")["paper"]

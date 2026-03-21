@@ -1370,14 +1370,16 @@ class ReferenceManagerService:
         direction: str,
         items: Sequence[Dict[str, Any]],
         degraded: Sequence[str],
+        sources_used: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
         fetched_at = utcnow()
         expires_at = iso_plus_seconds(self._relation_snapshot_ttl_seconds(direction))
-        sources_used = []
-        for item in items:
-            for provider in item.get("edge", {}).get("providers", []):
-                if provider not in sources_used:
-                    sources_used.append(provider)
+        normalized_sources = list(dict.fromkeys(sources_used or []))
+        if not normalized_sources:
+            for item in items:
+                for provider in item.get("edge", {}).get("providers", []):
+                    if provider not in normalized_sources:
+                        normalized_sources.append(provider)
         summary = self._relation_summary_from_items(items)
         status = "fresh"
         connection.execute(
@@ -1402,7 +1404,7 @@ class ReferenceManagerService:
                 status,
                 json_dumps(list(items)),
                 json_dumps(summary),
-                json_dumps(sources_used),
+                json_dumps(normalized_sources),
                 json_dumps(list(dict.fromkeys(degraded))),
                 fetched_at,
                 expires_at,
@@ -1722,15 +1724,37 @@ class ReferenceManagerService:
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
         directions = self._graph_modes(direction)
+        credential_states = self._credential_states(user_id)
+        available_sources = [
+            provider.capability.name
+            for provider in getattr(self.providers, "providers", [])
+            if not hasattr(self.providers, "_provider_available") or self.providers._provider_available(provider, credential_states)
+        ]
         with self._connect() as connection:
             paper_row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
             if not paper_row:
                 raise ServiceError("Paper non trovato.", status=404)
             snapshots = {item: self._load_relation_snapshot(connection, paper_id, item) for item in directions}
+            metadata = json_loads(paper_row["metadata_json"], {})
+            relation_hints = {
+                "references": metadata.get("reference_count"),
+                "citations": metadata.get("citation_count"),
+            }
             stale_directions = [
                 item
                 for item, snapshot in snapshots.items()
-                if force_refresh or snapshot is None or snapshot["stale"]
+                if force_refresh
+                or snapshot is None
+                or snapshot["stale"]
+                or (
+                    snapshot.get("summary", {}).get("count", 0) == 0
+                    and not snapshot.get("sources_used")
+                )
+                or (
+                    snapshot.get("summary", {}).get("count", 0) == 0
+                    and isinstance(relation_hints.get(item), int)
+                    and relation_hints.get(item, 0) > 0
+                )
             ]
             seed_record = self._build_relation_seed_record(connection, paper_row)
         degraded: List[str] = []
@@ -1745,7 +1769,7 @@ class ReferenceManagerService:
                 "paper_relations_live_refresh",
                 {"paper_id": paper_id, "directions": stale_directions, "force_refresh": force_refresh},
             )
-            relations_payload = self._cached_provider_relations(seed_record, self._credential_states(user_id), force_refresh=True)
+            relations_payload = self._cached_provider_relations(seed_record, credential_states, force_refresh=True)
             degraded = relations_payload.get("degraded", [])
             with self._connect() as connection:
                 for item in stale_directions:
@@ -1759,6 +1783,7 @@ class ReferenceManagerService:
                         direction=item,
                         items=relation_items,
                         degraded=degraded,
+                        sources_used=available_sources,
                     )
                     refreshed.append(item)
                 connection.commit()
