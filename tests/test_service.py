@@ -414,6 +414,25 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         self.assertEqual(status["stores"]["graph"]["backend"], "sqlite")
         self.assertEqual(status["stores"]["read_models"]["backend"], "sqlite")
 
+    def test_get_graph_reads_from_graph_projection(self) -> None:
+        seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        reference_id = seed["graph"]["references"][0]["paper"]["id"]
+        with self.service._connect() as connection:
+            connection.execute("DELETE FROM paper_relationships")
+            connection.commit()
+        graph = self.service.get_graph(self.user["id"], [seed["id"]], depth=1, limit=20)
+        edge_pairs = {(edge["source"], edge["target"]) for edge in graph["edges"] if edge["type"] == "cites"}
+        self.assertIn((f"paper:{seed['id']}", f"paper:{reference_id}"), edge_pairs)
+
+    def test_recommend_uses_graph_store_neighbors(self) -> None:
+        seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        candidate = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004")["paper"]
+        with self.service._connect() as connection:
+            connection.execute("DELETE FROM paper_relationships")
+            connection.commit()
+        recommendations = self.service.recommend(self.user["id"], seed_paper_ids=[seed["id"]])["results"]
+        self.assertTrue(any(item["paper"]["id"] == candidate["id"] for item in recommendations))
+
     def test_live_relations_are_fetched_and_cached(self) -> None:
         paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
         first_call_count = sum(self.transport.calls.values())

@@ -56,6 +56,12 @@ class GraphStore:
     def describe(self) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def get_paper_graph(self, seed_paper_ids: list[int], *, depth: int, limit: int) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_related_paper_ids(self, paper_id: int) -> Dict[str, list[int]]:
+        raise NotImplementedError
+
 
 class ReadModelStore:
     def initialize(self) -> None:
@@ -169,6 +175,97 @@ class SqliteGraphStore(GraphStore):
             node_count = connection.execute("SELECT COUNT(*) FROM graph_projection_nodes").fetchone()[0]
             edge_count = connection.execute("SELECT COUNT(*) FROM graph_projection_edges").fetchone()[0]
         return {"backend": "sqlite", "nodes": node_count, "edges": edge_count}
+
+    def get_paper_graph(self, seed_paper_ids: list[int], *, depth: int, limit: int) -> Dict[str, Any]:
+        nodes: Dict[str, Dict[str, Any]] = {}
+        edges: list[Dict[str, Any]] = []
+        seen_edges: set[str] = set()
+        frontier = [f"paper:{paper_id}" for paper_id in seed_paper_ids]
+        seen = set(frontier)
+        with self._connect() as connection:
+            for key in frontier:
+                row = connection.execute(
+                    "SELECT entity_key, payload_json FROM graph_projection_nodes WHERE entity_key = ?",
+                    (key,),
+                ).fetchone()
+                if row:
+                    payload = json_loads(row["payload_json"], {})
+                    nodes[key] = {"id": key, "type": "paper", "label": payload.get("title") or key}
+            for _level in range(max(1, depth)):
+                next_frontier: list[str] = []
+                for key in frontier:
+                    rows = connection.execute(
+                        """
+                        SELECT edge_key, source_key, target_key, relation_type, payload_json
+                        FROM graph_projection_edges
+                        WHERE relation_type = 'cites' AND (source_key = ? OR target_key = ?)
+                        LIMIT ?
+                        """,
+                        (key, key, limit),
+                    ).fetchall()
+                    for row in rows:
+                        source_key = row["source_key"]
+                        target_key = row["target_key"]
+                        if row["edge_key"] not in seen_edges:
+                            seen_edges.add(row["edge_key"])
+                            payload = json_loads(row["payload_json"], {})
+                            edges.append(
+                                {
+                                    "source": source_key,
+                                    "target": target_key,
+                                    "type": row["relation_type"],
+                                    "state": payload.get("state", "projected"),
+                                    "providers": payload.get("providers", []),
+                                }
+                            )
+                        for neighbor_key in (source_key, target_key):
+                            if neighbor_key not in seen and len(nodes) < limit:
+                                node_row = connection.execute(
+                                    "SELECT payload_json FROM graph_projection_nodes WHERE entity_key = ?",
+                                    (neighbor_key,),
+                                ).fetchone()
+                                if node_row:
+                                    payload = json_loads(node_row["payload_json"], {})
+                                    nodes[neighbor_key] = {"id": neighbor_key, "type": "paper", "label": payload.get("title") or neighbor_key}
+                                    seen.add(neighbor_key)
+                                    next_frontier.append(neighbor_key)
+                frontier = next_frontier
+                if not frontier or len(nodes) >= limit:
+                    break
+        return {"nodes": list(nodes.values())[:limit], "edges": edges[:limit]}
+
+    def get_related_paper_ids(self, paper_id: int) -> Dict[str, list[int]]:
+        key = f"paper:{paper_id}"
+        outgoing: list[int] = []
+        incoming: list[int] = []
+        with self._connect() as connection:
+            out_rows = connection.execute(
+                """
+                SELECT target_key FROM graph_projection_edges
+                WHERE relation_type = 'cites' AND source_key = ?
+                ORDER BY target_key ASC
+                """,
+                (key,),
+            ).fetchall()
+            in_rows = connection.execute(
+                """
+                SELECT source_key FROM graph_projection_edges
+                WHERE relation_type = 'cites' AND target_key = ?
+                ORDER BY source_key ASC
+                """,
+                (key,),
+            ).fetchall()
+        for row in out_rows:
+            try:
+                outgoing.append(int(str(row["target_key"]).split(":", 1)[1]))
+            except (IndexError, ValueError):
+                continue
+        for row in in_rows:
+            try:
+                incoming.append(int(str(row["source_key"]).split(":", 1)[1]))
+            except (IndexError, ValueError):
+                continue
+        return {"outgoing": outgoing, "incoming": incoming}
 
 
 class SqliteReadModelStore(ReadModelStore):
@@ -303,6 +400,92 @@ class Neo4jGraphStore(GraphStore):
 
     def describe(self) -> Dict[str, Any]:
         return {"backend": "neo4j", "database": self.database or "default"}
+
+    def get_paper_graph(self, seed_paper_ids: list[int], *, depth: int, limit: int) -> Dict[str, Any]:
+        nodes: Dict[str, Dict[str, Any]] = {}
+        edges: list[Dict[str, Any]] = []
+        seen_edges: set[tuple[str, str, str]] = set()
+        frontier = [f"paper:{paper_id}" for paper_id in seed_paper_ids]
+        seen = set(frontier)
+        with self.driver.session(database=self.database) as session:
+            for seed_key in frontier:
+                record = session.run(
+                    "MATCH (p:Paper {key: $key}) RETURN p.payload_json AS payload_json",
+                    key=seed_key,
+                ).single()
+                if record and record["payload_json"]:
+                    payload = json_loads(record["payload_json"], {})
+                    nodes[seed_key] = {"id": seed_key, "type": "paper", "label": payload.get("title") or seed_key}
+            for _level in range(max(1, depth)):
+                next_frontier: list[str] = []
+                for key in frontier:
+                    result = session.run(
+                        """
+                        MATCH (p:Paper {key: $key})-[r:CITES]-(neighbor:Paper)
+                        RETURN p.key AS source_key, neighbor.key AS target_key, r.payload_json AS payload_json, neighbor.payload_json AS neighbor_payload_json
+                        LIMIT $limit
+                        """,
+                        key=key,
+                        limit=limit,
+                    )
+                    for row in result:
+                        source_key = row["source_key"]
+                        target_key = row["target_key"]
+                        payload = json_loads(row["payload_json"], {})
+                        edge_key = (source_key, target_key, "cites")
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            edges.append(
+                                {
+                                    "source": source_key,
+                                    "target": target_key,
+                                    "type": "cites",
+                                    "state": payload.get("state", "projected"),
+                                    "providers": payload.get("providers", []),
+                                }
+                            )
+                        if target_key not in seen and len(nodes) < limit:
+                            neighbor_payload = json_loads(row["neighbor_payload_json"], {})
+                            nodes[target_key] = {"id": target_key, "type": "paper", "label": neighbor_payload.get("title") or target_key}
+                            seen.add(target_key)
+                            next_frontier.append(target_key)
+                frontier = next_frontier
+                if not frontier or len(nodes) >= limit:
+                    break
+        return {"nodes": list(nodes.values())[:limit], "edges": edges[:limit]}
+
+    def get_related_paper_ids(self, paper_id: int) -> Dict[str, list[int]]:
+        key = f"paper:{paper_id}"
+        outgoing: list[int] = []
+        incoming: list[int] = []
+        with self.driver.session(database=self.database) as session:
+            out_rows = session.run(
+                """
+                MATCH (:Paper {key: $key})-[:CITES]->(neighbor:Paper)
+                RETURN neighbor.key AS key
+                ORDER BY neighbor.key ASC
+                """,
+                key=key,
+            )
+            in_rows = session.run(
+                """
+                MATCH (neighbor:Paper)-[:CITES]->(:Paper {key: $key})
+                RETURN neighbor.key AS key
+                ORDER BY neighbor.key ASC
+                """,
+                key=key,
+            )
+            for row in out_rows:
+                try:
+                    outgoing.append(int(str(row["key"]).split(":", 1)[1]))
+                except (IndexError, ValueError):
+                    continue
+            for row in in_rows:
+                try:
+                    incoming.append(int(str(row["key"]).split(":", 1)[1]))
+                except (IndexError, ValueError):
+                    continue
+        return {"outgoing": outgoing, "incoming": incoming}
 
 
 class MongoReadModelStore(ReadModelStore):

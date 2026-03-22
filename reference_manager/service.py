@@ -3107,81 +3107,46 @@ class ReferenceManagerService:
         return self.get_paper(winner_id, user_id=user_id)
 
     def get_graph(self, user_id: int, seed_paper_ids: Sequence[int], depth: int = 1, limit: int = 50) -> Dict[str, Any]:
-        nodes: Dict[str, Dict[str, Any]] = {}
-        edges: List[Dict[str, Any]] = []
-        seen_edges: set[Tuple[str, str, str]] = set()
-        frontier = list(seed_paper_ids)
-        seen = set(frontier)
+        projection = self.graph_store.get_paper_graph(list(seed_paper_ids), depth=depth, limit=limit)
+        nodes: Dict[str, Dict[str, Any]] = {node["id"]: dict(node) for node in projection.get("nodes", [])}
+        edges: List[Dict[str, Any]] = list(projection.get("edges", []))
+        seen_edges: set[Tuple[str, str, str]] = {
+            (edge["source"], edge["target"], edge["type"])
+            for edge in edges
+        }
         with self._connect() as connection:
-            for paper_id in seed_paper_ids:
-                paper = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
-                if paper:
-                    nodes[f"paper:{paper_id}"] = {"id": f"paper:{paper_id}", "type": "paper", "label": paper["title"]}
-            for _level in range(depth):
-                next_frontier: List[int] = []
-                for paper_id in frontier:
-                    relations = connection.execute(
-                        """
-                        SELECT * FROM paper_relationships
-                        WHERE (source_paper_id = ? OR target_paper_id = ?) AND relation_type = ?
-                        LIMIT ?
-                        """,
-                        (paper_id, paper_id, GRAPH_RELATION_TYPE, limit),
-                    ).fetchall()
-                    for relation in relations:
-                        source_id = relation["source_paper_id"]
-                        target_id = relation["target_paper_id"]
-                        metadata = json_loads(relation["metadata_json"], {})
-                        for target in (source_id, target_id):
-                            if target not in seen and len(nodes) < limit:
-                                row = connection.execute("SELECT * FROM papers WHERE id = ?", (target,)).fetchone()
-                                if row:
-                                    nodes[f"paper:{target}"] = {"id": f"paper:{target}", "type": "paper", "label": row["title"]}
-                                    seen.add(target)
-                                    next_frontier.append(target)
-                        if len(edges) < limit:
-                            edge_key = (f"paper:{source_id}", f"paper:{target_id}", GRAPH_RELATION_TYPE)
-                            if edge_key not in seen_edges:
-                                seen_edges.add(edge_key)
-                                edges.append(
-                                    {
-                                        "source": f"paper:{source_id}",
-                                        "target": f"paper:{target_id}",
-                                        "type": GRAPH_RELATION_TYPE,
-                                        "explanation": relation["explanation"],
-                                        "state": metadata.get("aggregate_state", "unknown"),
-                                        "providers": metadata.get("source_providers", []),
-                                    }
-                                )
-                    author_rows = connection.execute(
-                        """
-                        SELECT authors.id, authors.canonical_name
-                        FROM paper_authors
-                        JOIN authors ON authors.id = paper_authors.author_id
-                        WHERE paper_authors.paper_id = ?
-                        """,
-                        (paper_id,),
-                    ).fetchall()
-                    for author in author_rows:
-                        nodes[f"author:{author['id']}"] = {"id": f"author:{author['id']}", "type": "author", "label": author["canonical_name"]}
-                        edge_key = (f"author:{author['id']}", f"paper:{paper_id}", "authored")
-                        if edge_key not in seen_edges and len(edges) < limit:
-                            seen_edges.add(edge_key)
-                            edges.append({"source": f"author:{author['id']}", "target": f"paper:{paper_id}", "type": "authored"})
-                    topic_rows = connection.execute(
-                        "SELECT topic FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?",
-                        (paper_id,),
-                    ).fetchall()
-                    for topic in topic_rows:
-                        topic_id = normalize_text(topic["topic"])
-                        nodes[f"topic:{topic_id}"] = {"id": f"topic:{topic_id}", "type": "topic", "label": topic["topic"]}
-                        edge_key = (f"paper:{paper_id}", f"topic:{topic_id}", "topic")
-                        if edge_key not in seen_edges and len(edges) < limit:
-                            seen_edges.add(edge_key)
-                            edges.append({"source": f"paper:{paper_id}", "target": f"topic:{topic_id}", "type": "topic"})
-                frontier = next_frontier
-                if not frontier or len(nodes) >= limit:
-                    break
+            paper_ids = [
+                int(node_id.split(":", 1)[1])
+                for node_id, node in nodes.items()
+                if node.get("type") == "paper" and ":" in node_id
+            ]
+            for paper_id in paper_ids:
+                author_rows = connection.execute(
+                    """
+                    SELECT authors.id, authors.canonical_name
+                    FROM paper_authors
+                    JOIN authors ON authors.id = paper_authors.author_id
+                    WHERE paper_authors.paper_id = ?
+                    """,
+                    (paper_id,),
+                ).fetchall()
+                for author in author_rows:
+                    nodes[f"author:{author['id']}"] = {"id": f"author:{author['id']}", "type": "author", "label": author["canonical_name"]}
+                    edge_key = (f"author:{author['id']}", f"paper:{paper_id}", "authored")
+                    if edge_key not in seen_edges and len(edges) < limit:
+                        seen_edges.add(edge_key)
+                        edges.append({"source": f"author:{author['id']}", "target": f"paper:{paper_id}", "type": "authored"})
+                topic_rows = connection.execute(
+                    "SELECT topic FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?",
+                    (paper_id,),
+                ).fetchall()
+                for topic in topic_rows:
+                    topic_id = normalize_text(topic["topic"])
+                    nodes[f"topic:{topic_id}"] = {"id": f"topic:{topic_id}", "type": "topic", "label": topic["topic"]}
+                    edge_key = (f"paper:{paper_id}", f"topic:{topic_id}", "topic")
+                    if edge_key not in seen_edges and len(edges) < limit:
+                        seen_edges.add(edge_key)
+                        edges.append({"source": f"paper:{paper_id}", "target": f"topic:{topic_id}", "type": "topic"})
         degraded = []
         if len(nodes) >= limit:
             degraded.append("Grafo limitato per densita eccessiva.")
@@ -3253,9 +3218,8 @@ class ReferenceManagerService:
         followed_topics: set[str] = set()
         with self._connect() as connection:
             if collection_id:
-                self._require_collection_access(user_id, collection_id)
-                rows = connection.execute("SELECT paper_id FROM collection_papers WHERE collection_id = ?", (collection_id,)).fetchall()
-                seen_papers.update(row["paper_id"] for row in rows)
+                collection = self.get_collection(user_id, collection_id)
+                seen_papers.update(paper["id"] for paper in collection["papers"])
             feedback_rows = connection.execute(
                 """
                 SELECT target_id, feedback_type FROM feedback
@@ -3285,30 +3249,17 @@ class ReferenceManagerService:
                     if topic_row:
                         followed_topics.add(topic_row["topic"])
             for seed_id in seen_papers:
-                relations = connection.execute(
-                    """
-                    SELECT target_paper_id FROM paper_relationships
-                    WHERE source_paper_id = ? AND relation_type = ?
-                    """,
-                    (seed_id, GRAPH_RELATION_TYPE),
-                ).fetchall()
-                for relation in relations:
-                    if relation["target_paper_id"] in seen_papers:
+                graph_neighbors = self.graph_store.get_related_paper_ids(seed_id)
+                for target_id in graph_neighbors["outgoing"]:
+                    if target_id in seen_papers:
                         continue
-                    candidate_scores[relation["target_paper_id"]] += 2.0
-                    explanations[relation["target_paper_id"]].append("Collegato ai seed tramite references persistite nel grafo.")
-                incoming_relations = connection.execute(
-                    """
-                    SELECT source_paper_id FROM paper_relationships
-                    WHERE target_paper_id = ? AND relation_type = ?
-                    """,
-                    (seed_id, GRAPH_RELATION_TYPE),
-                ).fetchall()
-                for relation in incoming_relations:
-                    if relation["source_paper_id"] in seen_papers:
+                    candidate_scores[target_id] += 2.0
+                    explanations[target_id].append("Collegato ai seed tramite references persistite nel grafo.")
+                for source_id in graph_neighbors["incoming"]:
+                    if source_id in seen_papers:
                         continue
-                    candidate_scores[relation["source_paper_id"]] += 2.5
-                    explanations[relation["source_paper_id"]].append("Collegato ai seed tramite citations persistite nel grafo.")
+                    candidate_scores[source_id] += 2.5
+                    explanations[source_id].append("Collegato ai seed tramite citations persistite nel grafo.")
                 topic_rows = connection.execute(
                     """
                     SELECT topic FROM topic_assignments WHERE entity_type = 'paper' AND entity_id = ?
