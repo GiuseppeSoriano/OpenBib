@@ -42,6 +42,14 @@ class AppConfig:
     search_cache_ttl_seconds: int
     reference_cache_ttl_seconds: int
     citation_cache_ttl_seconds: int
+    graph_store_backend: str = "sqlite"
+    read_model_store_backend: str = "sqlite"
+    mongodb_uri: Optional[str] = None
+    mongodb_database: str = "reference_manager"
+    neo4j_uri: Optional[str] = None
+    neo4j_username: Optional[str] = None
+    neo4j_password: Optional[str] = None
+    neo4j_database: Optional[str] = None
 
     @classmethod
     def from_env(cls, env_path: str = ".env") -> "AppConfig":
@@ -58,4 +66,12 @@ class AppConfig:
             search_cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "3600")),
             reference_cache_ttl_seconds=int(os.getenv("REFERENCE_CACHE_TTL_SECONDS", str(7 * 24 * 3600))),
             citation_cache_ttl_seconds=int(os.getenv("CITATION_CACHE_TTL_SECONDS", str(12 * 3600))),
+            graph_store_backend=os.getenv("GRAPH_STORE_BACKEND", "sqlite"),
+            read_model_store_backend=os.getenv("READ_MODEL_STORE_BACKEND", "sqlite"),
+            mongodb_uri=os.getenv("MONGODB_URI"),
+            mongodb_database=os.getenv("MONGODB_DATABASE", "reference_manager"),
+            neo4j_uri=os.getenv("NEO4J_URI"),
+            neo4j_username=os.getenv("NEO4J_USERNAME"),
+            neo4j_password=os.getenv("NEO4J_PASSWORD"),
+            neo4j_database=os.getenv("NEO4J_DATABASE"),
         )

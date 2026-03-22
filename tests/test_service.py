@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -375,6 +376,43 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         library = self.service.list_workspace_papers(self.user["id"])
         self.assertEqual(len(library), 1)
         self.assertEqual(library[0]["user_context"]["in_collections_count"], 1)
+
+    def test_sqlite_projection_stores_are_materialized(self) -> None:
+        collection = self.service.create_collection(self.user["id"], "Projection Test")
+        paper = self.service.add_paper(
+            self.user["id"],
+            identifier_type="doi",
+            value="10.1000/litdisc.2020.001",
+            collection_id=collection["id"],
+        )["paper"]
+        with sqlite3.connect(self.service.read_model_store.db_path) as connection:
+            library_view = connection.execute(
+                "SELECT payload_json FROM projection_views WHERE view_type = 'library' AND view_key = ?",
+                (str(self.user["id"]),),
+            ).fetchone()
+            collection_view = connection.execute(
+                "SELECT payload_json FROM projection_views WHERE view_type = 'collection' AND view_key = ?",
+                (f"{self.user['id']}:{collection['id']}",),
+            ).fetchone()
+        with sqlite3.connect(self.service.graph_store.db_path) as connection:
+            saved_edge = connection.execute(
+                "SELECT payload_json FROM graph_projection_edges WHERE edge_key = ?",
+                (f"user:{self.user['id']}->saved->paper:{paper['id']}",),
+            ).fetchone()
+            contains_edge = connection.execute(
+                "SELECT payload_json FROM graph_projection_edges WHERE edge_key = ?",
+                (f"collection:{collection['id']}->contains->paper:{paper['id']}",),
+            ).fetchone()
+        self.assertIsNotNone(library_view)
+        self.assertIsNotNone(collection_view)
+        self.assertIsNotNone(saved_edge)
+        self.assertIsNotNone(contains_edge)
+
+    def test_system_status_reports_storage_topology(self) -> None:
+        status = self.service.system_status()
+        self.assertEqual(status["stores"]["transactional"]["backend"], "sqlite")
+        self.assertEqual(status["stores"]["graph"]["backend"], "sqlite")
+        self.assertEqual(status["stores"]["read_models"]["backend"], "sqlite")
 
     def test_live_relations_are_fetched_and_cached(self) -> None:
         paper = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
