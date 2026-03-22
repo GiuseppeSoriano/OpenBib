@@ -53,6 +53,20 @@ NEO4J_DATABASE=neo4j
 
 The Python runtime must have `pymongo` and `neo4j` installed.
 
+## Seed Demo Data
+
+To wipe the current demo dataset and repopulate the transactional store, graph store, and read-model store with a small verification dataset:
+
+```bash
+PYTHONPATH=. python3 scripts/seed_demo_data.py
+```
+
+The seed creates:
+
+- the frontend demo account `demo.preview@reference-manager.test` with password `Preview2026Demo`;
+- a collaborator account `demo.collaborator@reference-manager.test` with the same password;
+- five saved papers, two collections, reading states, shared notes, collaborator membership, and a small internal citation graph.
+
 ## Notes
 
 - runtime retrieval is designed for real external providers; tests use a mocked HTTP transport so the suite remains offline and deterministic;
