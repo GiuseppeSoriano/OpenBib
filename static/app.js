@@ -3,6 +3,7 @@ const byId = (id) => document.getElementById(id);
 const DEMO_PASSWORD = "Preview2026Demo";
 const DEMO_NAME = "Frontend Preview";
 const DEMO_STORAGE_KEY = "reference-manager-demo-email";
+const PRIMARY_DEMO_EMAIL = "demo.preview@reference-manager.test";
 const CITATION_PAGE_SIZE = 10;
 const VALID_STATES = [
   "non_visto",
@@ -172,14 +173,28 @@ function updateSessionStatus(message, tone = "warning", detail = "") {
 function demoCandidateEmails() {
   const stored = window.localStorage.getItem(DEMO_STORAGE_KEY);
   const candidates = [];
-  if (stored) {
+  candidates.push(PRIMARY_DEMO_EMAIL);
+  if (stored && stored !== PRIMARY_DEMO_EMAIL) {
     candidates.push(stored);
   }
-  candidates.push("demo.preview@reference-manager.test");
   for (let index = 1; index <= 6; index += 1) {
     candidates.push(`demo.preview.${index}@reference-manager.test`);
   }
   return [...new Set(candidates)];
+}
+
+function bootstrapHasVisibleCollections(bootstrap) {
+  return Array.isArray(bootstrap?.collections) && bootstrap.collections.length > 0;
+}
+
+function shouldKeepCurrentDemoSession(bootstrap, forceReset) {
+  if (forceReset || !bootstrap?.me) {
+    return false;
+  }
+  if (bootstrap.me.email === PRIMARY_DEMO_EMAIL) {
+    return true;
+  }
+  return bootstrapHasVisibleCollections(bootstrap);
 }
 
 async function loginDemoUser(email) {
@@ -215,7 +230,7 @@ async function ensureDemoSession(forceReset = false) {
 
   const candidates = demoCandidateEmails();
   const bootstrap = await api("/api/bootstrap");
-  if (bootstrap.me && candidates.includes(bootstrap.me.email) && !forceReset) {
+  if (shouldKeepCurrentDemoSession(bootstrap, forceReset) && candidates.includes(bootstrap.me.email)) {
     state.demoCredentials = { email: bootstrap.me.email, password: DEMO_PASSWORD };
     return bootstrap;
   }
@@ -226,19 +241,50 @@ async function ensureDemoSession(forceReset = false) {
 
   let lastError = null;
   for (const email of candidates) {
+    if (email === PRIMARY_DEMO_EMAIL) {
+      try {
+        await loginDemoUser(email);
+        const candidateBootstrap = await api("/api/bootstrap");
+        if (candidateBootstrap?.me?.email === email) {
+          return candidateBootstrap;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    try {
+      await loginDemoUser(email);
+      const candidateBootstrap = await api("/api/bootstrap");
+      if (bootstrapHasVisibleCollections(candidateBootstrap) || email === PRIMARY_DEMO_EMAIL) {
+        return candidateBootstrap;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (email === PRIMARY_DEMO_EMAIL) {
+      try {
+        await registerDemoUser(email);
+        return await api("/api/bootstrap");
+      } catch (error) {
+        if (!error.message.includes("gia registrata")) {
+          lastError = error;
+        }
+      }
+      continue;
+    }
+
     try {
       await registerDemoUser(email);
-      return await api("/api/bootstrap");
+      const candidateBootstrap = await api("/api/bootstrap");
+      if (bootstrapHasVisibleCollections(candidateBootstrap)) {
+        return candidateBootstrap;
+      }
     } catch (error) {
       if (!error.message.includes("gia registrata")) {
         lastError = error;
       }
-    }
-    try {
-      await loginDemoUser(email);
-      return await api("/api/bootstrap");
-    } catch (error) {
-      lastError = error;
     }
   }
   throw lastError || new Error("Impossibile inizializzare la sessione demo.");
@@ -660,7 +706,7 @@ function renderStats() {
   const counts = state.system?.counts || {};
   const stats = [
     { label: "Utenti", value: counts.users ?? 0 },
-    { label: "Collections", value: counts.collections ?? 0 },
+    { label: "Collections globali", value: counts.collections ?? 0 },
     { label: "Paper salvati", value: counts.library_entries ?? 0 },
     { label: "Paper catalogo", value: counts.catalog_papers ?? 0 },
     { label: "Cache discovery", value: counts.discovery_cache ?? 0 },
