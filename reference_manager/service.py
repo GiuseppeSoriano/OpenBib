@@ -742,12 +742,16 @@ class ReferenceManagerService:
                     (collection_id, paper_id, user_id, now),
                 )
         self._audit(user_id, "collection_created", "collection", collection_id, f"Creata collezione {name}.")
+        if seed_paper_ids:
+            with self._connect() as connection:
+                for paper in self._hydrate_papers_by_ids(connection, user_id, seed_paper_ids):
+                    self._project_library_membership(user_id, paper, origin="collection_seed")
+                    self._project_collection_membership(user_id, collection_id, paper)
         collection = self._refresh_collection_view(user_id, collection_id)
         self._project_collection_ownership(user_id, collection)
+        self._refresh_collection_list_view(user_id)
         if seed_paper_ids:
             self._refresh_library_view(user_id)
-            for paper in collection["papers"]:
-                self._project_collection_membership(user_id, collection_id, paper)
         return collection
 
     def get_collection(self, user_id: int, collection_id: int) -> Dict[str, Any]:
@@ -758,29 +762,10 @@ class ReferenceManagerService:
         return self._refresh_collection_view(user_id, collection_id)
 
     def list_collections(self, user_id: int) -> List[Dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT DISTINCT collections.*
-                FROM collections
-                LEFT JOIN collection_members ON collection_members.collection_id = collections.id
-                WHERE collections.owner_id = ? OR collection_members.user_id = ?
-                ORDER BY collections.updated_at DESC
-                """,
-                (user_id, user_id),
-            ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "description": row["description"],
-                "visibility": row["visibility"],
-                "status": row["status"],
-                "tags": json_loads(row["tags_json"], []),
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+        view = self.read_model_store.get_view("collections", self._collections_view_key(user_id))
+        if view and "collections" in view:
+            return view["collections"]
+        return self._refresh_collection_list_view(user_id)
 
     def list_workspace_papers(self, user_id: int, collection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         if collection_id is not None:
@@ -809,6 +794,7 @@ class ReferenceManagerService:
         self._audit(user_id, "collection_updated", "collection", collection_id, f"Aggiornata collezione {name}.")
         collection_view = self._refresh_collection_view(user_id, collection_id)
         self._project_graph_collection(collection_view)
+        self._refresh_collection_list_view(user_id)
         return collection_view
 
     def duplicate_collection(self, user_id: int, collection_id: int) -> Dict[str, Any]:
@@ -858,9 +844,12 @@ class ReferenceManagerService:
         self._audit(user_id, "collection_merged", "collection", target_id, "Merge di collezioni completato.")
         merged = self._refresh_collection_view(user_id, target_id)
         self._project_graph_collection(merged)
-        self._refresh_library_view(user_id)
         for paper in merged["papers"]:
+            self._project_library_membership(user_id, paper, origin="collection_merge")
             self._project_collection_membership(user_id, target_id, paper)
+        self._refresh_library_view(user_id)
+        self._refresh_collection_list_view(user_id)
+        merged = self._refresh_collection_view(user_id, target_id)
         return merged
 
     def save_snapshot(self, user_id: int, collection_id: int, name: str, view_type: str, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -1373,18 +1362,17 @@ class ReferenceManagerService:
                 "discovery_id": discovery_id,
                 "discovered_only": paper_id is None,
             }
+        graph_membership = self.graph_store.get_user_paper_membership(user_id, paper_id)
         library_row = self._library_entry_for_paper(connection, user_id, paper_id)
-        collection_rows = connection.execute(
-            """
-            SELECT collections.id, collections.name
-            FROM collection_papers
-            JOIN collections ON collections.id = collection_papers.collection_id
-            LEFT JOIN collection_members ON collection_members.collection_id = collections.id
-            WHERE collection_papers.paper_id = ? AND (collections.owner_id = ? OR collection_members.user_id = ?)
-            ORDER BY collections.name ASC
-            """,
-            (paper_id, user_id, user_id),
-        ).fetchall()
+        collection_ids = graph_membership.get("collection_ids") or []
+        if collection_ids:
+            placeholders = ",".join("?" for _ in collection_ids)
+            collection_rows = connection.execute(
+                f"SELECT id, name FROM collections WHERE id IN ({placeholders}) ORDER BY name ASC",
+                tuple(collection_ids),
+            ).fetchall()
+        else:
+            collection_rows = []
         state_rows = connection.execute(
             """
             SELECT is_hidden, is_excluded, is_ignored
@@ -1393,10 +1381,11 @@ class ReferenceManagerService:
             """,
             (user_id, paper_id),
         ).fetchall()
+        saved_by_user = graph_membership.get("saved_by_user", False) or library_row is not None
         return {
-            "saved_by_user": library_row is not None,
+            "saved_by_user": saved_by_user,
             "library_entry_id": library_row["id"] if library_row else None,
-            "saved_at": library_row["saved_at"] if library_row else None,
+            "saved_at": graph_membership.get("saved_at") or (library_row["saved_at"] if library_row else None),
             "in_collections_count": len(collection_rows),
             "collection_ids": [row["id"] for row in collection_rows],
             "collection_names": [row["name"] for row in collection_rows],
@@ -1404,7 +1393,7 @@ class ReferenceManagerService:
             "is_excluded": any(bool(row["is_excluded"]) for row in state_rows),
             "is_ignored": any(bool(row["is_ignored"]) for row in state_rows),
             "discovery_id": discovery_id,
-            "discovered_only": library_row is None,
+            "discovered_only": not saved_by_user,
         }
 
     def _decorate_paper_for_user(
@@ -1436,10 +1425,44 @@ class ReferenceManagerService:
     def _library_view_key(self, user_id: int) -> str:
         return str(user_id)
 
+    def _collections_view_key(self, user_id: int) -> str:
+        return str(user_id)
+
     def _collection_view_key(self, user_id: int, collection_id: int) -> str:
         return f"{user_id}:{collection_id}"
 
+    def _hydrate_papers_by_ids(
+        self,
+        connection: sqlite3.Connection,
+        user_id: Optional[int],
+        paper_ids: Sequence[int],
+    ) -> List[Dict[str, Any]]:
+        ordered_ids = list(dict.fromkeys(int(paper_id) for paper_id in paper_ids))
+        if not ordered_ids:
+            return []
+        placeholders = ",".join("?" for _ in ordered_ids)
+        rows = connection.execute(
+            f"SELECT * FROM papers WHERE id IN ({placeholders}) AND merged_into_paper_id IS NULL",
+            tuple(ordered_ids),
+        ).fetchall()
+        row_by_id = {row["id"]: row for row in rows}
+        papers: List[Dict[str, Any]] = []
+        for paper_id in ordered_ids:
+            row = row_by_id.get(paper_id)
+            if row:
+                papers.append(self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row)))
+        return papers
+
     def _load_library_papers_from_sql(self, connection: sqlite3.Connection, user_id: int) -> List[Dict[str, Any]]:
+        graph_memberships = self.graph_store.list_saved_papers(user_id)
+        if graph_memberships:
+            graph_papers = self._hydrate_papers_by_ids(
+                connection,
+                user_id,
+                [membership["paper_id"] for membership in graph_memberships],
+            )
+            if graph_papers:
+                return graph_papers
         rows = connection.execute(
             """
             SELECT papers.*
@@ -1454,16 +1477,25 @@ class ReferenceManagerService:
 
     def _load_collection_payload_from_sql(self, connection: sqlite3.Connection, user_id: int, collection_id: int) -> Dict[str, Any]:
         collection = self._require_collection_access(user_id, collection_id)
-        papers = connection.execute(
-            """
-            SELECT papers.*
-            FROM collection_papers
-            JOIN papers ON papers.id = collection_papers.paper_id
-            WHERE collection_papers.collection_id = ? AND papers.merged_into_paper_id IS NULL
-            ORDER BY papers.year DESC, papers.title ASC
-            """,
-            (collection_id,),
-        ).fetchall()
+        graph_memberships = self.graph_store.list_collection_papers(collection_id)
+        if graph_memberships:
+            paper_payload = self._hydrate_papers_by_ids(
+                connection,
+                user_id,
+                [membership["paper_id"] for membership in graph_memberships],
+            )
+        else:
+            papers = connection.execute(
+                """
+                SELECT papers.*
+                FROM collection_papers
+                JOIN papers ON papers.id = collection_papers.paper_id
+                WHERE collection_papers.collection_id = ? AND papers.merged_into_paper_id IS NULL
+                ORDER BY papers.year DESC, papers.title ASC
+                """,
+                (collection_id,),
+            ).fetchall()
+            paper_payload = [self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row)) for row in papers]
         notes = connection.execute(
             """
             SELECT * FROM notes
@@ -1493,7 +1525,7 @@ class ReferenceManagerService:
             "visibility": collection["visibility"],
             "status": collection["status"],
             "tags": json_loads(collection["tags_json"], []),
-            "papers": [self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row)) for row in papers],
+            "papers": paper_payload,
             "notes": [self._row_to_note(row) for row in notes],
             "members": [dict(row) for row in members],
             "snapshots": [dict(row) for row in snapshots],
@@ -1504,6 +1536,49 @@ class ReferenceManagerService:
             papers = self._load_library_papers_from_sql(connection, user_id)
         self.read_model_store.upsert_view("library", self._library_view_key(user_id), {"papers": papers, "updated_at": utcnow()})
         return papers
+
+    def _refresh_collection_list_view(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._connect() as connection:
+            graph_memberships = self.graph_store.list_user_collections(user_id)
+            collection_ids = [membership["collection_id"] for membership in graph_memberships]
+            if collection_ids:
+                placeholders = ",".join("?" for _ in collection_ids)
+                rows = connection.execute(
+                    f"SELECT * FROM collections WHERE id IN ({placeholders}) ORDER BY updated_at DESC",
+                    tuple(collection_ids),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT DISTINCT collections.*
+                    FROM collections
+                    LEFT JOIN collection_members ON collection_members.collection_id = collections.id
+                    WHERE collections.owner_id = ? OR collection_members.user_id = ?
+                    ORDER BY collections.updated_at DESC
+                    """,
+                    (user_id, user_id),
+                ).fetchall()
+        row_by_id = {row["id"]: row for row in rows}
+        if collection_ids:
+            ordered_rows = [row_by_id[collection_id] for collection_id in collection_ids if collection_id in row_by_id]
+            remaining_rows = [row for row in rows if row["id"] not in set(collection_ids)]
+            ordered_rows.extend(remaining_rows)
+        else:
+            ordered_rows = list(rows)
+        collections = [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "visibility": row["visibility"],
+                "status": row["status"],
+                "tags": json_loads(row["tags_json"], []),
+                "updated_at": row["updated_at"],
+            }
+            for row in ordered_rows
+        ]
+        self.read_model_store.upsert_view("collections", self._collections_view_key(user_id), {"collections": collections, "updated_at": utcnow()})
+        return collections
 
     def _refresh_collection_view(self, user_id: int, collection_id: int) -> Dict[str, Any]:
         with self._connect() as connection:
@@ -1554,10 +1629,21 @@ class ReferenceManagerService:
         user = self.get_user(user_id)
         self._project_graph_user(user)
         self._project_graph_paper(paper)
-        self.graph_store.upsert_edge("user", user_id, "paper", paper["id"], "saved", {"origin": origin, "updated_at": utcnow()})
+        self.graph_store.upsert_edge(
+            "user",
+            user_id,
+            "paper",
+            paper["id"],
+            "saved",
+            {
+                "origin": origin,
+                "saved_at": (paper.get("user_context") or {}).get("saved_at") or utcnow(),
+                "updated_at": utcnow(),
+            },
+        )
 
     def _project_collection_membership(self, user_id: int, collection_id: int, paper: Dict[str, Any]) -> None:
-        collection = self._refresh_collection_view(user_id, collection_id)
+        collection = self._require_collection_access(user_id, collection_id)
         self._project_graph_collection(collection)
         self._project_graph_paper(paper)
         self.graph_store.upsert_edge(
@@ -1566,7 +1652,7 @@ class ReferenceManagerService:
             "paper",
             paper["id"],
             "contains",
-            {"collection_id": collection_id, "updated_at": utcnow()},
+            {"collection_id": collection_id, "added_at": utcnow(), "updated_at": utcnow()},
         )
 
     def _project_collection_ownership(self, user_id: int, collection: Dict[str, Any]) -> None:
@@ -2168,11 +2254,12 @@ class ReferenceManagerService:
                 paper_id=paper["id"],
             )
         saved_paper = self.get_paper(paper["id"], user_id=user_id)
-        self._refresh_library_view(user_id)
         self._project_library_membership(user_id, saved_paper, origin=identifier_type)
         if collection_id:
-            self._refresh_collection_view(user_id, collection_id)
             self._project_collection_membership(user_id, collection_id, saved_paper)
+        self._refresh_library_view(user_id)
+        if collection_id:
+            self._refresh_collection_view(user_id, collection_id)
         self._audit(user_id, "paper_added", "paper", paper["id"], f"Aggiunto paper {paper['title']}.", details={"collection_id": collection_id})
         return {"paper": saved_paper, "provider": source_provider, "degraded": degraded}
 
@@ -2212,11 +2299,12 @@ class ReferenceManagerService:
             details={"discovery_id": discovery_id, "collection_id": collection_id},
         )
         saved_paper = self.get_paper(paper["id"], user_id=user_id)
-        self._refresh_library_view(user_id)
         self._project_library_membership(user_id, saved_paper, origin="discovery")
         if collection_id:
-            self._refresh_collection_view(user_id, collection_id)
             self._project_collection_membership(user_id, collection_id, saved_paper)
+        self._refresh_library_view(user_id)
+        if collection_id:
+            self._refresh_collection_view(user_id, collection_id)
         return {"paper": saved_paper, "saved": True}
 
     def get_live_relations(
@@ -2710,19 +2798,9 @@ class ReferenceManagerService:
         filters = filters or {}
         query_norm = normalize_text(query)
         local_results: List[Dict[str, Any]] = []
+        library_papers = self.list_workspace_papers(user_id)
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT papers.*
-                FROM library_entries
-                JOIN papers ON papers.id = library_entries.paper_id
-                WHERE library_entries.user_id = ? AND papers.merged_into_paper_id IS NULL
-                ORDER BY library_entries.saved_at DESC, papers.year DESC, papers.title ASC
-                """,
-                (user_id,),
-            ).fetchall()
-            for row in rows:
-                paper = self._decorate_paper_for_user(connection, user_id, self._row_to_paper(row))
+            for paper in library_papers:
                 searchable = " ".join(
                     [
                         paper["title"] or "",
@@ -2735,37 +2813,21 @@ class ReferenceManagerService:
                 )
                 if query_norm and query_norm not in normalize_text(searchable):
                     continue
-                if filters.get("collection_id"):
-                    exists = connection.execute(
-                        "SELECT 1 FROM collection_papers WHERE collection_id = ? AND paper_id = ?",
-                        (filters["collection_id"], row["id"]),
-                    ).fetchone()
-                    if not exists:
-                        continue
+                if filters.get("collection_id") and filters["collection_id"] not in paper.get("user_context", {}).get("collection_ids", []):
+                    continue
                 if filters.get("status"):
                     state = connection.execute(
                         """
                         SELECT 1 FROM user_paper_state
                         WHERE user_id = ? AND paper_id = ? AND status = ?
                         """,
-                        (user_id, row["id"], filters["status"]),
+                        (user_id, paper["id"], filters["status"]),
                     ).fetchone()
                     if not state:
                         continue
                 local_results.append(paper)
         external = self._cached_provider_search(query, self._credential_states(user_id))
-        collection_presence = defaultdict(list)
         with self._connect() as connection:
-            memberships = connection.execute(
-                """
-                SELECT collection_papers.paper_id, collections.name
-                FROM collection_papers
-                JOIN collections ON collections.id = collection_papers.collection_id
-                LEFT JOIN collection_members ON collection_members.collection_id = collections.id
-                WHERE collections.owner_id = ? OR collection_members.user_id = ?
-                """,
-                (user_id, user_id),
-            ).fetchall()
             external_results = []
             for record in external["results"]:
                 provider_name = ((record.get("raw_sources") or [{}])[0].get("provider") or "provider")
@@ -2805,10 +2867,8 @@ class ReferenceManagerService:
                         "user_context": user_context,
                     }
                 )
-        for row in memberships:
-            collection_presence[row["paper_id"]].append(row["name"])
         for paper in local_results:
-            paper["known_in_collections"] = collection_presence.get(paper["id"], [])
+            paper["known_in_collections"] = paper.get("user_context", {}).get("collection_names", [])
         return {"results": local_results, "external_results": external_results, "degraded": external["degraded"]}
 
     def set_paper_state(self, user_id: int, paper_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2860,8 +2920,8 @@ class ReferenceManagerService:
                     """,
                     (user_id, paper_id, payload["feedback_type"], json_dumps(payload), utcnow()),
                 )
-        self._refresh_library_view(user_id)
         self._project_library_membership(user_id, self.get_paper(paper_id, user_id=user_id), origin=payload.get("source", "manual"))
+        self._refresh_library_view(user_id)
         self._audit(user_id, "paper_state_changed", "paper", paper_id, f"Stato paper aggiornato a {status}.")
         return {"paper_id": paper_id, "status": status, "collection_id": collection_id}
 
@@ -2899,8 +2959,8 @@ class ReferenceManagerService:
                 (note_id, payload["body"], utcnow(), user_id),
             )
         if target_type == "paper":
-            self._refresh_library_view(user_id)
             self._project_library_membership(user_id, self.get_paper(target_id, user_id=user_id), origin="note")
+            self._refresh_library_view(user_id)
         if target_type == "collection":
             self._refresh_collection_view(user_id, target_id)
         self._audit(user_id, "note_added", target_type, target_id, "Nota aggiunta.")
@@ -3103,7 +3163,17 @@ class ReferenceManagerService:
                 (winner_id, loser_id, reason, utcnow()),
             )
         self._audit(user_id, "paper_merged", "paper", winner_id, f"Merge completato con record {loser_id}.")
-        self._refresh_library_view(user_id)
+        winner = self.get_paper(winner_id, user_id=user_id)
+        with self._connect() as connection:
+            library_users = [row["user_id"] for row in connection.execute("SELECT DISTINCT user_id FROM library_entries WHERE paper_id = ?", (winner_id,)).fetchall()]
+            collection_ids = [row["collection_id"] for row in connection.execute("SELECT DISTINCT collection_id FROM collection_papers WHERE paper_id = ?", (winner_id,)).fetchall()]
+        for affected_user_id in library_users:
+            self._project_library_membership(affected_user_id, winner, origin="merge")
+            self._refresh_library_view(affected_user_id)
+        for collection_id in collection_ids:
+            self._project_collection_membership(user_id, collection_id, winner)
+            if collection_id in winner.get("user_context", {}).get("collection_ids", []):
+                self._refresh_collection_view(user_id, collection_id)
         return self.get_paper(winner_id, user_id=user_id)
 
     def get_graph(self, user_id: int, seed_paper_ids: Sequence[int], depth: int = 1, limit: int = 50) -> Dict[str, Any]:
@@ -3156,17 +3226,9 @@ class ReferenceManagerService:
         papers: List[Dict[str, Any]] = []
         with self._connect() as connection:
             if collection_id:
-                self._require_collection_access(user_id, collection_id)
-                rows = connection.execute(
-                    """
-                    SELECT papers.*
-                    FROM collection_papers
-                    JOIN papers ON papers.id = collection_papers.paper_id
-                    WHERE collection_papers.collection_id = ?
-                    ORDER BY COALESCE(papers.published_at, printf('%04d-01-01', papers.year)) ASC
-                    """,
-                    (collection_id,),
-                ).fetchall()
+                collection = self.get_collection(user_id, collection_id)
+                papers = list(collection["papers"])
+                rows = []
             elif topic:
                 rows = connection.execute(
                     """
@@ -3189,8 +3251,7 @@ class ReferenceManagerService:
             else:
                 rows = []
         for row in rows:
-            paper = self._row_to_paper(row)
-            papers.append(paper)
+            papers.append(self._row_to_paper(row))
         years = [paper["year"] for paper in papers if paper.get("year")]
         counts = Counter(years)
         growth = [{"year": year, "count": counts[year]} for year in sorted(counts)]
@@ -3388,7 +3449,9 @@ class ReferenceManagerService:
             )
             collection = self._refresh_collection_view(user_id, collection_id)
             self._project_collection_collaborator(notified_user_id, collection, role=role)
+            self._refresh_collection_list_view(notified_user_id)
         self._audit(user_id, "collaborator_invited", "collection", collection_id, f"Invitato {email} come {role}.")
+        self._refresh_collection_list_view(user_id)
         return {"collection_id": collection_id, "email": email, "role": role}
 
     def revoke_collaborator(self, user_id: int, collection_id: int, collaborator_user_id: int) -> None:
@@ -3401,6 +3464,8 @@ class ReferenceManagerService:
         self.read_model_store.delete_view("collection", self._collection_view_key(collaborator_user_id, collection_id))
         self.graph_store.delete_edge("user", collaborator_user_id, "collection", collection_id, "collaborates_on")
         self._refresh_collection_view(user_id, collection_id)
+        self._refresh_collection_list_view(user_id)
+        self._refresh_collection_list_view(collaborator_user_id)
         self._audit(user_id, "collaborator_revoked", "collection", collection_id, f"Revocato accesso a utente {collaborator_user_id}.")
 
     def _parse_bibtex(self, content: str) -> List[Dict[str, Any]]:

@@ -62,6 +62,18 @@ class GraphStore:
     def get_related_paper_ids(self, paper_id: int) -> Dict[str, list[int]]:
         raise NotImplementedError
 
+    def list_saved_papers(self, user_id: int) -> list[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_collection_papers(self, collection_id: int) -> list[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_user_collections(self, user_id: int) -> list[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_user_paper_membership(self, user_id: int, paper_id: int) -> Dict[str, Any]:
+        raise NotImplementedError
+
 
 class ReadModelStore:
     def initialize(self) -> None:
@@ -267,6 +279,132 @@ class SqliteGraphStore(GraphStore):
                 continue
         return {"outgoing": outgoing, "incoming": incoming}
 
+    def list_saved_papers(self, user_id: int) -> list[Dict[str, Any]]:
+        source_key = self._entity_key("user", user_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT target_key, payload_json, updated_at
+                FROM graph_projection_edges
+                WHERE relation_type = 'saved' AND source_key = ?
+                ORDER BY updated_at DESC, target_key ASC
+                """,
+                (source_key,),
+            ).fetchall()
+        memberships: list[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                paper_id = int(str(row["target_key"]).split(":", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            payload = json_loads(row["payload_json"], {})
+            memberships.append(
+                {
+                    "paper_id": paper_id,
+                    "saved_at": payload.get("saved_at") or row["updated_at"],
+                    "origin": payload.get("origin"),
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return memberships
+
+    def list_collection_papers(self, collection_id: int) -> list[Dict[str, Any]]:
+        source_key = self._entity_key("collection", collection_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT target_key, payload_json, updated_at
+                FROM graph_projection_edges
+                WHERE relation_type = 'contains' AND source_key = ?
+                ORDER BY updated_at DESC, target_key ASC
+                """,
+                (source_key,),
+            ).fetchall()
+        memberships: list[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                paper_id = int(str(row["target_key"]).split(":", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            payload = json_loads(row["payload_json"], {})
+            memberships.append(
+                {
+                    "paper_id": paper_id,
+                    "added_at": payload.get("added_at") or row["updated_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return memberships
+
+    def list_user_collections(self, user_id: int) -> list[Dict[str, Any]]:
+        source_key = self._entity_key("user", user_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT target_key, relation_type, payload_json, updated_at
+                FROM graph_projection_edges
+                WHERE source_key = ? AND relation_type IN ('owns', 'collaborates_on')
+                ORDER BY updated_at DESC, target_key ASC
+                """,
+                (source_key,),
+            ).fetchall()
+        memberships: list[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                collection_id = int(str(row["target_key"]).split(":", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            payload = json_loads(row["payload_json"], {})
+            memberships.append(
+                {
+                    "collection_id": collection_id,
+                    "relation_type": row["relation_type"],
+                    "role": payload.get("role") or ("owner" if row["relation_type"] == "owns" else None),
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return memberships
+
+    def get_user_paper_membership(self, user_id: int, paper_id: int) -> Dict[str, Any]:
+        user_key = self._entity_key("user", user_id)
+        paper_key = self._entity_key("paper", paper_id)
+        with self._connect() as connection:
+            saved_row = connection.execute(
+                """
+                SELECT payload_json, updated_at
+                FROM graph_projection_edges
+                WHERE relation_type = 'saved' AND source_key = ? AND target_key = ?
+                """,
+                (user_key, paper_key),
+            ).fetchone()
+            collection_rows = connection.execute(
+                """
+                SELECT DISTINCT c.target_key
+                FROM graph_projection_edges uc
+                JOIN graph_projection_edges c
+                    ON c.source_key = uc.target_key
+                   AND c.relation_type = 'contains'
+                   AND c.target_key = ?
+                WHERE uc.source_key = ?
+                  AND uc.relation_type IN ('owns', 'collaborates_on')
+                ORDER BY c.target_key ASC
+                """,
+                (paper_key, user_key),
+            ).fetchall()
+        collection_ids: list[int] = []
+        for row in collection_rows:
+            try:
+                collection_ids.append(int(str(row["target_key"]).split(":", 1)[1]))
+            except (IndexError, ValueError):
+                continue
+        payload = json_loads(saved_row["payload_json"], {}) if saved_row else {}
+        return {
+            "saved_by_user": saved_row is not None,
+            "saved_at": payload.get("saved_at") if saved_row else None,
+            "origin": payload.get("origin") if saved_row else None,
+            "collection_ids": collection_ids,
+        }
+
 
 class SqliteReadModelStore(ReadModelStore):
     def __init__(self, db_path: str) -> None:
@@ -369,7 +507,8 @@ class Neo4jGraphStore(GraphStore):
             f"MERGE (s:{source_label} {{key: $source_key}}) "
             f"MERGE (t:{target_label} {{key: $target_key}}) "
             f"MERGE (s)-[r:{rel}]->(t) "
-            f"SET r.payload_json = $payload_json, r.updated_at = $updated_at"
+            f"SET r.payload_json = $payload_json, r.updated_at = $updated_at, "
+            f"    r.saved_at = $saved_at, r.added_at = $added_at, r.role = $role"
         )
         with self.driver.session(database=self.database) as session:
             session.run(
@@ -378,6 +517,9 @@ class Neo4jGraphStore(GraphStore):
                 target_key=f"{target_type}:{target_id}",
                 payload_json=json_dumps(payload),
                 updated_at=utcnow(),
+                saved_at=payload.get("saved_at"),
+                added_at=payload.get("added_at"),
+                role=payload.get("role"),
             )
 
     def delete_edge(
@@ -486,6 +628,123 @@ class Neo4jGraphStore(GraphStore):
                 except (IndexError, ValueError):
                     continue
         return {"outgoing": outgoing, "incoming": incoming}
+
+    def list_saved_papers(self, user_id: int) -> list[Dict[str, Any]]:
+        memberships: list[Dict[str, Any]] = []
+        with self.driver.session(database=self.database) as session:
+            rows = session.run(
+                """
+                MATCH (:User {key: $user_key})-[r:SAVED]->(paper:Paper)
+                RETURN paper.key AS paper_key, r.payload_json AS payload_json, r.updated_at AS updated_at
+                ORDER BY r.updated_at DESC, paper.key ASC
+                """,
+                user_key=f"user:{user_id}",
+            )
+            for row in rows:
+                try:
+                    paper_id_value = int(str(row["paper_key"]).split(":", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                payload = json_loads(row["payload_json"], {})
+                memberships.append(
+                    {
+                        "paper_id": paper_id_value,
+                        "saved_at": payload.get("saved_at") or row["updated_at"],
+                        "origin": payload.get("origin"),
+                        "updated_at": row["updated_at"],
+                    }
+                )
+        return memberships
+
+    def list_collection_papers(self, collection_id: int) -> list[Dict[str, Any]]:
+        memberships: list[Dict[str, Any]] = []
+        with self.driver.session(database=self.database) as session:
+            rows = session.run(
+                """
+                MATCH (:Collection {key: $collection_key})-[r:CONTAINS]->(paper:Paper)
+                RETURN paper.key AS paper_key, r.payload_json AS payload_json, r.updated_at AS updated_at
+                ORDER BY r.updated_at DESC, paper.key ASC
+                """,
+                collection_key=f"collection:{collection_id}",
+            )
+            for row in rows:
+                try:
+                    paper_id_value = int(str(row["paper_key"]).split(":", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                payload = json_loads(row["payload_json"], {})
+                memberships.append(
+                    {
+                        "paper_id": paper_id_value,
+                        "added_at": payload.get("added_at") or row["updated_at"],
+                        "updated_at": row["updated_at"],
+                    }
+                )
+        return memberships
+
+    def list_user_collections(self, user_id: int) -> list[Dict[str, Any]]:
+        memberships: list[Dict[str, Any]] = []
+        with self.driver.session(database=self.database) as session:
+            rows = session.run(
+                """
+                MATCH (:User {key: $user_key})-[r]->(collection:Collection)
+                WHERE type(r) IN ['OWNS', 'COLLABORATES_ON']
+                RETURN collection.key AS collection_key, type(r) AS relation_type, r.payload_json AS payload_json, r.updated_at AS updated_at
+                ORDER BY r.updated_at DESC, collection.key ASC
+                """,
+                user_key=f"user:{user_id}",
+            )
+            for row in rows:
+                try:
+                    collection_id_value = int(str(row["collection_key"]).split(":", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                relation_type = str(row["relation_type"]).lower()
+                payload = json_loads(row["payload_json"], {})
+                memberships.append(
+                    {
+                        "collection_id": collection_id_value,
+                        "relation_type": relation_type,
+                        "role": payload.get("role") or ("owner" if relation_type == "owns" else None),
+                        "updated_at": row["updated_at"],
+                    }
+                )
+        return memberships
+
+    def get_user_paper_membership(self, user_id: int, paper_id: int) -> Dict[str, Any]:
+        with self.driver.session(database=self.database) as session:
+            saved_row = session.run(
+                """
+                MATCH (:User {key: $user_key})-[r:SAVED]->(:Paper {key: $paper_key})
+                RETURN r.payload_json AS payload_json
+                LIMIT 1
+                """,
+                user_key=f"user:{user_id}",
+                paper_key=f"paper:{paper_id}",
+            ).single()
+            collection_rows = session.run(
+                """
+                MATCH (:User {key: $user_key})-[membership]->(collection:Collection)-[:CONTAINS]->(:Paper {key: $paper_key})
+                WHERE type(membership) IN ['OWNS', 'COLLABORATES_ON']
+                RETURN DISTINCT collection.key AS collection_key
+                ORDER BY collection.key ASC
+                """,
+                user_key=f"user:{user_id}",
+                paper_key=f"paper:{paper_id}",
+            )
+            collection_ids: list[int] = []
+            for row in collection_rows:
+                try:
+                    collection_ids.append(int(str(row["collection_key"]).split(":", 1)[1]))
+                except (IndexError, ValueError):
+                    continue
+        payload = json_loads(saved_row["payload_json"], {}) if saved_row else {}
+        return {
+            "saved_by_user": saved_row is not None,
+            "saved_at": payload.get("saved_at") if saved_row else None,
+            "origin": payload.get("origin") if saved_row else None,
+            "collection_ids": collection_ids,
+        }
 
 
 class MongoReadModelStore(ReadModelStore):

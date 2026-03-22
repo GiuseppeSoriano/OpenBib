@@ -424,6 +424,31 @@ class ReferenceManagerServiceTest(unittest.TestCase):
         edge_pairs = {(edge["source"], edge["target"]) for edge in graph["edges"] if edge["type"] == "cites"}
         self.assertIn((f"paper:{seed['id']}", f"paper:{reference_id}"), edge_pairs)
 
+    def test_library_reads_from_graph_store_when_sql_memberships_are_missing(self) -> None:
+        saved = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
+        with self.service._connect() as connection:
+            connection.execute("DELETE FROM library_entries")
+            connection.commit()
+        library = self.service.list_workspace_papers(self.user["id"])
+        self.assertEqual([item["id"] for item in library], [saved["id"]])
+        hydrated = self.service.get_paper(saved["id"], user_id=self.user["id"])
+        self.assertTrue(hydrated["user_context"]["saved_by_user"])
+
+    def test_collection_reads_from_graph_store_when_sql_memberships_are_missing(self) -> None:
+        collection = self.service.create_collection(self.user["id"], "Graph-backed Collection")
+        saved = self.service.add_paper(
+            self.user["id"],
+            identifier_type="doi",
+            value="10.1000/litdisc.2020.001",
+            collection_id=collection["id"],
+        )["paper"]
+        with self.service._connect() as connection:
+            connection.execute("DELETE FROM collection_papers")
+            connection.commit()
+        refreshed = self.service.get_collection(self.user["id"], collection["id"])
+        self.assertEqual([item["id"] for item in refreshed["papers"]], [saved["id"]])
+        self.assertEqual(refreshed["papers"][0]["user_context"]["collection_ids"], [collection["id"]])
+
     def test_recommend_uses_graph_store_neighbors(self) -> None:
         seed = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2020.001")["paper"]
         candidate = self.service.add_paper(self.user["id"], identifier_type="doi", value="10.1000/litdisc.2021.004")["paper"]
