@@ -1,6 +1,6 @@
 # Reference Manager
 
-Backend-first literature discovery platform implemented with Python standard library components and SQLite.
+Backend-first literature discovery platform with a transactional SQLite core, configurable graph store, and configurable read-model store.
 
 ## Run
 
@@ -21,6 +21,8 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 - persistent backend cache for provider lookup/search/relations responses;
 - differentiated TTLs for references and citations live snapshots;
 - retrieval-run tracking for ingest, refresh, and graph expansion workflows;
+- explicit separation between saved library and temporary discovery results;
+- configurable graph projections (`sqlite` fallback or `neo4j`) and configurable read models (`sqlite` fallback or `mongodb`);
 - graph exploration, recommendations, timelines, feed, notifications, provider documentation, and external-library sync hooks.
 
 ## Environment
@@ -36,9 +38,25 @@ REFERENCE_CACHE_TTL_SECONDS=604800
 CITATION_CACHE_TTL_SECONDS=43200
 ```
 
+To run with real external stores:
+
+```bash
+GRAPH_STORE_BACKEND=neo4j
+READ_MODEL_STORE_BACKEND=mongodb
+MONGODB_URI=mongodb://127.0.0.1:27017
+MONGODB_DATABASE=reference_manager
+NEO4J_URI=bolt://127.0.0.1:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
+NEO4J_DATABASE=neo4j
+```
+
+The Python runtime must have `pymongo` and `neo4j` installed.
+
 ## Notes
 
 - runtime retrieval is designed for real external providers; tests use a mocked HTTP transport so the suite remains offline and deterministic;
 - the HTTP API is exposed under `/api/*`;
+- `/api/system` reports the active transactional, graph, and read-model backends;
 - retrieval-oriented endpoints currently include `/api/papers/add`, `/api/papers/:id/relations`, `/api/papers/refresh`, `/api/papers/expand`, and `/api/retrieval-runs`;
 - the test suite uses `unittest` and runs with `python3 -m unittest`.
