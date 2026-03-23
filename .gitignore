@@ -1,3 +1,11 @@
+# =========================================================
+# Project ignore rules
+# ---------------------------------------------------------
+# This file excludes generated files, local environment
+# settings, system artifacts, caches, and non-versioned
+# project directories from Git tracking.
+# =========================================================
+
 __pycache__/
 .env
 .DS_Store
