@@ -36,6 +36,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://refman:refman@db:5432/refman
+      REDIS_URL: redis://cache:6379/0
     ports:
       - "8000:8000"
     depends_on:

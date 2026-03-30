@@ -1,6 +1,7 @@
 FROM python:3.12-slim AS base
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 RUN adduser --disabled-password --gecos "" appuser
 
@@ -8,6 +9,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
 COPY . .
+RUN chown -R appuser:appuser /app
 
 USER appuser
 
