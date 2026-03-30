@@ -54,7 +54,7 @@ export default function Layout() {
         <div className="sidebar-footer">
           <div className="user-info">
             <span className="user-avatar">
-              {(user?.display_name ?? user?.email ?? "U")[0].toUpperCase()}
+              {(user?.display_name ?? user?.email ?? "U").charAt(0).toUpperCase()}
             </span>
             <span className="user-name">{user?.display_name ?? user?.email}</span>
           </div>
