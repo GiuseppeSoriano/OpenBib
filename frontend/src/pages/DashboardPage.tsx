@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Collection } from "@/types";
-import { FolderOpen, Search, GitFork } from "lucide-react";
+import { FolderOpen, Search, GitFork, Sparkles } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
@@ -12,10 +12,12 @@ export default function DashboardPage() {
   const { data: collections } = useQuery({
     queryKey: ["collections"],
     queryFn: async () => {
-      const { data } = await api.get<{ items: Collection[] }>("/collections");
-      return data.items;
+      const { data } = await api.get<Collection[]>("/collections");
+      return data;
     },
   });
+
+  const totalPapers = collections?.reduce((sum, c) => sum + c.paper_count, 0) ?? 0;
 
   return (
     <div className="dashboard">
@@ -25,6 +27,18 @@ export default function DashboardPage() {
         </h1>
         <p>Your academic reference workspace</p>
       </header>
+
+      {/* Stats */}
+      <div className="dashboard-stats">
+        <div className="stat-card card">
+          <span className="stat-value">{collections?.length ?? 0}</span>
+          <span className="stat-label">Collections</span>
+        </div>
+        <div className="stat-card card">
+          <span className="stat-value">{totalPapers}</span>
+          <span className="stat-label">Papers saved</span>
+        </div>
+      </div>
 
       <div className="dashboard-grid">
         <Link to="/search" className="dashboard-action card">
@@ -47,6 +61,12 @@ export default function DashboardPage() {
           <GitFork size={24} />
           <h3>Citation graph</h3>
           <p>Explore citation networks visually</p>
+        </Link>
+
+        <Link to="/recommendations" className="dashboard-action card">
+          <Sparkles size={24} />
+          <h3>Discover</h3>
+          <p>Find similar papers through co-citation analysis</p>
         </Link>
       </div>
 

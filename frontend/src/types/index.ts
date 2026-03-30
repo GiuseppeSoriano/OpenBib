@@ -88,22 +88,37 @@ export interface Note {
 
 /* ── Graph ──────────────────────────────────────────────── */
 export interface GraphNode {
-  key: string;
-  label: string;
+  id: string;
+  label: string | null;
+  type?: string;
 }
 
 export interface GraphEdge {
   source: string;
   target: string;
-  relation: string;
+  relation_type: string;
 }
 
-export interface GraphResponse {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+/* ── Recommendations ────────────────────────────────────── */
+export interface RecommendationItem {
+  canonical_key: string;
+  title: string;
+  score: number;
+  reason: string;
 }
 
-/* ── Search ─────────────────────────────────────────────── */
+export interface RecommendationResponse {
+  paper_key: string;
+  recommendations: RecommendationItem[];
+}
+
+/* ── Collection Paper (from backend) ────────────────────── */
+export interface CollectionPaper {
+  paper_canonical_key: string;
+  position: number;
+  added_at: string;
+}
+
 export interface SearchResult {
   papers: PaperMetadata[];
   total_count: number;
@@ -112,11 +127,14 @@ export interface SearchResult {
   provider: string;
 }
 
-/* ── Pagination ─────────────────────────────────────────── */
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
   page: number;
   size: number;
-  pages: number;
+}
+
+export interface GraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }

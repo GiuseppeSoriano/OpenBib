@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import api from "@/lib/api";
-import type { SearchResult, PaperMetadata } from "@/types";
-import { Search, ExternalLink, BookOpen } from "lucide-react";
+import type { SearchResult, PaperMetadata, Collection } from "@/types";
+import { Search, ExternalLink, BookOpen, FolderPlus, GitFork, Check } from "lucide-react";
 import "./SearchPage.css";
 
 const PROVIDERS = [
@@ -90,6 +91,40 @@ export default function SearchPage() {
 }
 
 function PaperCard({ paper }: { paper: PaperMetadata }) {
+  const [showCollections, setShowCollections] = useState(false);
+  const [addedTo, setAddedTo] = useState<Set<string>>(new Set());
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowCollections(false);
+      }
+    };
+    if (showCollections) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showCollections]);
+
+  const { data: collections } = useQuery({
+    queryKey: ["collections"],
+    queryFn: async () => {
+      const { data } = await api.get<Collection[]>("/collections");
+      return data;
+    },
+    enabled: showCollections,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async (collectionId: string) => {
+      await api.post(`/collections/${collectionId}/papers`, {
+        paper_canonical_key: paper.canonical_key,
+      });
+    },
+    onSuccess: (_data, collectionId) => {
+      setAddedTo((prev) => new Set(prev).add(collectionId));
+    },
+  });
+
   return (
     <div className="card paper-card">
       <div className="paper-card-top">
@@ -152,6 +187,56 @@ function PaperCard({ paper }: { paper: PaperMetadata }) {
           ))}
         </div>
       )}
+
+      <div className="paper-actions">
+        <div className="add-to-collection" ref={dropdownRef}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowCollections((s) => !s)}
+            title="Add to collection"
+          >
+            <FolderPlus size={14} />
+            Add to collection
+          </button>
+          {showCollections && (
+            <div className="add-to-collection-dropdown">
+              {!collections || collections.length === 0 ? (
+                <div className="no-collections">
+                  No collections yet.{" "}
+                  <Link to="/collections" onClick={() => setShowCollections(false)}>
+                    Create one
+                  </Link>
+                </div>
+              ) : (
+                collections.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => addMutation.mutate(c.id)}
+                    disabled={addedTo.has(c.id) || addMutation.isPending}
+                  >
+                    {addedTo.has(c.id) ? (
+                      <>
+                        <Check size={12} style={{ display: "inline", marginRight: 4 }} />
+                        Added to {c.name}
+                      </>
+                    ) : (
+                      c.name
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        <Link
+          to={`/graph/${encodeURIComponent(paper.canonical_key)}`}
+          className="btn btn-secondary explore-graph-link"
+        >
+          <GitFork size={14} />
+          Explore graph
+        </Link>
+      </div>
     </div>
   );
 }

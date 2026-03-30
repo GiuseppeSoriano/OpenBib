@@ -8,6 +8,7 @@
   display: flex;
   gap: var(--space-sm);
   margin-bottom: var(--space-xl);
+  align-items: stretch;
 }
 
 .search-input-wrap {
@@ -21,15 +22,17 @@
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-light-gray);
+  pointer-events: none;
 }
 .search-input {
   width: 100%;
-  padding-left: 2.5rem;
+  padding-left: 2.5rem !important;
 }
 
 .provider-select {
-  width: 140px;
+  width: 130px !important;
   flex-shrink: 0;
+  flex-grow: 0;
 }
 
 .search-status {
@@ -98,4 +101,122 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-xs);
+}
+
+/* ── Paper card actions (add-to-collection, states, etc.) ─ */
+.paper-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.paper-actions .btn {
+  font-size: 0.8rem;
+  padding: 3px var(--space-sm);
+}
+
+/* ── Add to Collection dropdown ─────────────────────────── */
+.add-to-collection {
+  position: relative;
+}
+.add-to-collection-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  min-width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-xs) 0;
+  margin-top: 4px;
+}
+.add-to-collection-dropdown button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.85rem;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  transition: background 0.1s;
+}
+.add-to-collection-dropdown button:hover {
+  background: rgba(224, 175, 160, 0.1);
+}
+.add-to-collection-dropdown .no-collections {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+/* ── Reading state selector ─────────────────────────────── */
+.state-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.state-selector select {
+  font-size: 0.8rem;
+  padding: 2px var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* ── Tags inline ────────────────────────────────────────── */
+.paper-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: center;
+}
+.paper-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--space-sm);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  background: rgba(70, 63, 58, 0.08);
+  color: var(--color-charcoal);
+}
+.paper-tag button {
+  background: none;
+  border: none;
+  font-size: 0.65rem;
+  color: var(--color-warm-gray);
+  padding: 0;
+  line-height: 1;
+}
+.paper-tag button:hover {
+  color: #c53030;
+}
+.tag-add-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.tag-add-input input {
+  font-size: 0.75rem;
+  padding: 1px var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: 80px;
+}
+
+/* ── Explore graph link ─────────────────────────────────── */
+.explore-graph-link {
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

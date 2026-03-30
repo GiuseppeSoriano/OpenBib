@@ -106,3 +106,43 @@ async def add_member(collection_id: uuid.UUID, body: MemberAdd, user: CurrentUse
 @router.delete("/{collection_id}/members/{member_id}", status_code=204)
 async def remove_member(collection_id: uuid.UUID, member_id: uuid.UUID, user: CurrentUser, db: DB):
     await service.remove_member(db, collection_id, user.id, member_id)
+
+
+# --- Import / Export ---
+
+@router.get("/{collection_id}/export/bibtex")
+async def export_bibtex(collection_id: uuid.UUID, user: OptionalUser, db: DB):
+    from app.collections.import_export import export_bibtex as _export
+    from fastapi.responses import PlainTextResponse
+
+    user_id = user.id if user else None
+    bibtex = await _export(db, collection_id, user_id)
+    return PlainTextResponse(
+        content=bibtex,
+        media_type="application/x-bibtex",
+        headers={"Content-Disposition": f"attachment; filename=collection_{collection_id}.bib"},
+    )
+
+
+@router.post("/{collection_id}/import/dois")
+async def import_dois(collection_id: uuid.UUID, body: dict, user: CurrentUser, db: DB):
+    from app.collections.import_export import import_doi_list
+
+    dois = body.get("dois", [])
+    if not isinstance(dois, list):
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'dois' must be a list of strings")
+    result = await import_doi_list(db, collection_id, user.id, dois)
+    return result
+
+
+@router.post("/{collection_id}/import/keys")
+async def import_keys(collection_id: uuid.UUID, body: dict, user: CurrentUser, db: DB):
+    from app.collections.import_export import import_canonical_keys
+
+    keys = body.get("keys", [])
+    if not isinstance(keys, list):
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'keys' must be a list of strings")
+    result = await import_canonical_keys(db, collection_id, user.id, keys)
+    return result

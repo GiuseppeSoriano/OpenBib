@@ -8,6 +8,7 @@ import SearchPage from "@/pages/SearchPage";
 import CollectionsPage from "@/pages/CollectionsPage";
 import CollectionDetailPage from "@/pages/CollectionDetailPage";
 import GraphPage from "@/pages/GraphPage";
+import RecommendationsPage from "@/pages/RecommendationsPage";
 import SettingsPage from "@/pages/SettingsPage";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/graph/:paperKey" element={<GraphPage />} />
+        <Route path="/recommendations" element={<RecommendationsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />

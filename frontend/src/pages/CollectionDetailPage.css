@@ -1,0 +1,198 @@
+.collection-detail {
+  max-width: 900px;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.cd-header {
+  margin-bottom: var(--space-xl);
+}
+.cd-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+.cd-title-row h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+.cd-description {
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+.cd-meta {
+  color: var(--color-warm-gray);
+  font-size: 0.85rem;
+}
+
+.cd-toolbar {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+.cd-toolbar .btn {
+  font-size: 0.8rem;
+  padding: 4px var(--space-sm);
+}
+
+.cd-import-form {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) !important;
+}
+
+.cd-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.cd-edit-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* ── Add paper form ─────────────────────────────────────── */
+.cd-add-paper {
+  margin-bottom: var(--space-xl);
+}
+.cd-add-form {
+  display: flex;
+  gap: var(--space-sm);
+}
+.cd-add-form .input {
+  flex: 1;
+}
+
+/* ── Paper list ─────────────────────────────────────────── */
+.cd-papers {
+  margin-bottom: var(--space-xl);
+}
+.cd-papers h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+}
+.cd-empty {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  padding: var(--space-lg) 0;
+}
+
+/* ── Collection paper item ──────────────────────────────── */
+.cp-item {
+  margin-bottom: var(--space-sm);
+  padding: var(--space-md) !important;
+}
+.cp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+.cp-key {
+  font-size: 0.9rem;
+  font-weight: 500;
+  word-break: break-all;
+}
+.cp-actions {
+  display: flex;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+.cp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+.cp-notes-toggle {
+  margin-bottom: var(--space-xs);
+}
+.cp-notes-toggle button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  border: none;
+  padding: 2px 0;
+}
+.cp-notes {
+  padding-left: var(--space-md);
+  border-left: 2px solid var(--color-border);
+  margin-bottom: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.note-form-inline {
+  display: flex;
+  gap: var(--space-xs);
+}
+.note-form-inline .input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: var(--space-xs) var(--space-sm);
+}
+.note-form-inline .btn {
+  font-size: 0.8rem;
+  padding: 2px var(--space-sm);
+}
+.note-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+.cp-added {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-warm-gray);
+}
+
+/* ── Notes section (collection-level) ───────────────────── */
+.cd-notes-section {
+  margin-top: var(--space-lg);
+}
+.cd-notes {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.note-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.note-textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-size: 0.9rem;
+}
+.note-item {
+  padding: var(--space-md) !important;
+}
+.note-item p {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: var(--space-xs);
+}
+.note-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--color-warm-gray);
+}
+
+.loading-text {
+  color: var(--color-text-secondary);
+  padding: var(--space-xl) 0;
+  text-align: center;
+}
