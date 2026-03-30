@@ -16,7 +16,7 @@ from app.papers.schemas import (
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
-@router.get("/search", response_model=list[PaperMetadataRead])
+@router.get("/search")
 async def search_papers(
     q: str = Query(min_length=1, max_length=500),
     provider: str | None = None,
@@ -28,21 +28,24 @@ async def search_papers(
     size: int = Query(25, ge=1, le=100),
     redis: Redis = None,
 ):
-    from app.providers.registry import get_registry
+    from dataclasses import asdict
+    from app.providers.registry import search as provider_search
+    from app.providers.base import SearchFilters
 
-    registry = get_registry()
-    results = await registry.search(
-        query=q,
-        provider_name=provider,
+    filters = SearchFilters(
         year_from=year_from,
         year_to=year_to,
         author=author,
         open_access_only=open_access_only,
+    )
+    result = await provider_search(
+        query=q,
+        filters=filters,
         page=page,
         size=size,
-        redis=redis,
+        provider_name=provider or "openalex",
     )
-    return results
+    return asdict(result)
 
 
 @router.get("/{paper_key:path}/states", response_model=list[StateRead])

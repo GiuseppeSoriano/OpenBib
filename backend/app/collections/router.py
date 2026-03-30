@@ -18,13 +18,13 @@ from app.dependencies import DB, CurrentUser, OptionalUser
 router = APIRouter(prefix="/collections", tags=["collections"])
 
 
-@router.get("/", response_model=list[CollectionRead])
+@router.get("", response_model=list[CollectionRead])
 async def list_collections(user: CurrentUser, db: DB):
     rows = await service.list_collections(db, user.id)
     return rows
 
 
-@router.post("/", response_model=CollectionRead, status_code=201)
+@router.post("", response_model=CollectionRead, status_code=201)
 async def create_collection(body: CollectionCreate, user: CurrentUser, db: DB):
     coll = await service.create_collection(db, user.id, body)
     return {**coll.__dict__, "paper_count": 0}

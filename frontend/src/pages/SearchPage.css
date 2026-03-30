@@ -12,6 +12,7 @@
 
 .search-input-wrap {
   flex: 1;
+  min-width: 0;
   position: relative;
 }
 .search-icon {
@@ -22,11 +23,13 @@
   color: var(--color-light-gray);
 }
 .search-input {
+  width: 100%;
   padding-left: 2.5rem;
 }
 
 .provider-select {
-  width: 160px;
+  width: 140px;
+  flex-shrink: 0;
 }
 
 .search-status {

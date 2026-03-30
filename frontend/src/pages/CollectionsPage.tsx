@@ -16,8 +16,8 @@ export default function CollectionsPage() {
   const { data: collections, isLoading } = useQuery({
     queryKey: ["collections"],
     queryFn: async () => {
-      const { data } = await api.get<{ items: Collection[] }>("/collections");
-      return data.items;
+      const { data } = await api.get<Collection[]>("/collections");
+      return data;
     },
   });
 

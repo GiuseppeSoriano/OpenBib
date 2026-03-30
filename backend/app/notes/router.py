@@ -13,7 +13,7 @@ from sqlalchemy import select
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 
-@router.post("/", response_model=NoteRead, status_code=201)
+@router.post("", response_model=NoteRead, status_code=201)
 async def create_note(body: NoteCreate, user: CurrentUser, db: DB):
     note = Note(
         user_id=user.id,
@@ -26,7 +26,7 @@ async def create_note(body: NoteCreate, user: CurrentUser, db: DB):
     return note
 
 
-@router.get("/", response_model=list[NoteRead])
+@router.get("", response_model=list[NoteRead])
 async def list_notes(
     user: CurrentUser,
     db: DB,
