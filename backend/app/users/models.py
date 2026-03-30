@@ -1,7 +1,7 @@
 """User SQLAlchemy model."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,5 +19,5 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc)
+        nullable=False, server_default=func.now(), onupdate=func.now()
     )

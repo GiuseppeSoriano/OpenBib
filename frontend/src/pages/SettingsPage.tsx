@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 
 export default function SettingsPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
   const [saved, setSaved] = useState(false);
 
@@ -12,7 +12,10 @@ export default function SettingsPage() {
     mutationFn: async () => {
       await api.patch("/users/me", { display_name: displayName || null });
     },
-    onSuccess: () => setSaved(true),
+    onSuccess: async () => {
+      await refreshUser();
+      setSaved(true);
+    },
   });
 
   const deleteMutation = useMutation({
