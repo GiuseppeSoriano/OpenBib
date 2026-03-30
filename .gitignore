@@ -1,15 +1,38 @@
 # =========================================================
 # Project ignore rules
-# ---------------------------------------------------------
-# This file excludes generated files, local environment
-# settings, system artifacts, caches, and non-versioned
-# project directories from Git tracking.
 # =========================================================
 
+# ── Python ─────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ── Node / Frontend ───────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── Environment & secrets ─────────────────────────────────
 .env
+.env.local
+.env.production
+
+# ── IDE / OS ──────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Data & caches ─────────────────────────────────────────
 data/
+*.sqlite3
 .conda/
 .conda-pkgs/
 .vendor/
+
+# ── Docker ────────────────────────────────────────────────
+docker-compose.override.yml
