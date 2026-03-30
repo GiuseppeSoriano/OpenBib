@@ -1,2 +1,0 @@
-"""Reference Manager application package."""
-
