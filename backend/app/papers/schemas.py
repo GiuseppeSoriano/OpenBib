@@ -1,5 +1,6 @@
 """Paper Pydantic schemas."""
 
+import uuid
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field
@@ -35,7 +36,7 @@ class StateUpdate(BaseModel):
 class StateRead(BaseModel):
     paper_canonical_key: str
     state: str
-    collection_id: str | None = None
+    collection_id: uuid.UUID | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}

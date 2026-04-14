@@ -9,6 +9,8 @@ from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.schemas import CollectionCreate, CollectionUpdate
 from app.common.exceptions import ForbiddenError, NotFoundError
 
+from fastapi import HTTPException, status as http_status
+
 
 async def get_collection_or_404(db: AsyncSession, collection_id: uuid.UUID) -> Collection:
     coll = await db.get(Collection, collection_id)
@@ -132,7 +134,10 @@ async def add_paper(
         )
     )
     if existing.scalar_one_or_none() is not None:
-        raise NotFoundError("Paper already in collection")  # idempotent-ish
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Paper already in collection",
+        )
 
     max_pos = await db.execute(
         select(func.coalesce(func.max(CollectionPaper.position), -1)).where(
@@ -218,3 +223,54 @@ async def remove_member(
     if member is None:
         raise NotFoundError("Member not found")
     await db.delete(member)
+
+
+async def get_paper_memberships(
+    db: AsyncSession, user_id: uuid.UUID
+) -> dict[str, list[str]]:
+    """Return {paper_canonical_key: [collection_id, ...]} for all user's collections."""
+    stmt = (
+        select(CollectionPaper.paper_canonical_key, CollectionPaper.collection_id)
+        .join(Collection, Collection.id == CollectionPaper.collection_id)
+        .where(Collection.owner_id == user_id)
+    )
+    result = await db.execute(stmt)
+    memberships: dict[str, list[str]] = {}
+    for row in result.all():
+        key = row.paper_canonical_key
+        cid = str(row.collection_id)
+        memberships.setdefault(key, []).append(cid)
+    return memberships
+
+
+async def get_user_stats(
+    db: AsyncSession, user_id: uuid.UUID
+) -> dict[str, int]:
+    """Return collection and paper counts for a user."""
+    # Total collections
+    coll_count_result = await db.execute(
+        select(func.count()).where(Collection.owner_id == user_id)
+    )
+    total_collections = coll_count_result.scalar() or 0
+
+    # Total papers (with duplicates across collections)
+    total_papers_result = await db.execute(
+        select(func.count(CollectionPaper.paper_canonical_key))
+        .join(Collection, Collection.id == CollectionPaper.collection_id)
+        .where(Collection.owner_id == user_id)
+    )
+    total_papers = total_papers_result.scalar() or 0
+
+    # Distinct papers
+    distinct_papers_result = await db.execute(
+        select(func.count(func.distinct(CollectionPaper.paper_canonical_key)))
+        .join(Collection, Collection.id == CollectionPaper.collection_id)
+        .where(Collection.owner_id == user_id)
+    )
+    distinct_papers = distinct_papers_result.scalar() or 0
+
+    return {
+        "total_collections": total_collections,
+        "total_papers": total_papers,
+        "distinct_papers": distinct_papers,
+    }

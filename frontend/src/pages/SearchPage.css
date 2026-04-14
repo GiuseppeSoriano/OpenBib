@@ -40,11 +40,45 @@
   padding: var(--space-xl) 0;
   text-align: center;
 }
+.search-error {
+  color: #c53030;
+}
 
 .search-meta {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+/* ── Search filters ─────────────────────────────────────── */
+.search-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
   margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+}
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+.filter-toggle input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  width: 14px;
+  height: 14px;
+}
+.filter-count {
+  margin-left: auto;
+  color: var(--color-warm-gray);
+  font-size: 0.78rem;
 }
 
 .paper-list {
@@ -66,10 +100,49 @@
   gap: var(--space-md);
 }
 
+.paper-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .paper-title {
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.badge-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(76, 175, 80, 0.12);
+  color: #2e7d32;
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.badge-dismissed {
+  background: rgba(138, 129, 124, 0.12);
+  color: var(--color-warm-gray);
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Dismissed paper card ───────────────────────────────── */
+.paper-card--dismissed {
+  opacity: 0.55;
+}
+.paper-card--dismissed:hover {
+  opacity: 0.85;
 }
 
 .paper-links {
@@ -150,6 +223,13 @@
 .add-to-collection-dropdown button:hover {
   background: rgba(224, 175, 160, 0.1);
 }
+.add-to-collection-dropdown button.already-saved {
+  color: var(--color-warm-gray);
+  cursor: default;
+}
+.add-to-collection-dropdown button.already-saved:hover {
+  background: none;
+}
 .add-to-collection-dropdown .no-collections {
   padding: var(--space-sm) var(--space-md);
   font-size: 0.85rem;
@@ -219,4 +299,16 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ── Dismiss button ─────────────────────────────────────── */
+.dismiss-btn {
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-warm-gray);
+}
+.dismiss-btn:hover {
+  color: var(--color-text);
 }

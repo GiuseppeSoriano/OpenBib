@@ -127,6 +127,16 @@ export interface SearchResult {
   provider: string;
 }
 
+/* ── Paper memberships (search page enrichment) ─────────── */
+export type PaperMemberships = Record<string, string[]>;
+
+/* ── User stats ─────────────────────────────────────────── */
+export interface UserStats {
+  total_collections: number;
+  total_papers: number;
+  distinct_papers: number;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;

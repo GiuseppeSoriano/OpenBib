@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.papers.models import READING_STATES, UserPaperState, UserPaperTag
+from app.papers.models import READING_STATES, UserDismissedPaper, UserPaperState, UserPaperTag
 from app.common.exceptions import NotFoundError
 
 from fastapi import HTTPException, status
@@ -103,3 +103,49 @@ async def get_tags(
         )
     )
     return list(result.scalars().all())
+
+
+# ── Dismiss ─────────────────────────────────────────────────
+
+async def get_dismissed_keys(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[str]:
+    result = await db.execute(
+        select(UserDismissedPaper.paper_canonical_key).where(
+            UserDismissedPaper.user_id == user_id
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def dismiss_paper(
+    db: AsyncSession, user_id: uuid.UUID, paper_key: str
+) -> UserDismissedPaper:
+    existing = await db.execute(
+        select(UserDismissedPaper).where(
+            UserDismissedPaper.user_id == user_id,
+            UserDismissedPaper.paper_canonical_key == paper_key,
+        )
+    )
+    row = existing.scalar_one_or_none()
+    if row is not None:
+        return row  # idempotent
+    dp = UserDismissedPaper(user_id=user_id, paper_canonical_key=paper_key)
+    db.add(dp)
+    await db.flush()
+    return dp
+
+
+async def undismiss_paper(
+    db: AsyncSession, user_id: uuid.UUID, paper_key: str
+) -> None:
+    result = await db.execute(
+        select(UserDismissedPaper).where(
+            UserDismissedPaper.user_id == user_id,
+            UserDismissedPaper.paper_canonical_key == paper_key,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return  # idempotent — already undismissed
+    await db.delete(row)

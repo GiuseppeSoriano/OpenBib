@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import type { Collection, Visibility } from "@/types";
 import { Plus, Trash2 } from "lucide-react";
+import ConfirmModal from "@/components/ConfirmModal";
 import "./CollectionsPage.css";
 
 export default function CollectionsPage() {
@@ -12,6 +13,7 @@ export default function CollectionsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("private");
+  const [pendingDelete, setPendingDelete] = useState<Collection | null>(null);
 
   const { data: collections, isLoading } = useQuery({
     queryKey: ["collections"],
@@ -39,6 +41,8 @@ export default function CollectionsPage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["collections"] });
+      void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
     },
   });
 
@@ -114,9 +118,7 @@ export default function CollectionsPage() {
             </Link>
             <button
               className="btn-ghost delete-btn"
-              onClick={() => {
-                if (confirm(`Delete "${c.name}"?`)) deleteMutation.mutate(c.id);
-              }}
+              onClick={() => setPendingDelete(c)}
               title="Delete collection"
             >
               <Trash2 size={14} />
@@ -129,6 +131,19 @@ export default function CollectionsPage() {
         <p className="loading-text">
           No collections yet. Create one to start organizing your references.
         </p>
+      )}
+
+      {pendingDelete && (
+        <ConfirmModal
+          title={`Delete "${pendingDelete.name}"?`}
+          message={`This will permanently delete the collection and remove all ${pendingDelete.paper_count} paper${pendingDelete.paper_count !== 1 ? "s" : ""} saved inside it. This action cannot be undone.`}
+          confirmLabel="Delete collection"
+          onConfirm={() => {
+            deleteMutation.mutate(pendingDelete.id);
+            setPendingDelete(null);
+          }}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );

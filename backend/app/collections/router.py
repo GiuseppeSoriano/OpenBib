@@ -24,6 +24,11 @@ async def list_collections(user: CurrentUser, db: DB):
     return rows
 
 
+@router.get("/paper-memberships")
+async def paper_memberships(user: CurrentUser, db: DB):
+    return await service.get_paper_memberships(db, user.id)
+
+
 @router.post("", response_model=CollectionRead, status_code=201)
 async def create_collection(body: CollectionCreate, user: CurrentUser, db: DB):
     coll = await service.create_collection(db, user.id, body)

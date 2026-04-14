@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import type { Collection, CollectionPaper, Note } from "@/types";
+import ConfirmModal from "@/components/ConfirmModal";
 import {
   Trash2,
   GitFork,
@@ -33,6 +34,7 @@ export default function CollectionDetailPage() {
   const [newNote, setNewNote] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [importDois, setImportDois] = useState("");
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
 
   const { data: collection, isLoading } = useQuery({
     queryKey: ["collection", id],
@@ -88,7 +90,21 @@ export default function CollectionDetailPage() {
     mutationFn: async (paperKey: string) => {
       await api.delete(`/collections/${id}/papers/${encodeURIComponent(paperKey)}`);
     },
-    onSuccess: () => {
+    onMutate: async (paperKey: string) => {
+      await queryClient.cancelQueries({ queryKey: ["collection-papers", id] });
+      const previous = queryClient.getQueryData<CollectionPaper[]>(["collection-papers", id]);
+      queryClient.setQueryData<CollectionPaper[]>(
+        ["collection-papers", id],
+        (old) => old?.filter((cp) => cp.paper_canonical_key !== paperKey) ?? [],
+      );
+      return { previous };
+    },
+    onError: (_err, _key, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["collection-papers", id], context.previous);
+      }
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["collection-papers", id] });
       void queryClient.invalidateQueries({ queryKey: ["collection", id] });
     },
@@ -265,10 +281,24 @@ export default function CollectionDetailPage() {
             key={cp.paper_canonical_key}
             paper={cp}
             collectionId={id!}
-            onRemove={() => removePaperMutation.mutate(cp.paper_canonical_key)}
+            onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
           />
         ))}
       </div>
+
+      {/* Delete confirmation modal */}
+      {pendingDeleteKey && (
+        <ConfirmModal
+          title="Remove paper"
+          message={`Are you sure you want to remove "${pendingDeleteKey.length > 60 ? pendingDeleteKey.slice(0, 60) + "…" : pendingDeleteKey}" from this collection?`}
+          confirmLabel="Remove"
+          onConfirm={() => {
+            removePaperMutation.mutate(pendingDeleteKey);
+            setPendingDeleteKey(null);
+          }}
+          onCancel={() => setPendingDeleteKey(null)}
+        />
+      )}
 
       {/* Notes section */}
       <div className="cd-notes-section">

@@ -128,7 +128,7 @@ class OpenAlexProvider(BaseProvider):
     }
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(base_url=_BASE, timeout=15)
+        self._client = httpx.AsyncClient(base_url=_BASE, timeout=30)
         self._limiter = ProviderRateLimiter(calls_per_second=10)
 
     async def lookup_by_doi(self, doi: str) -> PaperMetadata | None:

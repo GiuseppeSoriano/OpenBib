@@ -41,6 +41,16 @@ class UserPaperTag(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
 
+class UserDismissedPaper(Base):
+    __tablename__ = "user_dismissed_papers"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    paper_canonical_key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    dismissed_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+
 class UserPreference(Base):
     __tablename__ = "user_preferences"
 

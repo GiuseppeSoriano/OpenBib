@@ -13,6 +13,12 @@ async def get_me(user: CurrentUser):
     return user
 
 
+@router.get("/me/stats")
+async def get_stats(user: CurrentUser, db: DB):
+    from app.collections.service import get_user_stats
+    return await get_user_stats(db, user.id)
+
+
 @router.patch("/me", response_model=UserRead)
 async def update_me(body: UserUpdate, user: CurrentUser, db: DB):
     if body.display_name is not None:

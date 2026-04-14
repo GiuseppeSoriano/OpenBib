@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Collection } from "@/types";
+import type { Collection, UserStats } from "@/types";
 import { FolderOpen, Search, GitFork, Sparkles } from "lucide-react";
 import "./DashboardPage.css";
 
@@ -17,7 +17,13 @@ export default function DashboardPage() {
     },
   });
 
-  const totalPapers = collections?.reduce((sum, c) => sum + c.paper_count, 0) ?? 0;
+  const { data: stats } = useQuery({
+    queryKey: ["user-stats"],
+    queryFn: async () => {
+      const { data } = await api.get<UserStats>("/users/me/stats");
+      return data;
+    },
+  });
 
   return (
     <div className="dashboard">
@@ -31,12 +37,16 @@ export default function DashboardPage() {
       {/* Stats */}
       <div className="dashboard-stats">
         <div className="stat-card card">
-          <span className="stat-value">{collections?.length ?? 0}</span>
+          <span className="stat-value">{stats?.total_collections ?? collections?.length ?? 0}</span>
           <span className="stat-label">Collections</span>
         </div>
         <div className="stat-card card">
-          <span className="stat-value">{totalPapers}</span>
-          <span className="stat-label">Papers saved</span>
+          <span className="stat-value">{stats?.total_papers ?? 0}</span>
+          <span className="stat-label">Total saves</span>
+        </div>
+        <div className="stat-card card">
+          <span className="stat-value">{stats?.distinct_papers ?? 0}</span>
+          <span className="stat-label">Unique papers</span>
         </div>
       </div>
 

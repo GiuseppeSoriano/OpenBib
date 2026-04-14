@@ -1,6 +1,8 @@
 """Papers router — lookup, search, states, tags."""
 
-from fastapi import APIRouter, Query
+import logging
+
+from fastapi import APIRouter, HTTPException, Query
 
 from app.dependencies import DB, CurrentUser, Redis
 from app.papers import service
@@ -12,6 +14,8 @@ from app.papers.schemas import (
     TagCreate,
     TagRead,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
@@ -38,14 +42,29 @@ async def search_papers(
         author=author,
         open_access_only=open_access_only,
     )
-    result = await provider_search(
-        query=q,
-        filters=filters,
-        page=page,
-        size=size,
-        provider_name=provider or "openalex",
-    )
+    try:
+        result = await provider_search(
+            query=q,
+            filters=filters,
+            page=page,
+            size=size,
+            provider_name=provider or "openalex",
+        )
+    except Exception as exc:
+        logger.warning("Search provider error for q=%r: %s", q, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="The external search provider is temporarily unavailable. Please try again.",
+        ) from exc
     return asdict(result)
+
+
+# ── Dismiss (must be before {paper_key:path} routes) ────────
+
+@router.get("/dismissed")
+async def get_dismissed(user: CurrentUser, db: DB):
+    keys = await service.get_dismissed_keys(db, user.id)
+    return keys
 
 
 @router.get("/{paper_key:path}/states", response_model=list[StateRead])
@@ -71,3 +90,14 @@ async def add_tag(paper_key: str, body: TagCreate, user: CurrentUser, db: DB):
 @router.delete("/{paper_key:path}/tags/{tag}", status_code=204)
 async def remove_tag(paper_key: str, tag: str, user: CurrentUser, db: DB):
     await service.remove_tag(db, user.id, paper_key, tag)
+
+
+@router.post("/{paper_key:path}/dismiss", status_code=201)
+async def dismiss_paper(paper_key: str, user: CurrentUser, db: DB):
+    dp = await service.dismiss_paper(db, user.id, paper_key)
+    return {"paper_canonical_key": dp.paper_canonical_key, "dismissed_at": dp.dismissed_at}
+
+
+@router.delete("/{paper_key:path}/dismiss", status_code=204)
+async def undismiss_paper(paper_key: str, user: CurrentUser, db: DB):
+    await service.undismiss_paper(db, user.id, paper_key)

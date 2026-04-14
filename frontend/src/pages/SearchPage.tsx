@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, type FormEvent } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
-import type { SearchResult, PaperMetadata, Collection } from "@/types";
-import { Search, ExternalLink, BookOpen, FolderPlus, GitFork, Check } from "lucide-react";
+import type { SearchResult, PaperMetadata, PaperMemberships, Collection } from "@/types";
+import {
+  Search, ExternalLink, BookOpen, FolderPlus, GitFork, Check, EyeOff, Undo2, FolderCheck,
+} from "lucide-react";
 import "./SearchPage.css";
 
 const PROVIDERS = [
@@ -17,8 +19,10 @@ export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("openalex");
   const [submitted, setSubmitted] = useState("");
+  const [unsavedOnly, setUnsavedOnly] = useState(false);
+  const [hideDismissed, setHideDismissed] = useState(true);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["search", submitted, provider],
     queryFn: async () => {
       const { data } = await api.get<SearchResult>("/papers/search", {
@@ -27,6 +31,40 @@ export default function SearchPage() {
       return data;
     },
     enabled: !!submitted,
+    retry: 2,
+    retryDelay: 1000,
+  });
+
+  // Paper memberships: which collections each paper is in (only after search results arrive)
+  const { data: memberships } = useQuery({
+    queryKey: ["paper-memberships"],
+    queryFn: async () => {
+      const { data } = await api.get<PaperMemberships>("/collections/paper-memberships");
+      return data;
+    },
+    enabled: !!data,
+    staleTime: 30_000,
+  });
+
+  // Dismissed paper keys (only after search results arrive)
+  const { data: dismissedKeys } = useQuery({
+    queryKey: ["dismissed-papers"],
+    queryFn: async () => {
+      const { data } = await api.get<string[]>("/papers/dismissed");
+      return data;
+    },
+    enabled: !!data,
+    staleTime: 30_000,
+  });
+
+  const dismissedSet = new Set(dismissedKeys ?? []);
+  const membershipsMap = memberships ?? {};
+
+  // Client-side filtering
+  const filteredPapers = data?.papers.filter((p) => {
+    if (hideDismissed && dismissedSet.has(p.canonical_key)) return false;
+    if (unsavedOnly && membershipsMap[p.canonical_key]?.length) return false;
+    return true;
   });
 
   const handleSearch = (e: FormEvent) => {
@@ -68,6 +106,13 @@ export default function SearchPage() {
 
       {isLoading && <p className="search-status">Searching…</p>}
 
+      {isError && (
+        <p className="search-status search-error">
+          {(error as any)?.response?.data?.detail ||
+            "Search failed. The provider may be temporarily unavailable — please try again."}
+        </p>
+      )}
+
       {data && (
         <div className="search-results">
           <p className="search-meta">
@@ -75,24 +120,63 @@ export default function SearchPage() {
             <strong>{data.provider}</strong>
           </p>
 
+          {/* Filters */}
+          <div className="search-filters">
+            <label className="filter-toggle">
+              <input
+                type="checkbox"
+                checked={unsavedOnly}
+                onChange={(e) => setUnsavedOnly(e.target.checked)}
+              />
+              <span>Unsaved only</span>
+            </label>
+            <label className="filter-toggle">
+              <input
+                type="checkbox"
+                checked={hideDismissed}
+                onChange={(e) => setHideDismissed(e.target.checked)}
+              />
+              <span>Hide dismissed</span>
+            </label>
+            {filteredPapers && filteredPapers.length !== data.papers.length && (
+              <span className="filter-count">
+                Showing {filteredPapers.length} of {data.papers.length}
+              </span>
+            )}
+          </div>
+
           <div className="paper-list">
-            {data.papers.map((paper) => (
-              <PaperCard key={paper.canonical_key} paper={paper} />
+            {filteredPapers?.map((paper) => (
+              <PaperCard
+                key={paper.canonical_key}
+                paper={paper}
+                savedInCollections={membershipsMap[paper.canonical_key] ?? []}
+                isDismissed={dismissedSet.has(paper.canonical_key)}
+              />
             ))}
           </div>
         </div>
       )}
 
-      {data && data.papers.length === 0 && (
-        <p className="search-status">No papers found. Try a different query or provider.</p>
+      {filteredPapers && filteredPapers.length === 0 && (
+        <p className="search-status">No papers found. Try a different query or adjust filters.</p>
       )}
     </div>
   );
 }
 
-function PaperCard({ paper }: { paper: PaperMetadata }) {
+function PaperCard({
+  paper,
+  savedInCollections,
+  isDismissed,
+}: {
+  paper: PaperMetadata;
+  savedInCollections: string[];
+  isDismissed: boolean;
+}) {
+  const queryClient = useQueryClient();
   const [showCollections, setShowCollections] = useState(false);
-  const [addedTo, setAddedTo] = useState<Set<string>>(new Set());
+  const [sessionAdded, setSessionAdded] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,14 +205,73 @@ function PaperCard({ paper }: { paper: PaperMetadata }) {
       });
     },
     onSuccess: (_data, collectionId) => {
-      setAddedTo((prev) => new Set(prev).add(collectionId));
+      setSessionAdded((prev) => new Set(prev).add(collectionId));
+      void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
     },
   });
 
+  const dismissMutation = useMutation({
+    mutationFn: async () => {
+      await api.post(`/papers/${encodeURIComponent(paper.canonical_key)}/dismiss`);
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["dismissed-papers"] });
+      const prev = queryClient.getQueryData<string[]>(["dismissed-papers"]);
+      queryClient.setQueryData<string[]>(["dismissed-papers"], (old) => [
+        ...(old ?? []),
+        paper.canonical_key,
+      ]);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["dismissed-papers"], ctx.prev);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dismissed-papers"] });
+    },
+  });
+
+  const undismissMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/papers/${encodeURIComponent(paper.canonical_key)}/dismiss`);
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["dismissed-papers"] });
+      const prev = queryClient.getQueryData<string[]>(["dismissed-papers"]);
+      queryClient.setQueryData<string[]>(["dismissed-papers"], (old) =>
+        (old ?? []).filter((k) => k !== paper.canonical_key),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["dismissed-papers"], ctx.prev);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dismissed-papers"] });
+    },
+  });
+
+  const isSaved = savedInCollections.length > 0 || sessionAdded.size > 0;
+
+  // Merge initial + session-added to know which collections already have this paper
+  const alreadyInCollection = (collectionId: string) =>
+    savedInCollections.includes(collectionId) || sessionAdded.has(collectionId);
+
   return (
-    <div className="card paper-card">
+    <div className={`card paper-card${isDismissed ? " paper-card--dismissed" : ""}`}>
       <div className="paper-card-top">
-        <h3 className="paper-title">{paper.title}</h3>
+        <div className="paper-title-row">
+          <h3 className="paper-title">{paper.title}</h3>
+          {isSaved && (
+            <span className="badge badge-saved" title="Saved in a collection">
+              <FolderCheck size={11} />
+              Saved
+            </span>
+          )}
+          {isDismissed && (
+            <span className="badge badge-dismissed">Dismissed</span>
+          )}
+        </div>
         <div className="paper-links">
           {paper.doi && (
             <a
@@ -212,12 +355,13 @@ function PaperCard({ paper }: { paper: PaperMetadata }) {
                   <button
                     key={c.id}
                     onClick={() => addMutation.mutate(c.id)}
-                    disabled={addedTo.has(c.id) || addMutation.isPending}
+                    disabled={alreadyInCollection(c.id) || addMutation.isPending}
+                    className={alreadyInCollection(c.id) ? "already-saved" : ""}
                   >
-                    {addedTo.has(c.id) ? (
+                    {alreadyInCollection(c.id) ? (
                       <>
                         <Check size={12} style={{ display: "inline", marginRight: 4 }} />
-                        Added to {c.name}
+                        Already saved
                       </>
                     ) : (
                       c.name
@@ -236,6 +380,28 @@ function PaperCard({ paper }: { paper: PaperMetadata }) {
           <GitFork size={14} />
           Explore graph
         </Link>
+
+        {isDismissed ? (
+          <button
+            className="btn btn-secondary dismiss-btn"
+            onClick={() => undismissMutation.mutate()}
+            disabled={undismissMutation.isPending}
+            title="Undo dismiss"
+          >
+            <Undo2 size={14} />
+            Undo dismiss
+          </button>
+        ) : (
+          <button
+            className="btn btn-secondary dismiss-btn"
+            onClick={() => dismissMutation.mutate()}
+            disabled={dismissMutation.isPending}
+            title="Not relevant to my research"
+          >
+            <EyeOff size={14} />
+            Not relevant
+          </button>
+        )}
       </div>
     </div>
   );
