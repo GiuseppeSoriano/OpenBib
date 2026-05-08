@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Collection, UserStats } from "@/types";
-import { FolderOpen, Search, GitFork, Sparkles } from "lucide-react";
+import { FolderOpen, Search, GitFork } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
@@ -73,11 +73,6 @@ export default function DashboardPage() {
           <p>Explore citation networks visually</p>
         </Link>
 
-        <Link to="/recommendations" className="dashboard-action card">
-          <Sparkles size={24} />
-          <h3>Discover</h3>
-          <p>Find similar papers through co-citation analysis</p>
-        </Link>
       </div>
 
       {collections && collections.length > 0 && (
