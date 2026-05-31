@@ -1,32 +1,72 @@
-import { useState, useRef, useEffect, type FormEvent } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import api from "@/lib/api";
-import type { SearchResult, PaperMetadata, PaperMemberships, Collection } from "@/types";
+import type { AxiosError } from "axios";
+import api, { library } from "@/lib/api";
+import type {
+  Collection,
+  PaperMemberships,
+  PaperMetadata,
+  SearchPaperGroupItem,
+  SearchResult,
+  SearchResultItem,
+} from "@/types";
 import {
-  Search, ExternalLink, BookOpen, FolderPlus, GitFork, Check, EyeOff, Undo2, FolderCheck,
+  BookMarked,
+  BookOpen,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  EyeOff,
+  FolderCheck,
+  FolderPlus,
+  GitFork,
+  Layers3,
+  Search,
+  Undo2,
 } from "lucide-react";
 import "./SearchPage.css";
 
-const PROVIDERS = [
-  { value: "openalex", label: "OpenAlex" },
-  { value: "crossref", label: "Crossref" },
-  { value: "arxiv", label: "arXiv" },
-  { value: "europepmc", label: "Europe PMC" },
-];
+const PROVIDER_LABELS: Record<string, string> = {
+  openalex: "OpenAlex",
+  crossref: "Crossref",
+  arxiv: "arXiv",
+  europepmc: "Europe PMC",
+};
+
+function providerLabel(name: string): string {
+  return PROVIDER_LABELS[name] ?? name;
+}
+
+function searchErrorMessage(error: unknown): string {
+  const axiosError = error as AxiosError<{ detail?: string }>;
+  return (
+    axiosError.response?.data?.detail ||
+    "Search failed. The provider may be temporarily unavailable — please try again."
+  );
+}
+
+function getSelectedPaper(
+  item: SearchResultItem,
+  selectedVersions: Record<string, string>,
+): PaperMetadata {
+  if (item.kind === "paper") return item.paper;
+  const selectedKey = selectedVersions[item.paper_group_key] ?? item.selected_version.canonical_key;
+  return item.versions.find((paper) => paper.canonical_key === selectedKey) ?? item.selected_version;
+}
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState("openalex");
   const [submitted, setSubmitted] = useState("");
   const [unsavedOnly, setUnsavedOnly] = useState(false);
   const [hideDismissed, setHideDismissed] = useState(true);
+  const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["search", submitted, provider],
+    queryKey: ["search", submitted],
     queryFn: async () => {
       const { data } = await api.get<SearchResult>("/papers/search", {
-        params: { q: submitted, provider, page: 1, size: 20 },
+        params: { q: submitted, page: 1, size: 20 },
       });
       return data;
     },
@@ -35,7 +75,20 @@ export default function SearchPage() {
     retryDelay: 1000,
   });
 
-  // Paper memberships: which collections each paper is in (only after search results arrive)
+  useEffect(() => {
+    if (!data) {
+      setSelectedVersions({});
+      return;
+    }
+    const nextSelections: Record<string, string> = {};
+    for (const item of data.items) {
+      if (item.kind === "paper_group") {
+        nextSelections[item.paper_group_key] = item.selected_version.canonical_key;
+      }
+    }
+    setSelectedVersions(nextSelections);
+  }, [data]);
+
   const { data: memberships } = useQuery({
     queryKey: ["paper-memberships"],
     queryFn: async () => {
@@ -46,7 +99,6 @@ export default function SearchPage() {
     staleTime: 30_000,
   });
 
-  // Dismissed paper keys (only after search results arrive)
   const { data: dismissedKeys } = useQuery({
     queryKey: ["dismissed-papers"],
     queryFn: async () => {
@@ -57,13 +109,21 @@ export default function SearchPage() {
     staleTime: 30_000,
   });
 
+  const { data: libraryKeys } = useQuery({
+    queryKey: ["library-keys"],
+    queryFn: () => library.listKeys(),
+    enabled: !!data,
+    staleTime: 30_000,
+  });
+
   const dismissedSet = new Set(dismissedKeys ?? []);
+  const librarySet = new Set(libraryKeys ?? []);
   const membershipsMap = memberships ?? {};
 
-  // Client-side filtering
-  const filteredPapers = data?.papers.filter((p) => {
-    if (hideDismissed && dismissedSet.has(p.canonical_key)) return false;
-    if (unsavedOnly && membershipsMap[p.canonical_key]?.length) return false;
+  const filteredItems = data?.items.filter((item) => {
+    const selectedPaper = getSelectedPaper(item, selectedVersions);
+    if (hideDismissed && dismissedSet.has(selectedPaper.canonical_key)) return false;
+    if (unsavedOnly && membershipsMap[selectedPaper.canonical_key]?.length) return false;
     return true;
   });
 
@@ -88,17 +148,6 @@ export default function SearchPage() {
             autoFocus
           />
         </div>
-        <select
-          className="input provider-select"
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
         <button type="submit" className="btn btn-primary">
           Search
         </button>
@@ -108,19 +157,22 @@ export default function SearchPage() {
 
       {isError && (
         <p className="search-status search-error">
-          {(error as any)?.response?.data?.detail ||
-            "Search failed. The provider may be temporarily unavailable — please try again."}
+          {searchErrorMessage(error)}
         </p>
       )}
 
       {data && (
         <div className="search-results">
           <p className="search-meta">
-            {data.total_count.toLocaleString()} results from{" "}
-            <strong>{data.provider}</strong>
+            {data.total_count.toLocaleString()} grouped results from{" "}
+            <strong>
+              {data.providers.length > 0 ? data.providers.map(providerLabel).join(", ") : "no providers"}
+            </strong>
+            {data.raw_total_count !== data.total_count && (
+              <> · {data.raw_total_count.toLocaleString()} raw matches before grouping</>
+            )}
           </p>
 
-          {/* Filters */}
           <div className="search-filters">
             <label className="filter-toggle">
               <input
@@ -138,45 +190,146 @@ export default function SearchPage() {
               />
               <span>Hide dismissed</span>
             </label>
-            {filteredPapers && filteredPapers.length !== data.papers.length && (
+            {filteredItems && filteredItems.length !== data.items.length && (
               <span className="filter-count">
-                Showing {filteredPapers.length} of {data.papers.length}
+                Showing {filteredItems.length} of {data.items.length}
               </span>
             )}
           </div>
 
           <div className="paper-list">
-            {filteredPapers?.map((paper) => (
-              <PaperCard
-                key={paper.canonical_key}
-                paper={paper}
-                savedInCollections={membershipsMap[paper.canonical_key] ?? []}
-                isDismissed={dismissedSet.has(paper.canonical_key)}
-              />
-            ))}
+            {filteredItems?.map((item) => {
+              if (item.kind === "paper") {
+                return (
+                  <PaperCard
+                    key={item.paper.canonical_key}
+                    paper={item.paper}
+                    providerSources={item.paper.provider_sources ?? []}
+                    savedInCollections={membershipsMap[item.paper.canonical_key] ?? []}
+                    isDismissed={dismissedSet.has(item.paper.canonical_key)}
+                    inLibrary={librarySet.has(item.paper.paper_group_key)}
+                  />
+                );
+              }
+
+              const selected = getSelectedPaper(item, selectedVersions);
+              return (
+                <PaperGroupCard
+                  key={item.paper_group_key}
+                  item={item}
+                  selectedPaper={selected}
+                  onSelectVersion={(paper) =>
+                    setSelectedVersions((current) => ({
+                      ...current,
+                      [item.paper_group_key]: paper.canonical_key,
+                    }))
+                  }
+                  savedInCollections={membershipsMap[selected.canonical_key] ?? []}
+                  isDismissed={dismissedSet.has(selected.canonical_key)}
+                  inLibrary={librarySet.has(item.paper_group_key)}
+                />
+              );
+            })}
           </div>
         </div>
       )}
 
-      {filteredPapers && filteredPapers.length === 0 && (
+      {filteredItems && filteredItems.length === 0 && (
         <p className="search-status">No papers found. Try a different query or adjust filters.</p>
       )}
     </div>
   );
 }
 
-function PaperCard({
-  paper,
+function PaperGroupCard({
+  item,
+  selectedPaper,
+  onSelectVersion,
   savedInCollections,
   isDismissed,
+  inLibrary,
 }: {
-  paper: PaperMetadata;
+  item: SearchPaperGroupItem;
+  selectedPaper: PaperMetadata;
+  onSelectVersion: (paper: PaperMetadata) => void;
   savedInCollections: string[];
   isDismissed: boolean;
+  inLibrary: boolean;
+}) {
+  const [showVersions, setShowVersions] = useState(false);
+
+  return (
+    <div className="paper-group-card">
+      <div className="paper-group-toolbar">
+        <button
+          type="button"
+          className="group-toggle"
+          onClick={() => setShowVersions((current) => !current)}
+        >
+          <Layers3 size={14} />
+          {item.version_count} versions
+          <ChevronDown size={14} className={showVersions ? "group-toggle-icon open" : "group-toggle-icon"} />
+        </button>
+      </div>
+
+      {showVersions && (
+        <div className="version-list">
+          {item.versions.map((version) => {
+            const isActive = version.canonical_key === selectedPaper.canonical_key;
+            return (
+              <button
+                type="button"
+                key={version.canonical_key}
+                className={`version-chip${isActive ? " active" : ""}`}
+                onClick={() => onSelectVersion(version)}
+              >
+                <span>{version.version || version.publication_date?.slice(0, 4) || "Undated"}</span>
+                <span>{providerLabel(version.provider_source)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <PaperCard
+        paper={selectedPaper}
+        providerSources={item.provider_sources ?? selectedPaper.provider_sources ?? []}
+        savedInCollections={savedInCollections}
+        isDismissed={isDismissed}
+        inLibrary={inLibrary}
+        className="paper-card--grouped"
+        headerBadges={[
+          <span key="versions" className="badge badge-grouped">
+            <Layers3 size={11} />
+            {item.version_count} versions grouped
+          </span>,
+        ]}
+      />
+    </div>
+  );
+}
+
+function PaperCard({
+  paper,
+  providerSources,
+  savedInCollections,
+  isDismissed,
+  inLibrary,
+  className = "",
+  headerBadges = [],
+}: {
+  paper: PaperMetadata;
+  providerSources: string[];
+  savedInCollections: string[];
+  isDismissed: boolean;
+  inLibrary: boolean;
+  className?: string;
+  headerBadges?: ReactNode[];
 }) {
   const queryClient = useQueryClient();
   const [showCollections, setShowCollections] = useState(false);
   const [sessionAdded, setSessionAdded] = useState<Set<string>>(new Set());
+  const [sessionLibrarySaved, setSessionLibrarySaved] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -188,6 +341,10 @@ function PaperCard({
     if (showCollections) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showCollections]);
+
+  useEffect(() => {
+    setSessionLibrarySaved(false);
+  }, [paper.paper_group_key]);
 
   const { data: collections } = useQuery({
     queryKey: ["collections"],
@@ -207,6 +364,21 @@ function PaperCard({
     onSuccess: (_data, collectionId) => {
       setSessionAdded((prev) => new Set(prev).add(collectionId));
       void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
+    },
+  });
+
+  const saveToLibraryMutation = useMutation({
+    mutationFn: async () => {
+      await library.ensureEntry({
+        paper_group_key: paper.paper_group_key,
+        paper_canonical_key: paper.canonical_key,
+        source_provider: paper.provider_source,
+      });
+    },
+    onSuccess: () => {
+      setSessionLibrarySaved(true);
+      void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
     },
   });
 
@@ -239,7 +411,7 @@ function PaperCard({
       await queryClient.cancelQueries({ queryKey: ["dismissed-papers"] });
       const prev = queryClient.getQueryData<string[]>(["dismissed-papers"]);
       queryClient.setQueryData<string[]>(["dismissed-papers"], (old) =>
-        (old ?? []).filter((k) => k !== paper.canonical_key),
+        (old ?? []).filter((key) => key !== paper.canonical_key),
       );
       return { prev };
     },
@@ -252,25 +424,40 @@ function PaperCard({
   });
 
   const isSaved = savedInCollections.length > 0 || sessionAdded.size > 0;
+  const inLibraryNow = inLibrary || sessionLibrarySaved;
 
-  // Merge initial + session-added to know which collections already have this paper
   const alreadyInCollection = (collectionId: string) =>
     savedInCollections.includes(collectionId) || sessionAdded.has(collectionId);
 
   return (
-    <div className={`card paper-card${isDismissed ? " paper-card--dismissed" : ""}`}>
+    <div className={`card paper-card${isDismissed ? " paper-card--dismissed" : ""} ${className}`.trim()}>
+      {providerSources.length > 0 && (
+        <div className="provider-badges">
+          {providerSources.map((source) => (
+            <span key={source} className="badge badge-provider">
+              {providerLabel(source)}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="paper-card-top">
         <div className="paper-title-row">
           <h3 className="paper-title">{paper.title}</h3>
+          {headerBadges}
+          {paper.version && <span className="badge badge-version">{paper.version}</span>}
           {isSaved && (
             <span className="badge badge-saved" title="Saved in a collection">
               <FolderCheck size={11} />
               Saved
             </span>
           )}
-          {isDismissed && (
-            <span className="badge badge-dismissed">Dismissed</span>
+          {inLibraryNow && (
+            <span className="badge badge-library" title="Saved in your Library">
+              <BookMarked size={11} />
+              In Library
+            </span>
           )}
+          {isDismissed && <span className="badge badge-dismissed">Dismissed</span>}
         </div>
         <div className="paper-links">
           {paper.doi && (
@@ -298,44 +485,51 @@ function PaperCard({
         </div>
       </div>
 
-      <p className="paper-authors">
-        {paper.authors.map((a) => a.name).join(", ")}
-      </p>
+      <p className="paper-authors">{paper.authors.map((author) => author.name).join(", ")}</p>
 
       <div className="paper-meta">
         {paper.venue && <span>{paper.venue}</span>}
-        {paper.publication_date && (
-          <span>{paper.publication_date.slice(0, 4)}</span>
-        )}
-        {paper.cited_by_count != null && (
-          <span>{paper.cited_by_count} citations</span>
-        )}
+        {paper.publication_date && <span>{paper.publication_date.slice(0, 4)}</span>}
+        {paper.cited_by_count != null && <span>{paper.cited_by_count} citations</span>}
         {paper.open_access && <span className="badge">Open Access</span>}
       </div>
 
       {paper.abstract && (
         <p className="paper-abstract">
-          {paper.abstract.length > 300
-            ? paper.abstract.slice(0, 300) + "…"
-            : paper.abstract}
+          {paper.abstract.length > 300 ? `${paper.abstract.slice(0, 300)}…` : paper.abstract}
         </p>
       )}
 
       {paper.topics.length > 0 && (
         <div className="paper-topics">
-          {paper.topics.slice(0, 5).map((t) => (
-            <span key={t} className="badge">
-              {t}
+          {paper.topics.slice(0, 5).map((topic) => (
+            <span key={topic} className="badge">
+              {topic}
             </span>
           ))}
         </div>
       )}
 
       <div className="paper-actions">
+        <button
+          type="button"
+          className="btn btn-secondary save-to-library-btn"
+          onClick={() => saveToLibraryMutation.mutate()}
+          disabled={inLibraryNow || saveToLibraryMutation.isPending}
+          title={
+            inLibraryNow
+              ? "Already in your Library"
+              : "Save this version to your persistent Library"
+          }
+        >
+          <BookMarked size={14} />
+          {inLibraryNow ? "In Library" : "Save to Library"}
+        </button>
+
         <div className="add-to-collection" ref={dropdownRef}>
           <button
             className="btn btn-secondary"
-            onClick={() => setShowCollections((s) => !s)}
+            onClick={() => setShowCollections((current) => !current)}
             title="Add to collection"
           >
             <FolderPlus size={14} />
@@ -351,20 +545,20 @@ function PaperCard({
                   </Link>
                 </div>
               ) : (
-                collections.map((c) => (
+                collections.map((collection) => (
                   <button
-                    key={c.id}
-                    onClick={() => addMutation.mutate(c.id)}
-                    disabled={alreadyInCollection(c.id) || addMutation.isPending}
-                    className={alreadyInCollection(c.id) ? "already-saved" : ""}
+                    key={collection.id}
+                    onClick={() => addMutation.mutate(collection.id)}
+                    disabled={alreadyInCollection(collection.id) || addMutation.isPending}
+                    className={alreadyInCollection(collection.id) ? "already-saved" : ""}
                   >
-                    {alreadyInCollection(c.id) ? (
+                    {alreadyInCollection(collection.id) ? (
                       <>
                         <Check size={12} style={{ display: "inline", marginRight: 4 }} />
                         Already saved
                       </>
                     ) : (
-                      c.name
+                      collection.name
                     )}
                   </button>
                 ))

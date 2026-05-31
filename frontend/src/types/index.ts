@@ -18,25 +18,37 @@ export interface User {
 /* ── Paper ──────────────────────────────────────────────── */
 export interface PaperMetadata {
   canonical_key: string;
+  paper_group_key: string;
   title: string;
   authors: Author[];
   abstract: string | null;
   publication_date: string | null;
   doi: string | null;
   arxiv_id: string | null;
+  pmid?: string | null;
+  pmcid?: string | null;
+  openalex_id?: string | null;
   venue: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
   paper_type: string | null;
   topics: string[];
   keywords: string[];
   open_access: boolean | null;
   pdf_url: string | null;
+  abstract_url?: string | null;
   cited_by_count: number | null;
   reference_count: number | null;
+  version?: string | null;
   provider_source: string;
+  provider_sources: string[];
 }
 
 export interface Author {
   name: string;
+  family_name?: string | null;
+  given_name?: string | null;
   openalex_id: string | null;
   orcid: string | null;
   affiliations: string[];
@@ -55,7 +67,6 @@ export type ReadingState =
 
 export interface PaperState {
   paper_canonical_key: string;
-  collection_id: string;
   state: ReadingState;
 }
 
@@ -90,7 +101,12 @@ export interface Note {
 export interface GraphNode {
   id: string;
   label: string | null;
-  type?: string;
+  type: "paper" | "paper_group";
+  paper_group_key: string;
+  version_count: number;
+  selected_version: PaperMetadata;
+  versions: PaperMetadata[];
+  is_seed: boolean;
 }
 
 export interface GraphEdge {
@@ -115,16 +131,36 @@ export interface RecommendationResponse {
 /* ── Collection Paper (from backend) ────────────────────── */
 export interface CollectionPaper {
   paper_canonical_key: string;
+  paper_group_key: string | null;
   position: number;
   added_at: string;
 }
 
+export interface SearchPaperItem {
+  kind: "paper";
+  paper: PaperMetadata;
+}
+
+export interface SearchPaperGroupItem {
+  kind: "paper_group";
+  paper_group_key: string;
+  title: string;
+  authors: Author[];
+  version_count: number;
+  selected_version: PaperMetadata;
+  versions: PaperMetadata[];
+  provider_sources: string[];
+}
+
+export type SearchResultItem = SearchPaperItem | SearchPaperGroupItem;
+
 export interface SearchResult {
-  papers: PaperMetadata[];
+  items: SearchResultItem[];
   total_count: number;
+  raw_total_count: number;
   page: number;
   page_size: number;
-  provider: string;
+  providers: string[];
 }
 
 /* ── Paper memberships (search page enrichment) ─────────── */
@@ -135,6 +171,35 @@ export interface UserStats {
   total_collections: number;
   total_papers: number;
   distinct_papers: number;
+  library_total: number;
+}
+
+/* ── Library ────────────────────────────────────────────── */
+export interface LibraryVersionPin {
+  paper_canonical_key: string;
+  paper_group_key: string;
+  source_provider: string | null;
+  added_at: string;
+}
+
+export interface LibraryEntryListItem {
+  paper_group_key: string;
+  primary_canonical_key: string;
+  created_at: string;
+  primary_version: PaperMetadata | null;
+  version_count: number;
+  tags: string[];
+}
+
+export interface LibraryEntry {
+  paper_group_key: string;
+  primary_canonical_key: string;
+  created_at: string;
+  primary_version: PaperMetadata | null;
+  pinned_versions: LibraryVersionPin[];
+  notes_count: number;
+  tags: string[];
+  states: PaperState[];
 }
 
 export interface PaginatedResponse<T> {
@@ -145,6 +210,8 @@ export interface PaginatedResponse<T> {
 }
 
 export interface GraphResponse {
+  active_paper_key: string;
+  active_paper_group_key: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
 }

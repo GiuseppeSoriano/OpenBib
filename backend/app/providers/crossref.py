@@ -18,6 +18,7 @@ from app.providers.base import (
     SearchFilters,
     SearchResult,
     build_canonical_key,
+    build_paper_group_key,
 )
 from app.providers.rate_limiter import ProviderRateLimiter
 
@@ -99,6 +100,7 @@ def _map_work(raw: dict) -> PaperMetadata:
 
     return PaperMetadata(
         canonical_key=key,
+        paper_group_key=build_paper_group_key(title, [a.name for a in authors]),
         title=title,
         authors=authors,
         abstract=_strip_jats(raw.get("abstract")),

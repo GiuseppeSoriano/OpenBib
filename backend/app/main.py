@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     from app.auth.router import router as auth_router
     from app.collections.router import router as collections_router
     from app.graph.router import router as graph_router
+    from app.library.router import router as library_router
     from app.notes.router import router as notes_router
     from app.papers.router import router as papers_router
     from app.recommendations.router import router as recommendations_router
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
     app.include_router(recommendations_router, prefix="/api/v1")
+    app.include_router(library_router, prefix="/api/v1")
 
     # ------------------------------------------------------------------
     # Health check

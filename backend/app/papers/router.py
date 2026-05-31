@@ -2,13 +2,14 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from app.dependencies import DB, CurrentUser, Redis
 from app.papers import service
 from app.papers.schemas import (
     PaperMetadataRead,
     SearchQuery,
+    SearchResultRead,
     StateRead,
     StateUpdate,
     TagCreate,
@@ -20,20 +21,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
-@router.get("/search")
+@router.get("/search", response_model=SearchResultRead)
 async def search_papers(
     q: str = Query(min_length=1, max_length=500),
-    provider: str | None = None,
+    providers: list[str] | None = Query(None),
     year_from: int | None = None,
     year_to: int | None = None,
     author: str | None = None,
     open_access_only: bool = False,
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
+    db: DB = None,
     redis: Redis = None,
 ):
-    from dataclasses import asdict
-    from app.providers.registry import search as provider_search
+    from app.providers.registry import search_all
     from app.providers.base import SearchFilters
 
     filters = SearchFilters(
@@ -42,21 +43,19 @@ async def search_papers(
         author=author,
         open_access_only=open_access_only,
     )
-    try:
-        result = await provider_search(
-            query=q,
-            filters=filters,
-            page=page,
-            size=size,
-            provider_name=provider or "openalex",
-        )
-    except Exception as exc:
-        logger.warning("Search provider error for q=%r: %s", q, exc)
-        raise HTTPException(
-            status_code=502,
-            detail="The external search provider is temporarily unavailable. Please try again.",
-        ) from exc
-    return asdict(result)
+    results = await search_all(
+        query=q,
+        filters=filters,
+        page=page,
+        size=size,
+        providers=providers,
+    )
+    if not results:
+        logger.warning("All search providers failed or returned nothing for q=%r", q)
+
+    merged = service.round_robin_dedupe(results)
+    await service.cache_papers(db, merged.papers)
+    return service.build_search_response(merged)
 
 
 # ── Dismiss (must be before {paper_key:path} routes) ────────
@@ -74,7 +73,7 @@ async def get_states(paper_key: str, user: CurrentUser, db: DB):
 
 @router.put("/{paper_key:path}/state", response_model=StateRead)
 async def set_state(paper_key: str, body: StateUpdate, user: CurrentUser, db: DB):
-    return await service.set_paper_state(db, user.id, paper_key, body.state, body.collection_id)
+    return await service.set_paper_state(db, user.id, paper_key, body.state)
 
 
 @router.get("/{paper_key:path}/tags", response_model=list[TagRead])

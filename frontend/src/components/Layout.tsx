@@ -4,6 +4,7 @@ import {
   Search,
   LayoutDashboard,
   FolderOpen,
+  BookMarked,
   GitFork,
   Settings,
   LogOut,
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/search", icon: Search, label: "Search" },
   { to: "/collections", icon: FolderOpen, label: "Collections" },
+  { to: "/library", icon: BookMarked, label: "Library" },
   { to: "/graph", icon: GitFork, label: "Graph" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ] as const;

@@ -7,6 +7,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import {
   Trash2,
   GitFork,
+  BookMarked,
   StickyNote,
   Plus,
   X,
@@ -280,7 +281,6 @@ export default function CollectionDetailPage() {
           <CollectionPaperItem
             key={cp.paper_canonical_key}
             paper={cp}
-            collectionId={id!}
             onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
           />
         ))}
@@ -356,11 +356,9 @@ export default function CollectionDetailPage() {
 
 function CollectionPaperItem({
   paper,
-  collectionId,
   onRemove,
 }: {
   paper: CollectionPaper;
-  collectionId: string;
   onRemove: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -372,7 +370,7 @@ function CollectionPaperItem({
     queryKey: ["paper-state", paper.paper_canonical_key],
     queryFn: async () => {
       const { data } = await api.get(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/states`);
-      return data as { state: string; collection_id: string | null }[];
+      return data as { state: string }[];
     },
   });
 
@@ -399,7 +397,6 @@ function CollectionPaperItem({
     mutationFn: async (state: string) => {
       await api.put(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/state`, {
         state,
-        collection_id: collectionId,
       });
     },
     onSuccess: () => {
@@ -449,7 +446,7 @@ function CollectionPaperItem({
     },
   });
 
-  const currentState = states?.find((s) => s.collection_id === collectionId)?.state ?? "unseen";
+  const currentState = states?.[0]?.state ?? "unseen";
 
   return (
     <div className="cp-item card">
@@ -460,6 +457,15 @@ function CollectionPaperItem({
             : paper.paper_canonical_key}
         </span>
         <div className="cp-actions">
+          {paper.paper_group_key && (
+            <Link
+              to={`/library?focus=${encodeURIComponent(paper.paper_group_key)}`}
+              className="btn-ghost"
+              title="Open in Library — notes and tags live there"
+            >
+              <BookMarked size={14} />
+            </Link>
+          )}
           <Link
             to={`/graph/${encodeURIComponent(paper.paper_canonical_key)}`}
             className="btn-ghost"
@@ -467,7 +473,11 @@ function CollectionPaperItem({
           >
             <GitFork size={14} />
           </Link>
-          <button className="btn-ghost" onClick={onRemove} title="Remove from collection">
+          <button
+            className="btn-ghost"
+            onClick={onRemove}
+            title="Remove from collection (the paper stays in your Library)"
+          >
             <Trash2 size={14} />
           </button>
         </div>

@@ -1,6 +1,6 @@
-"""Tests for canonical key construction."""
+"""Tests for canonical and paper-group key construction."""
 
-from app.common.canonical import build_canonical_key
+from app.common.canonical import build_canonical_key, build_paper_group_key
 
 
 def test_doi_based_key():
@@ -39,3 +39,15 @@ def test_hash_key_different_for_different_inputs():
     k1 = build_canonical_key(doi=None, title="Paper A")
     k2 = build_canonical_key(doi=None, title="Paper B")
     assert k1 != k2
+
+
+def test_paper_group_key_normalizes_case_punctuation_and_author_order():
+    key1 = build_paper_group_key(
+        "Attention, Is All You Need!",
+        ["Ashish Vaswani", "Noam Shazeer"],
+    )
+    key2 = build_paper_group_key(
+        "attention is all you need",
+        ["Noam Shazeer", "Ashish Vaswani"],
+    )
+    assert key1 == key2

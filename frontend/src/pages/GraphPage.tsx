@@ -1,19 +1,19 @@
-import { useState, useCallback, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import CytoscapeComponent from "react-cytoscapejs";
 import type { Core, EventObject } from "cytoscape";
 import api from "@/lib/api";
-import type { GraphResponse } from "@/types";
-import { Maximize2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import type { GraphResponse, PaperMetadata } from "@/types";
+import { Layers3, Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import "./GraphPage.css";
 
 const LAYOUT_OPTIONS = {
   name: "cose",
   animate: true,
   animationDuration: 500,
-  nodeRepulsion: () => 8000,
-  idealEdgeLength: () => 120,
+  nodeRepulsion: () => 8500,
+  idealEdgeLength: () => 130,
   edgeElasticity: () => 100,
   gravity: 0.3,
   numIter: 300,
@@ -26,14 +26,15 @@ const CYTOSCAPE_STYLE: any[] = [
     selector: "node",
     style: {
       label: "data(label)",
+      shape: "ellipse",
       "background-color": "#E0AFA0",
       "border-color": "#d49a8a",
       "border-width": 2,
-      width: 40,
-      height: 40,
+      width: 42,
+      height: 42,
       "font-size": "10px",
       "text-wrap": "ellipsis",
-      "text-max-width": "120px",
+      "text-max-width": "130px",
       "text-margin-y": 8,
       "text-valign": "bottom",
       "text-halign": "center",
@@ -41,12 +42,24 @@ const CYTOSCAPE_STYLE: any[] = [
     },
   },
   {
+    selector: "node.grouped",
+    style: {
+      shape: "round-rectangle",
+      "background-color": "#F4E3DA",
+      "border-color": "#8A817C",
+      "border-style": "dashed",
+      "border-width": 3,
+      width: 58,
+      height: 46,
+    },
+  },
+  {
     selector: "node.seed",
     style: {
       "background-color": "#463F3A",
       "border-color": "#463F3A",
-      width: 55,
-      height: 55,
+      width: 60,
+      height: 60,
       "font-size": "11px",
       "font-weight": "bold" as const,
       color: "#463F3A",
@@ -91,77 +104,102 @@ const CYTOSCAPE_STYLE: any[] = [
 export default function GraphPage() {
   const { paperKey } = useParams<{ paperKey: string }>();
   const navigate = useNavigate();
-  const [key, setKey] = useState(paperKey ? decodeURIComponent(paperKey) : "");
-  const [searchKey, setSearchKey] = useState(paperKey ? decodeURIComponent(paperKey) : "");
+  const initialKey = paperKey ? decodeURIComponent(paperKey) : "";
+  const [key, setKey] = useState(initialKey);
+  const [searchKey, setSearchKey] = useState(initialKey);
   const [depth, setDepth] = useState(2);
   const [maxNodes, setMaxNodes] = useState(50);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
   const cyRef = useRef<Core | null>(null);
 
+  useEffect(() => {
+    const nextKey = paperKey ? decodeURIComponent(paperKey) : "";
+    setKey(nextKey);
+    setSearchKey(nextKey);
+    setSelectedNodeId(null);
+    setSelectedVersions({});
+  }, [paperKey]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["graph", searchKey, depth, maxNodes],
+    queryKey: ["graph", searchKey, depth, maxNodes, JSON.stringify(selectedVersions)],
     queryFn: async () => {
       const { data } = await api.get<GraphResponse>(`/graph/${encodeURIComponent(searchKey)}`, {
-        params: { depth, max_nodes: maxNodes },
+        params: {
+          depth,
+          max_nodes: maxNodes,
+          selected_versions:
+            Object.keys(selectedVersions).length > 0 ? JSON.stringify(selectedVersions) : undefined,
+        },
       });
       return data;
     },
     enabled: !!searchKey,
   });
 
+  const selectedNode = data?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+
   const handleExplore = () => {
-    if (key.trim()) {
-      setSearchKey(key.trim());
-      navigate(`/graph/${encodeURIComponent(key.trim())}`, { replace: true });
-    }
+    if (!key.trim()) return;
+    setSelectedVersions({});
+    setSelectedNodeId(null);
+    setSearchKey(key.trim());
+    navigate(`/graph/${encodeURIComponent(key.trim())}`, { replace: true });
   };
 
   const cyElements = (() => {
     if (!data) return [];
-    const nodes = data.nodes.map((n) => ({
+    const nodes = data.nodes.map((node) => {
+      const labelBase = node.selected_version.title || node.label || node.id;
+      const label =
+        node.version_count > 1 ? `${truncateLabel(labelBase, 44)} (${node.version_count})` : truncateLabel(labelBase, 50);
+      const classes = [
+        node.is_seed ? "seed" : "",
+        node.type === "paper_group" ? "grouped" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return {
+        data: {
+          id: node.id,
+          label,
+          fullLabel: node.selected_version.title || node.label || node.id,
+          versionCount: node.version_count,
+          type: node.type,
+        },
+        classes,
+      };
+    });
+    const edges = data.edges.map((edge, index) => ({
       data: {
-        id: n.id,
-        label: n.label && n.label !== n.id
-          ? n.label.length > 50
-            ? n.label.slice(0, 50) + "…"
-            : n.label
-          : n.id.length > 30
-            ? n.id.slice(0, 30) + "…"
-            : n.id,
-        fullLabel: n.label || n.id,
-      },
-      classes: n.id === searchKey ? "seed" : "",
-    }));
-    const edges = data.edges.map((e, i) => ({
-      data: {
-        id: `e${i}`,
-        source: e.source,
-        target: e.target,
-        relation_type: e.relation_type,
+        id: `e${index}`,
+        source: edge.source,
+        target: edge.target,
+        relation_type: edge.relation_type,
       },
     }));
     return [...nodes, ...edges];
   })();
 
-  const handleCyInit = useCallback(
-    (cy: Core) => {
-      cyRef.current = cy;
-      cy.on("tap", "node", (evt: EventObject) => {
-        const nodeId = evt.target.id();
-        setSelectedNode(nodeId);
-      });
-      cy.on("dbltap", "node", (evt: EventObject) => {
-        const nodeId = evt.target.id();
-        setKey(nodeId);
-        setSearchKey(nodeId);
-        navigate(`/graph/${encodeURIComponent(nodeId)}`, { replace: true });
-      });
-      cy.on("tap", (evt: EventObject) => {
-        if (evt.target === cy) setSelectedNode(null);
-      });
-    },
-    [navigate],
-  );
+  const handleCyInit = useCallback((cy: Core) => {
+    cyRef.current = cy;
+    cy.on("tap", "node", (evt: EventObject) => {
+      setSelectedNodeId(evt.target.id());
+    });
+    cy.on("dbltap", "node", (evt: EventObject) => {
+      const nodeId = evt.target.id();
+      const node = data?.nodes.find((entry) => entry.id === nodeId);
+      if (!node) return;
+      const nextPaperKey = node.selected_version.canonical_key;
+      setSelectedVersions({});
+      setKey(nextPaperKey);
+      setSearchKey(nextPaperKey);
+      navigate(`/graph/${encodeURIComponent(nextPaperKey)}`, { replace: true });
+    });
+    cy.on("tap", (evt: EventObject) => {
+      if (evt.target === cy) setSelectedNodeId(null);
+    });
+  }, [data?.nodes, navigate]);
 
   const handleFit = () => cyRef.current?.fit(undefined, 40);
   const handleZoomIn = () => {
@@ -184,7 +222,7 @@ export default function GraphPage() {
         <div className="graph-search">
           <input
             className="input"
-            placeholder="Enter a DOI or canonical key…"
+            placeholder="Enter a paper canonical key…"
             value={key}
             onChange={(e) => setKey(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleExplore()}
@@ -198,16 +236,16 @@ export default function GraphPage() {
           <label>
             Depth:
             <select value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5].map((d) => (
-                <option key={d} value={d}>{d}</option>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <option key={value} value={value}>{value}</option>
               ))}
             </select>
           </label>
           <label>
             Max nodes:
             <select value={maxNodes} onChange={(e) => setMaxNodes(Number(e.target.value))}>
-              {[25, 50, 100, 150, 200].map((n) => (
-                <option key={n} value={n}>{n}</option>
+              {[25, 50, 100, 150, 200].map((value) => (
+                <option key={value} value={value}>{value}</option>
               ))}
             </select>
           </label>
@@ -219,8 +257,7 @@ export default function GraphPage() {
       {data && data.nodes.length === 0 && (
         <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
           <p className="graph-status" style={{ padding: 0 }}>
-            No graph data found for this paper. Try searching a paper first to
-            populate citation data.
+            No graph data found for this paper. Try searching a paper first to populate citation data.
           </p>
         </div>
       )}
@@ -248,15 +285,59 @@ export default function GraphPage() {
 
           {selectedNode && (
             <div className="graph-node-detail card">
-              <h4>Selected node</h4>
-              <p className="node-detail-key">{selectedNode}</p>
+              <div className="graph-node-header">
+                <h4>{selectedNode.selected_version.title}</h4>
+                {selectedNode.version_count > 1 && (
+                  <span className="graph-node-badge">
+                    <Layers3 size={12} />
+                    {selectedNode.version_count} versions
+                  </span>
+                )}
+              </div>
+              <p className="node-detail-key">{selectedNode.selected_version.authors.map((author) => author.name).join(", ") || selectedNode.selected_version.canonical_key}</p>
+              <div className="node-detail-meta">
+                {selectedNode.selected_version.venue && <span>{selectedNode.selected_version.venue}</span>}
+                {selectedNode.selected_version.publication_date && (
+                  <span>{selectedNode.selected_version.publication_date.slice(0, 4)}</span>
+                )}
+                {selectedNode.selected_version.version && (
+                  <span>{selectedNode.selected_version.version}</span>
+                )}
+              </div>
+
+              {selectedNode.versions.length > 1 && (
+                <div className="graph-version-picker">
+                  {selectedNode.versions.map((version: PaperMetadata) => {
+                    const isActive = version.canonical_key === selectedNode.selected_version.canonical_key;
+                    return (
+                      <button
+                        type="button"
+                        key={version.canonical_key}
+                        className={`graph-version-chip${isActive ? " active" : ""}`}
+                        onClick={() =>
+                          setSelectedVersions((current) => ({
+                            ...current,
+                            [selectedNode.paper_group_key]: version.canonical_key,
+                          }))
+                        }
+                      >
+                        <span>{version.version || version.publication_date?.slice(0, 4) || "Version"}</span>
+                        <span>{version.provider_source}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="node-detail-actions">
                 <button
                   className="btn btn-secondary"
                   onClick={() => {
-                    setKey(selectedNode);
-                    setSearchKey(selectedNode);
-                    navigate(`/graph/${encodeURIComponent(selectedNode)}`, { replace: true });
+                    const nextPaperKey = selectedNode.selected_version.canonical_key;
+                    setSelectedVersions({});
+                    setKey(nextPaperKey);
+                    setSearchKey(nextPaperKey);
+                    navigate(`/graph/${encodeURIComponent(nextPaperKey)}`, { replace: true });
                   }}
                 >
                   Expand from here
@@ -266,8 +347,9 @@ export default function GraphPage() {
           )}
 
           <div className="graph-legend">
-            <span><span className="legend-dot seed" /> Seed paper</span>
-            <span><span className="legend-dot" /> Connected paper</span>
+            <span><span className="legend-dot seed" /> Seed group</span>
+            <span><span className="legend-dot grouped" /> Grouped paper</span>
+            <span><span className="legend-dot" /> Single paper</span>
             <span><span className="legend-line solid" /> Cites</span>
             <span><span className="legend-line dashed" /> Similar</span>
           </div>
@@ -277,11 +359,14 @@ export default function GraphPage() {
       {!searchKey && (
         <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
           <p style={{ color: "var(--color-text-secondary)" }}>
-            Enter a paper key above or double-click a node to explore its
-            citation neighborhood.
+            Enter a paper key above or double-click a node to explore its citation neighborhood.
           </p>
         </div>
       )}
     </div>
   );
+}
+
+function truncateLabel(label: string, maxLength: number) {
+  return label.length > maxLength ? `${label.slice(0, maxLength)}…` : label;
 }

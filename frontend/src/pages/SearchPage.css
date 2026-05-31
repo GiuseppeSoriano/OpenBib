@@ -29,12 +29,6 @@
   padding-left: 2.5rem !important;
 }
 
-.provider-select {
-  width: 130px !important;
-  flex-shrink: 0;
-  flex-grow: 0;
-}
-
 .search-status {
   color: var(--color-text-secondary);
   padding: var(--space-xl) 0;
@@ -87,10 +81,85 @@
   gap: var(--space-md);
 }
 
+.paper-group-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.paper-group-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(224, 175, 160, 0.12);
+  color: var(--color-charcoal);
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+.group-toggle-icon {
+  transition: transform 0.15s ease;
+}
+
+.group-toggle-icon.open {
+  transform: rotate(180deg);
+}
+
+.version-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
+.version-chip.active {
+  background: rgba(70, 63, 58, 0.08);
+  border-color: var(--color-charcoal);
+  color: var(--color-charcoal);
+}
+
 .paper-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+}
+
+.provider-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: -2px;
+}
+
+.badge-provider {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(70, 63, 58, 0.08);
+  color: var(--color-charcoal);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 1px var(--space-sm);
+  border-radius: 999px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .paper-card-top {
@@ -127,6 +196,24 @@
   flex-shrink: 0;
 }
 
+.badge-library {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(224, 175, 160, 0.22);
+  color: var(--color-charcoal);
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.save-to-library-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .badge-dismissed {
   background: rgba(138, 129, 124, 0.12);
   color: var(--color-warm-gray);
@@ -135,6 +222,27 @@
   border-radius: 999px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.badge-grouped {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(70, 63, 58, 0.08);
+  color: var(--color-charcoal);
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-version {
+  background: rgba(224, 175, 160, 0.16);
+  color: var(--color-charcoal);
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 /* ── Dismissed paper card ───────────────────────────────── */

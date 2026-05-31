@@ -2,14 +2,25 @@
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
+class AuthorRead(BaseModel):
+    name: str
+    family_name: str | None = None
+    given_name: str | None = None
+    openalex_id: str | None = None
+    orcid: str | None = None
+    affiliations: list[str] = []
+
+
 class PaperMetadataRead(BaseModel):
     canonical_key: str
+    paper_group_key: str
     title: str
-    authors: list[dict] = []
+    authors: list[AuthorRead] = []
     abstract: str | None = None
     publication_date: date | None = None
     doi: str | None = None
@@ -18,25 +29,54 @@ class PaperMetadataRead(BaseModel):
     pmcid: str | None = None
     openalex_id: str | None = None
     venue: str | None = None
+    volume: str | None = None
+    issue: str | None = None
+    pages: str | None = None
     paper_type: str | None = None
     topics: list[str] = []
     keywords: list[str] = []
     open_access: bool | None = None
     pdf_url: str | None = None
+    abstract_url: str | None = None
     cited_by_count: int | None = None
     reference_count: int | None = None
+    version: str | None = None
     provider_source: str | None = None
+    provider_sources: list[str] = []
+
+
+class SearchPaperItemRead(BaseModel):
+    kind: Literal["paper"]
+    paper: PaperMetadataRead
+
+
+class SearchPaperGroupItemRead(BaseModel):
+    kind: Literal["paper_group"]
+    paper_group_key: str
+    title: str
+    authors: list[AuthorRead] = []
+    version_count: int
+    selected_version: PaperMetadataRead
+    versions: list[PaperMetadataRead] = []
+    provider_sources: list[str] = []
+
+
+class SearchResultRead(BaseModel):
+    items: list[SearchPaperItemRead | SearchPaperGroupItemRead]
+    total_count: int
+    raw_total_count: int
+    page: int
+    page_size: int
+    providers: list[str] = []
 
 
 class StateUpdate(BaseModel):
     state: str
-    collection_id: str | None = None
 
 
 class StateRead(BaseModel):
     paper_canonical_key: str
     state: str
-    collection_id: uuid.UUID | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -49,6 +89,7 @@ class TagCreate(BaseModel):
 class TagRead(BaseModel):
     paper_canonical_key: str
     tag: str
+    paper_group_key: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

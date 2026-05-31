@@ -8,6 +8,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import SearchPage from "@/pages/SearchPage";
 import CollectionsPage from "@/pages/CollectionsPage";
 import CollectionDetailPage from "@/pages/CollectionDetailPage";
+import LibraryPage from "@/pages/LibraryPage";
 import GraphPage from "@/pages/GraphPage";
 import SettingsPage from "@/pages/SettingsPage";
 
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
+        <Route path="/library" element={<LibraryPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/graph/:paperKey" element={<GraphPage />} />
         <Route path="/settings" element={<SettingsPage />} />

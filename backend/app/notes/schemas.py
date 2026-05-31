@@ -27,6 +27,7 @@ class NoteRead(BaseModel):
     id: uuid.UUID
     target_type: str
     target_key: str
+    paper_group_key: str | None = None
     content: str
     created_at: datetime
     updated_at: datetime

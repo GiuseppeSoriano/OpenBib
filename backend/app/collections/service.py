@@ -146,6 +146,31 @@ async def add_paper(
     )
     next_pos = (max_pos.scalar() or 0) + 1
 
+    # Library invariant — every paper in a collection must have a Library
+    # entry + version pin behind it, so notes/tags/states can anchor on
+    # the group_key. Look up group_key from the cache; fall back to a
+    # synthesized hash if the cache row is missing (e.g. legacy import).
+    from app.library.service import ensure_entry_and_version
+    from app.papers.models import CachedPaperMetadata
+
+    cached = await db.get(CachedPaperMetadata, paper_key)
+    if cached is not None:
+        paper_group_key = cached.paper_group_key
+        source_provider = cached.provider_source
+    else:
+        # Synthesize a deterministic group_key so the entry can still anchor
+        # notes/tags. The opportunistic re-anchor on next provider fetch
+        # will overwrite it with the correct value via the backfill script.
+        import hashlib
+
+        digest = hashlib.sha256(paper_key.encode("utf-8")).hexdigest()[:16]
+        paper_group_key = f"group:{digest}"
+        source_provider = None
+
+    await ensure_entry_and_version(
+        db, user_id, paper_group_key, paper_key, source_provider
+    )
+
     cp = CollectionPaper(
         collection_id=collection_id,
         paper_canonical_key=paper_key,
@@ -179,18 +204,33 @@ async def remove_paper(
 
 async def list_papers(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None
-) -> list[CollectionPaper]:
+) -> list[dict]:
     coll = await get_collection_or_404(db, collection_id)
     roles = await _member_roles(db, collection_id)
     if not _can_view(coll, user_id, roles):
         raise ForbiddenError()
 
-    result = await db.execute(
-        select(CollectionPaper)
+    from app.papers.models import CachedPaperMetadata
+
+    stmt = (
+        select(CollectionPaper, CachedPaperMetadata.paper_group_key)
+        .outerjoin(
+            CachedPaperMetadata,
+            CachedPaperMetadata.canonical_key == CollectionPaper.paper_canonical_key,
+        )
         .where(CollectionPaper.collection_id == collection_id)
         .order_by(CollectionPaper.position)
     )
-    return list(result.scalars().all())
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "paper_canonical_key": cp.paper_canonical_key,
+            "paper_group_key": group_key,
+            "position": cp.position,
+            "added_at": cp.added_at,
+        }
+        for cp, group_key in rows
+    ]
 
 
 async def add_member(
@@ -246,7 +286,9 @@ async def get_paper_memberships(
 async def get_user_stats(
     db: AsyncSession, user_id: uuid.UUID
 ) -> dict[str, int]:
-    """Return collection and paper counts for a user."""
+    """Return collection, paper, and library counts for a user."""
+    from app.library.service import count_entries
+
     # Total collections
     coll_count_result = await db.execute(
         select(func.count()).where(Collection.owner_id == user_id)
@@ -269,8 +311,11 @@ async def get_user_stats(
     )
     distinct_papers = distinct_papers_result.scalar() or 0
 
+    library_total = await count_entries(db, user_id)
+
     return {
         "total_collections": total_collections,
         "total_papers": total_papers,
         "distinct_papers": distinct_papers,
+        "library_total": library_total,
     }

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
-import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
+
+from app.common.canonical import build_canonical_key, build_paper_group_key
 
 
 class ProviderCapability(Enum):
@@ -34,6 +34,7 @@ class Author:
 @dataclass
 class PaperMetadata:
     canonical_key: str
+    paper_group_key: str
     title: str
     authors: list[Author] = field(default_factory=list)
     abstract: str | None = None
@@ -57,6 +58,7 @@ class PaperMetadata:
     reference_count: int | None = None
     version: str | None = None
     provider_source: str = ""
+    provider_sources: list[str] = field(default_factory=list)
     raw_response: dict | None = None
 
 
@@ -75,6 +77,7 @@ class SearchResult:
     page: int
     page_size: int
     provider: str
+    providers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -95,33 +98,6 @@ class AuthorMetadata:
     affiliations: list[str] = field(default_factory=list)
     works_count: int | None = None
     cited_by_count: int | None = None
-
-
-def build_canonical_key(
-    doi: str | None,
-    title: str | None = None,
-    authors: list[str] | None = None,
-    year: int | None = None,
-) -> str:
-    if doi:
-        normalized = doi.strip().lower()
-        normalized = normalized.removeprefix("https://doi.org/")
-        normalized = normalized.removeprefix("http://doi.org/")
-        return f"doi:{normalized}"
-
-    parts: list[str] = []
-    if title:
-        normalized_title = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
-        parts.append(normalized_title)
-    if authors:
-        sorted_names = sorted(a.split()[-1].lower() for a in authors if a.strip())
-        parts.append(",".join(sorted_names))
-    if year:
-        parts.append(str(year))
-
-    combined = "|".join(parts)
-    hash_val = hashlib.sha256(combined.encode()).hexdigest()[:16]
-    return f"hash:{hash_val}"
 
 
 class BaseProvider(ABC):

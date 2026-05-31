@@ -18,10 +18,11 @@ from app.providers.base import (
     SearchFilters,
     SearchResult,
     build_canonical_key,
+    build_paper_group_key,
 )
 from app.providers.rate_limiter import ProviderRateLimiter
 
-_BASE = "http://export.arxiv.org/api"
+_BASE = "https://export.arxiv.org/api"
 
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -107,6 +108,7 @@ def _parse_entry(entry: ET.Element) -> PaperMetadata:
 
     return PaperMetadata(
         canonical_key=key,
+        paper_group_key=build_paper_group_key(title, [a.name for a in authors]),
         title=title,
         authors=authors,
         abstract=abstract,
@@ -132,7 +134,7 @@ class ArxivProvider(BaseProvider):
     }
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=15)
+        self._client = httpx.AsyncClient(timeout=15, follow_redirects=True)
         self._limiter = ProviderRateLimiter(calls_per_second=0.33, min_delay=3.0)
 
     async def lookup_by_doi(self, doi: str) -> PaperMetadata | None:

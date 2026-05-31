@@ -21,10 +21,12 @@ class Note(Base):
         Enum("paper", "collection", "author", name="note_target_enum"), nullable=False
     )
     target_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    paper_group_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_notes_user_target", "user_id", "target_type", "target_key"),
+        Index("ix_notes_user_group", "user_id", "paper_group_key"),
     )

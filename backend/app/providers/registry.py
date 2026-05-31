@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,59 @@ async def search(
 
     f = filters or SearchFilters()
     return await provider.search(query, f, page, size)
+
+
+# Default order when fanning out across all providers — used as both the
+# query order AND the round-robin tie-break for cross-provider duplicates.
+SEARCH_FANOUT_ORDER: list[str] = ["openalex", "crossref", "arxiv", "europepmc"]
+
+
+async def search_all(
+    query: str,
+    filters: SearchFilters | None = None,
+    page: int = 1,
+    size: int = 20,
+    providers: list[str] | None = None,
+) -> list[SearchResult]:
+    """Fan out the search across multiple providers in parallel.
+
+    Defaults to all four search-capable providers in SEARCH_FANOUT_ORDER.
+    Failed providers (timeout, 5xx, parse error) are logged and dropped —
+    a single bad provider must not fail the whole search. Returns the
+    successful results in the requested provider order.
+    """
+    f = filters or SearchFilters()
+    requested = providers or SEARCH_FANOUT_ORDER
+    selected: list[BaseProvider] = []
+    for name in requested:
+        provider = _PROVIDERS.get(name)
+        if provider is None:
+            logger.warning("Unknown provider requested in search_all: %s", name)
+            continue
+        if ProviderCapability.SEARCH not in provider.capabilities:
+            continue
+        selected.append(provider)
+
+    if not selected:
+        return []
+
+    raw_results = await asyncio.gather(
+        *(p.search(query, f, page, size) for p in selected),
+        return_exceptions=True,
+    )
+
+    results: list[SearchResult] = []
+    for provider, outcome in zip(selected, raw_results):
+        if isinstance(outcome, Exception):
+            logger.warning(
+                "Provider %s failed search for q=%r: %s",
+                provider.name,
+                query,
+                outcome,
+            )
+            continue
+        results.append(outcome)
+    return results
 
 
 async def get_references(paper_id: str) -> list[PaperReference]:

@@ -54,6 +54,7 @@ class PaperAdd(BaseModel):
 
 class CollectionPaperRead(BaseModel):
     paper_canonical_key: str
+    paper_group_key: str | None = None
     position: int
     added_at: datetime
 

@@ -1,7 +1,29 @@
-"""Canonical key generation for papers."""
+"""Canonical and grouping key generation for papers."""
 
 import hashlib
 import re
+
+
+def _normalize_title(title: str | None) -> str:
+    if not title:
+        return ""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", title.lower())).strip()
+
+
+def _normalize_author_surnames(authors: list[str] | None) -> list[str]:
+    surnames: list[str] = []
+    for author in authors or []:
+        parts = re.sub(r"\s+", " ", author.strip().lower()).split(" ")
+        if parts and parts[-1]:
+            surnames.append(parts[-1])
+    return sorted(surnames)
+
+
+def build_paper_group_key(title: str | None, authors: list[str] | None) -> str:
+    parts = [_normalize_title(title), ",".join(_normalize_author_surnames(authors))]
+    combined = "|".join(parts)
+    hash_val = hashlib.sha256(combined.encode()).hexdigest()[:16]
+    return f"group:{hash_val}"
 
 
 def build_canonical_key(
@@ -16,13 +38,7 @@ def build_canonical_key(
         normalized = normalized.removeprefix("http://doi.org/")
         return f"doi:{normalized}"
 
-    parts: list[str] = []
-    if title:
-        normalized_title = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
-        parts.append(normalized_title)
-    if authors:
-        sorted_names = sorted(a.split()[-1].lower() for a in authors if a.strip())
-        parts.append(",".join(sorted_names))
+    parts: list[str] = [build_paper_group_key(title, authors)]
     if year:
         parts.append(str(year))
 

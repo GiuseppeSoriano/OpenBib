@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Collection, UserStats } from "@/types";
-import { FolderOpen, Search, GitFork } from "lucide-react";
+import { BookMarked, FolderOpen, Search, GitFork } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
@@ -41,6 +41,10 @@ export default function DashboardPage() {
           <span className="stat-label">Collections</span>
         </div>
         <div className="stat-card card">
+          <span className="stat-value">{stats?.library_total ?? 0}</span>
+          <span className="stat-label">In Library</span>
+        </div>
+        <div className="stat-card card">
           <span className="stat-value">{stats?.total_papers ?? 0}</span>
           <span className="stat-label">Total saves</span>
         </div>
@@ -64,6 +68,16 @@ export default function DashboardPage() {
             {collections
               ? `${collections.length} collection${collections.length !== 1 ? "s" : ""}`
               : "Organize your references"}
+          </p>
+        </Link>
+
+        <Link to="/library" className="dashboard-action card">
+          <BookMarked size={24} />
+          <h3>Library</h3>
+          <p>
+            {stats
+              ? `${stats.library_total} paper${stats.library_total !== 1 ? "s" : ""} archived`
+              : "Your persistent paper archive"}
           </p>
         </Link>
 

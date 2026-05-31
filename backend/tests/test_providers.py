@@ -36,6 +36,7 @@ def test_map_work_minimal():
     }
     paper = _map_work(raw)
     assert paper.canonical_key == "doi:10.1234/test"
+    assert paper.paper_group_key.startswith("group:")
     assert paper.title == "Test Paper"
     assert len(paper.authors) == 1
     assert paper.authors[0].name == "Alice Smith"
