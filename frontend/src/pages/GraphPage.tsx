@@ -11,6 +11,7 @@ import type {
   GraphNode,
   GraphResponse,
   PaperMetadata,
+  RelationDirection,
 } from "@/types";
 import {
   Layers3,
@@ -194,12 +195,13 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   });
 
   const expandFromKeys = useCallback(
-    (fromKeys: string[], focusKey: string | null) => {
+    (fromKeys: string[], focusKey: string | null, direction: RelationDirection) => {
       if (fromKeys.length === 0) return;
       expandMutation.mutate({
         from_keys: fromKeys,
         focus_key: focusKey,
         existing_group_keys: graphState.nodes.map((n) => n.id),
+        direction,
         order,
         limit_per_node: limitPerNode,
       });
@@ -210,13 +212,17 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   // Keep cytoscape event handlers pointed at the latest state/handlers.
   const actionsRef = useRef<{
     nodes: GraphNode[];
-    expandFocused: (node: GraphNode) => void;
+    expandFocused: (node: GraphNode, direction: RelationDirection) => void;
   }>({ nodes: [], expandFocused: () => {} });
   useEffect(() => {
     actionsRef.current = {
       nodes: graphState.nodes,
-      expandFocused: (node) =>
-        expandFromKeys([node.selected_version.canonical_key], node.selected_version.canonical_key),
+      expandFocused: (node, direction) =>
+        expandFromKeys(
+          [node.selected_version.canonical_key],
+          node.selected_version.canonical_key,
+          direction,
+        ),
     };
   });
 
@@ -238,6 +244,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
       from_keys: baseQuery.data.nodes.map((n) => n.selected_version.canonical_key),
       focus_key: null,
       existing_group_keys: baseQuery.data.nodes.map((n) => n.id),
+      direction: "cited_by",
       order,
       limit_per_node: limitPerNode,
     });
@@ -290,7 +297,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
     cy.on("tap", "node", (evt: EventObject) => setSelectedNodeId(evt.target.id()));
     cy.on("dbltap", "node", (evt: EventObject) => {
       const node = actionsRef.current.nodes.find((n) => n.id === evt.target.id());
-      if (node) actionsRef.current.expandFocused(node);
+      if (node) actionsRef.current.expandFocused(node, "cited_by");
     });
     cy.on("tap", (evt: EventObject) => {
       if (evt.target === cy) setSelectedNodeId(null);
@@ -376,12 +383,25 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
           </label>
           <button
             className="btn btn-secondary"
-            onClick={() => expandFromKeys(graphState.nodes.map((n) => n.selected_version.canonical_key), null)}
+            onClick={() =>
+              expandFromKeys(graphState.nodes.map((n) => n.selected_version.canonical_key), null, "cited_by")
+            }
             disabled={!hasGraph || isExpanding}
             title="Add papers that cite any node currently shown"
           >
             {isExpanding ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
-            Expand all
+            Expand citers
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() =>
+              expandFromKeys(graphState.nodes.map((n) => n.selected_version.canonical_key), null, "cites")
+            }
+            disabled={!hasGraph || isExpanding}
+            title="Add the references of any node currently shown (papers it cites)"
+          >
+            {isExpanding ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
+            Expand references
           </button>
         </div>
       </div>
@@ -469,15 +489,32 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
                 <button
                   className="btn btn-secondary"
                   disabled={isExpanding}
+                  title="Add papers that cite this one"
                   onClick={() =>
                     expandFromKeys(
                       [selectedNode.selected_version.canonical_key],
                       selectedNode.selected_version.canonical_key,
+                      "cited_by",
                     )
                   }
                 >
                   {isExpanding ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
-                  Expand from here
+                  Citers
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  disabled={isExpanding}
+                  title="Add the papers this one cites (its references)"
+                  onClick={() =>
+                    expandFromKeys(
+                      [selectedNode.selected_version.canonical_key],
+                      selectedNode.selected_version.canonical_key,
+                      "cites",
+                    )
+                  }
+                >
+                  {isExpanding ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
+                  References
                 </button>
               </div>
             </div>
@@ -487,7 +524,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
             <span><span className="legend-dot seed" /> Seed</span>
             <span><span className="legend-dot grouped" /> Grouped versions</span>
             <span><span className="legend-dot" /> Paper (size = citations)</span>
-            <span><span className="legend-line solid" /> Cited by →</span>
+            <span><span className="legend-line solid" /> A → B: A cites B</span>
           </div>
         </div>
       )}

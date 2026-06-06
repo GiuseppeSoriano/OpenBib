@@ -40,19 +40,25 @@ class GraphQuery(BaseModel):
 
 CitingOrder = Literal["cited_by_count", "recent"]
 
+# Which way to grow the graph from the chosen node(s):
+#   cited_by → add papers that CITE them (citers; edge citer → node)
+#   cites    → add papers they CITE (references; edge node → reference)
+RelationDirection = Literal["cited_by", "cites"]
+
 
 class ExpandRequest(BaseModel):
     """Grow the graph by one citation level.
 
-    Adds papers that *cite* the chosen nodes as new leaves. ``focus_key`` set →
-    expand only that node (focused); ``None`` → expand every node in
-    ``from_keys`` (global). ``existing_group_keys`` are the groups already on
-    screen, so only genuinely new leaves are returned.
+    Adds related papers as new nodes. ``direction`` chooses citers vs.
+    references. ``focus_key`` set → expand only that node (focused); ``None`` →
+    expand every node in ``from_keys`` (global). ``existing_group_keys`` are the
+    groups already on screen, so only genuinely new nodes are returned.
     """
 
     from_keys: list[str] = Field(default_factory=list)
     focus_key: str | None = None
     existing_group_keys: list[str] = Field(default_factory=list)
+    direction: RelationDirection = "cited_by"
     order: CitingOrder = "cited_by_count"
     limit_per_node: int = Field(25, ge=1, le=100)
 

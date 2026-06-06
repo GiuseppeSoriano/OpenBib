@@ -27,6 +27,7 @@ async def expand_graph(body: ExpandRequest, user: CurrentUser, db: DB, redis: Re
         from_keys=body.from_keys,
         focus_key=body.focus_key,
         existing_group_keys=body.existing_group_keys,
+        direction=body.direction,
         order=body.order,
         limit_per_node=body.limit_per_node,
         saved_keys=saved,

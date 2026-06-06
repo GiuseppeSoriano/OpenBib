@@ -143,3 +143,34 @@ async def test_base_graph_links_intra_set_via_references(db, monkeypatch):
 
     rows = (await db.execute(select(PaperGraphEdge))).scalars().all()
     assert {(r.source_key, r.target_key) for r in rows} == {("doi:a", "doi:b")}
+
+
+@pytest.mark.asyncio
+async def test_expand_cites_direction_orients_edges_seed_to_reference(db, monkeypatch):
+    db.add(_cached("doi:seed", "group:seed", "Seed", openalex_id="https://openalex.org/W1"))
+    await db.flush()
+
+    refs = [_meta("doi:r1", "group:r1", "Reference One", "https://openalex.org/W9", cited_by_count=99)]
+
+    async def fake_refs(openalex_id, *, order="cited_by_count", limit=25):
+        return refs
+
+    monkeypatch.setattr(registry, "list_referenced_papers", fake_refs)
+
+    res = await graph_service.expand_graph(
+        db,
+        None,
+        from_keys=["doi:seed"],
+        existing_group_keys=["group:seed"],
+        direction="cites",
+        saved_keys={"doi:seed", "doi:r1"},
+    )
+
+    # In "cites" mode the seed is the citer: edge points seed -> reference.
+    assert {n.id for n in res.nodes} == {"group:r1"}
+    assert {(e.source, e.target, e.relation_type) for e in res.edges} == {
+        ("group:seed", "group:r1", "cited_by")
+    }
+
+    rows = (await db.execute(select(PaperGraphEdge))).scalars().all()
+    assert {(r.source_key, r.target_key) for r in rows} == {("doi:seed", "doi:r1")}

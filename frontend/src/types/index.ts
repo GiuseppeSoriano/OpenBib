@@ -218,10 +218,14 @@ export interface GraphResponse {
 
 export type CitingOrder = "cited_by_count" | "recent";
 
+// "cited_by" → add papers that cite the node; "cites" → add its references.
+export type RelationDirection = "cited_by" | "cites";
+
 export interface ExpandRequest {
   from_keys: string[];
   focus_key?: string | null;
   existing_group_keys: string[];
+  direction: RelationDirection;
   order: CitingOrder;
   limit_per_node: number;
 }

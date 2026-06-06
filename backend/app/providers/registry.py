@@ -214,6 +214,27 @@ async def list_citing_papers(
         return []
 
 
+async def list_referenced_papers(
+    openalex_id: str | None,
+    *,
+    order: str = "cited_by_count",
+    limit: int = 25,
+) -> list[PaperMetadata]:
+    """Papers that the given work cites — its references — as fully-mapped
+    metadata (mirror of ``list_citing_papers``). OpenAlex-only; returns ``[]``
+    gracefully when no OpenAlex id is known."""
+    if not openalex_id:
+        return []
+    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
+    try:
+        return await _openalex.list_referenced_papers(openalex_id, sort=sort, per_page=limit)
+    except Exception:
+        logger.warning(
+            "OpenAlex failed referenced-papers for %s", openalex_id, exc_info=True
+        )
+        return []
+
+
 async def get_openalex_reference_ids(openalex_id: str | None) -> list[str]:
     """OpenAlex work ids (full URLs) referenced by the given work.
 

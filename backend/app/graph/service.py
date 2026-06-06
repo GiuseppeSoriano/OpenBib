@@ -261,26 +261,32 @@ async def _resolve_openalex_id(db: AsyncSession, paper: PaperMetadataRead) -> st
     return None
 
 
-async def fetch_citing(
+async def fetch_related(
     db: AsyncSession,
     redis: aioredis.Redis | None,
     paper: PaperMetadataRead,
     *,
+    direction: str = "cited_by",
     order: str = "cited_by_count",
     limit: int = 25,
 ) -> list[PaperMetadataRead]:
-    """Papers that cite ``paper``, fully mapped. Redis-cached per
-    (work, order, limit); fetched papers are upserted into the metadata cache
-    so they resolve consistently elsewhere."""
+    """Papers related to ``paper``, fully mapped. ``direction="cited_by"`` →
+    papers that cite it (citers); ``direction="cites"`` → papers it cites
+    (references). Redis-cached per (work, direction, order, limit); fetched
+    papers are upserted into the metadata cache so they resolve elsewhere."""
     openalex_id = await _resolve_openalex_id(db, paper)
     if not openalex_id:
         return []
-    cache_id = f"{openalex_id}|{order}|{limit}"
+    query_type = "references" if direction == "cites" else "citations"
+    cache_id = f"{openalex_id}|{direction}|{order}|{limit}"
     if redis is not None:
-        cached = await provider_cache.cache_get(redis, "openalex", "citations", cache_id)
+        cached = await provider_cache.cache_get(redis, "openalex", query_type, cache_id)
         if cached is not None:
             return [PaperMetadataRead.model_validate(item) for item in cached]
-    papers = await registry.list_citing_papers(openalex_id, order=order, limit=limit)
+    if direction == "cites":
+        papers = await registry.list_referenced_papers(openalex_id, order=order, limit=limit)
+    else:
+        papers = await registry.list_citing_papers(openalex_id, order=order, limit=limit)
     if papers:
         await paper_service.cache_papers(db, papers)
     reads = [_read_from_metadata(p) for p in papers]
@@ -288,7 +294,7 @@ async def fetch_citing(
         await provider_cache.cache_set(
             redis,
             "openalex",
-            "citations",
+            query_type,
             cache_id,
             [r.model_dump(mode="json") for r in reads],
         )
@@ -441,17 +447,21 @@ async def expand_graph(
     from_keys: list[str],
     focus_key: str | None = None,
     existing_group_keys: list[str] | None = None,
+    direction: str = "cited_by",
     order: str = "cited_by_count",
     limit_per_node: int = 25,
     saved_keys: set[str] | None = None,
 ) -> ExpandResponse:
-    """Grow the graph by one citation level — add papers that *cite* the chosen
-    nodes as new leaves. Returns only new leaf nodes plus the citing→cited edges
-    (including edges onto nodes already on screen). Persists an edge only when
-    both endpoints are saved papers."""
+    """Grow the graph by one citation level. ``direction="cited_by"`` adds papers
+    that *cite* the chosen nodes (edge citer → node); ``direction="cites"`` adds
+    papers they *reference* (edge node → reference). Edges are always stored
+    citing→cited (``relation_type="cited_by"``). Returns only new nodes plus the
+    edges (including edges onto nodes already on screen). Persists an edge only
+    when both endpoints are saved papers."""
     existing = set(existing_group_keys or [])
     saved = saved_keys or set()
     targets = [focus_key] if focus_key else list(dict.fromkeys(from_keys))
+    cites = direction == "cites"
 
     new_nodes: dict[str, GraphNode] = {}
     edges: set[tuple[str, str, str]] = set()
@@ -462,19 +472,29 @@ async def expand_graph(
             continue
         from_paper = await _resolve_read(db, from_key)
         from_group = from_paper.paper_group_key
-        citing = await fetch_citing(db, redis, from_paper, order=order, limit=limit_per_node)
-        for citer in citing:
-            cgroup = citer.paper_group_key
-            if cgroup == from_group:
+        related = await fetch_related(
+            db, redis, from_paper, direction=direction, order=order, limit=limit_per_node
+        )
+        for other in related:
+            ogroup = other.paper_group_key
+            if ogroup == from_group:
                 continue
-            edges.add((cgroup, from_group, CITED_BY))
-            if cgroup not in existing and cgroup not in new_nodes:
-                new_nodes[cgroup] = _node_from_read(citer)
-            if citer.canonical_key in saved and from_key in saved:
+            # Always citing → cited. In "cites" mode the seed is the citer;
+            # in "cited_by" mode the discovered paper is the citer.
+            if cites:
+                src_group, tgt_group = from_group, ogroup
+                src_key, tgt_key = from_key, other.canonical_key
+            else:
+                src_group, tgt_group = ogroup, from_group
+                src_key, tgt_key = other.canonical_key, from_key
+            edges.add((src_group, tgt_group, CITED_BY))
+            if ogroup not in existing and ogroup not in new_nodes:
+                new_nodes[ogroup] = _node_from_read(other)
+            if src_key in saved and tgt_key in saved:
                 edges_to_store.append(
                     {
-                        "source_key": citer.canonical_key,
-                        "target_key": from_key,
+                        "source_key": src_key,
+                        "target_key": tgt_key,
                         "relation_type": CITED_BY,
                         "provider_source": "openalex",
                     }
