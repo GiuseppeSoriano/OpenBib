@@ -166,7 +166,6 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const cyRef = useRef<Core | null>(null);
-  const autoExpandedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode === "paper") setKeyInput(paramKey);
@@ -227,30 +226,12 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   });
 
   // Reset accumulated graph whenever a fresh base arrives (also on order change).
+  // The seed(s) are shown un-expanded — the user chooses Citers/References.
   useEffect(() => {
     if (!baseQuery.data) return;
     setGraphState({ nodes: baseQuery.data.nodes, edges: baseQuery.data.edges });
     setSelectedNodeId(null);
-    autoExpandedRef.current = null;
   }, [baseQuery.data]);
-
-  // Single-paper view: auto-expand once so the first level of citing papers shows.
-  useEffect(() => {
-    if (mode !== "paper" || !baseQuery.data || baseQuery.data.nodes.length === 0) return;
-    const sig = `${paramKey}|${order}`;
-    if (autoExpandedRef.current === sig) return;
-    autoExpandedRef.current = sig;
-    expandMutation.mutate({
-      from_keys: baseQuery.data.nodes.map((n) => n.selected_version.canonical_key),
-      focus_key: null,
-      existing_group_keys: baseQuery.data.nodes.map((n) => n.id),
-      direction: "cited_by",
-      order,
-      limit_per_node: limitPerNode,
-    });
-    // limitPerNode intentionally omitted — changing it shouldn't re-seed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, baseQuery.data, paramKey, order]);
 
   // Re-run layout whenever the node/edge count changes (base load + expansions).
   useEffect(() => {
