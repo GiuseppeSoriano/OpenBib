@@ -178,6 +178,61 @@ async def get_citations(paper_id: str) -> list[PaperReference]:
     return []
 
 
+# Map the UI-facing ordering choice to an OpenAlex sort expression.
+_CITING_SORTS = {
+    "cited_by_count": "cited_by_count:desc",
+    "recent": "publication_date:desc",
+}
+
+
+async def list_citing_papers(
+    openalex_id: str | None,
+    *,
+    order: str = "cited_by_count",
+    limit: int = 25,
+) -> list[PaperMetadata]:
+    """Papers that cite the given work, as fully-mapped metadata.
+
+    Targets OpenAlex (the citation authority with sortable results). Returns
+    ``[]`` gracefully when no OpenAlex id is known — for example for papers
+    that only exist as a ``hash:`` canonical key. ``order`` is one of
+    ``cited_by_count`` (default) or ``recent``.
+
+    NOTE: EuropePMC also exposes citations but keyed by PMID/PMCID (a different
+    native id) with no sort support, so it is intentionally not chained here
+    for v1; pmid-based fallback is future work.
+    """
+    if not openalex_id:
+        return []
+    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
+    try:
+        return await _openalex.list_citing_papers(openalex_id, sort=sort, per_page=limit)
+    except Exception:
+        logger.warning(
+            "OpenAlex failed citing-papers for %s", openalex_id, exc_info=True
+        )
+        return []
+
+
+async def get_openalex_reference_ids(openalex_id: str | None) -> list[str]:
+    """OpenAlex work ids (full URLs) referenced by the given work.
+
+    Used to compute exact citation edges *among papers already in the app*:
+    intersect these ids with the in-app paper set. OpenAlex-only on purpose —
+    its ``referenced_works`` is a complete, single-call list whose id format
+    matches our cached ``openalex_id`` values.
+    """
+    if not openalex_id:
+        return []
+    short = openalex_id.rsplit("/", 1)[-1]
+    try:
+        refs = await _openalex.get_references(short)
+    except Exception:
+        logger.warning("OpenAlex failed references for %s", openalex_id, exc_info=True)
+        return []
+    return [r.canonical_key for r in refs if r.canonical_key]
+
+
 async def get_author(author_id: str) -> AuthorMetadata | None:
     """Author profiles — only OpenAlex for MVP."""
     try:

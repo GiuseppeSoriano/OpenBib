@@ -1,5 +1,13 @@
 import axios from "axios";
-import type { LibraryEntry, LibraryEntryListItem, LibraryVersionPin } from "@/types";
+import type {
+  CitingOrder,
+  ExpandRequest,
+  ExpandResponse,
+  GraphResponse,
+  LibraryEntry,
+  LibraryEntryListItem,
+  LibraryVersionPin,
+} from "@/types";
 
 const api = axios.create({
   baseURL: "/api/v1",
@@ -94,6 +102,34 @@ export const library = {
     await api.delete(
       `/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`,
     );
+  },
+};
+
+/* ── Graph namespace ───────────────────────────────────── */
+export const graph = {
+  async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") {
+    const { data } = await api.get<GraphResponse>(
+      `/graph/paper/${encodeURIComponent(paperKey)}`,
+      { params: { order } },
+    );
+    return data;
+  },
+  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") {
+    const { data } = await api.get<GraphResponse>(
+      `/graph/collection/${encodeURIComponent(collectionId)}`,
+      { params: { order } },
+    );
+    return data;
+  },
+  async buildLibrary(order: CitingOrder = "cited_by_count") {
+    const { data } = await api.get<GraphResponse>("/graph/library", {
+      params: { order },
+    });
+    return data;
+  },
+  async expand(body: ExpandRequest) {
+    const { data } = await api.post<ExpandResponse>("/graph/expand", body);
+    return data;
   },
 };
 

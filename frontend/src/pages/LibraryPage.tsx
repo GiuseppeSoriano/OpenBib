@@ -54,6 +54,11 @@ export default function LibraryPage() {
           Your persistent archive of saved papers. Notes and tags anchor here so
           they survive moving papers between collections and version upgrades.
         </p>
+        <div className="library-toolbar">
+          <Link to="/graph/library" className="btn btn-secondary">
+            <GitFork size={14} /> View citation graph
+          </Link>
+        </div>
       </header>
 
       {errorMessage && (

@@ -215,3 +215,18 @@ export interface GraphResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+export type CitingOrder = "cited_by_count" | "recent";
+
+export interface ExpandRequest {
+  from_keys: string[];
+  focus_key?: string | null;
+  existing_group_keys: string[];
+  order: CitingOrder;
+  limit_per_node: number;
+}
+
+export interface ExpandResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

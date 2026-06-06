@@ -19,6 +19,10 @@
   max-width: 60ch;
 }
 
+.library-toolbar {
+  margin-top: var(--space-md);
+}
+
 .library-status {
   color: var(--color-text-secondary);
   padding: var(--space-xl) 0;

@@ -228,6 +228,35 @@ class OpenAlexProvider(BaseProvider):
             for w in data.get("results", [])
         ]
 
+    async def list_citing_papers(
+        self,
+        paper_id: str,
+        *,
+        sort: str = "cited_by_count:desc",
+        per_page: int = 25,
+    ) -> list[PaperMetadata]:
+        """Papers that cite ``paper_id``, returned as fully-mapped metadata.
+
+        ``paper_id`` is an OpenAlex work id (full URL or short ``W…`` form).
+        ``sort`` is an OpenAlex sort expression — ``cited_by_count:desc`` for
+        the most influential citing papers, ``publication_date:desc`` for the
+        most recent. Unlike ``get_citations`` (which returns lightweight
+        references), each result carries canonical/group keys and
+        ``cited_by_count`` so it can become a graph node directly.
+        """
+        await self._limiter.acquire()
+        work_id = paper_id.rsplit("/", 1)[-1]
+        params = _params()
+        params["filter"] = f"cites:{work_id}"
+        params["sort"] = sort
+        params["per_page"] = str(max(1, min(per_page, 200)))
+        resp = await self._client.get("/works", params=params)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+        return [_map_work(w) for w in data.get("results", [])]
+
     async def get_author(self, author_id: str) -> AuthorMetadata | None:
         await self._limiter.acquire()
         resp = await self._client.get(f"/authors/{author_id}", params=_params())

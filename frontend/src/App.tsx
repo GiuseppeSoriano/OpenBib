@@ -35,8 +35,10 @@ export default function App() {
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
         <Route path="/library" element={<LibraryPage />} />
-        <Route path="/graph" element={<GraphPage />} />
-        <Route path="/graph/:paperKey" element={<GraphPage />} />
+        <Route path="/graph" element={<GraphPage mode="manual" />} />
+        <Route path="/graph/library" element={<GraphPage mode="library" />} />
+        <Route path="/graph/collection/:collectionId" element={<GraphPage mode="collection" />} />
+        <Route path="/graph/:paperKey" element={<GraphPage mode="paper" />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />

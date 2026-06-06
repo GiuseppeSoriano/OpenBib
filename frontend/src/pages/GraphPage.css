@@ -2,6 +2,51 @@
   font-size: 1.4rem;
   font-weight: 600;
   margin-bottom: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.graph-mode-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-charcoal);
+  background: rgba(224, 175, 160, 0.22);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+/* ── Expansion order toggle ─────────────────────────────── */
+.graph-order-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.graph-order-toggle button {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.82rem;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  border: none;
+  border-right: 1px solid var(--color-border);
+}
+.graph-order-toggle button:last-child {
+  border-right: none;
+}
+.graph-order-toggle button.active {
+  background: var(--color-charcoal);
+  color: var(--color-off-white, #f4f3ee);
+}
+
+@keyframes graph-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.graph-page .spin {
+  animation: graph-spin 0.8s linear infinite;
 }
 
 .graph-controls {

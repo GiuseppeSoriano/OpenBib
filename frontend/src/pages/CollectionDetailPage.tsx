@@ -216,6 +216,9 @@ export default function CollectionDetailPage() {
               Created {new Date(collection.created_at).toLocaleDateString()}
             </p>
             <div className="cd-toolbar">
+              <Link to={`/graph/collection/${id}`} className="btn btn-secondary">
+                <GitFork size={14} /> View citation graph
+              </Link>
               <button className="btn btn-secondary" onClick={handleExportBibtex}>
                 <Download size={14} /> Export BibTeX
               </button>
