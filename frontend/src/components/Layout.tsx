@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   FolderOpen,
   BookMarked,
-  GitFork,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -16,7 +15,6 @@ const NAV_ITEMS = [
   { to: "/search", icon: Search, label: "Search" },
   { to: "/collections", icon: FolderOpen, label: "Collections" },
   { to: "/library", icon: BookMarked, label: "Library" },
-  { to: "/graph", icon: GitFork, label: "Graph" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 

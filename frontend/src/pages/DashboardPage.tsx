@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Collection, UserStats } from "@/types";
-import { BookMarked, FolderOpen, Search, GitFork } from "lucide-react";
+import { BookMarked, FolderOpen, Search } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
@@ -79,12 +79,6 @@ export default function DashboardPage() {
               ? `${stats.library_total} paper${stats.library_total !== 1 ? "s" : ""} archived`
               : "Your persistent paper archive"}
           </p>
-        </Link>
-
-        <Link to="/graph" className="dashboard-action card">
-          <GitFork size={24} />
-          <h3>Citation graph</h3>
-          <p>Explore citation networks visually</p>
         </Link>
 
       </div>
