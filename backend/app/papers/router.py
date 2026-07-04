@@ -1,5 +1,6 @@
 """Papers router — lookup, search, states, tags."""
 
+import json
 import logging
 
 from fastapi import APIRouter, Query
@@ -36,6 +37,29 @@ async def search_papers(
 ):
     from app.providers.registry import search_all
     from app.providers.base import SearchFilters
+    from app.providers.cache import cache_get, cache_set
+
+    # One cache entry per full fan-out query: repeat searches within
+    # cache_ttl_search are served from Redis without touching providers.
+    cache_id = json.dumps(
+        {
+            "q": q,
+            "providers": sorted(providers) if providers else None,
+            "year_from": year_from,
+            "year_to": year_to,
+            "author": author,
+            "open_access_only": open_access_only,
+            "page": page,
+            "size": size,
+        },
+        sort_keys=True,
+    )
+    try:
+        cached = await cache_get(redis, "fanout", "search", cache_id)
+    except Exception:  # Redis down → bypass the cache, never fail the search
+        cached = None
+    if cached is not None:
+        return cached
 
     filters = SearchFilters(
         year_from=year_from,
@@ -55,7 +79,16 @@ async def search_papers(
 
     merged = service.round_robin_dedupe(results)
     await service.cache_papers(db, merged.papers)
-    return service.build_search_response(merged)
+    response = service.build_search_response(merged)
+
+    # Don't cache total provider failure — the next attempt should retry.
+    if results:
+        try:
+            await cache_set(redis, "fanout", "search", cache_id, response)
+        except Exception:
+            logger.debug("Search cache write failed; continuing without cache")
+
+    return response
 
 
 # ── Dismiss (must be before {paper_key:path} routes) ────────
