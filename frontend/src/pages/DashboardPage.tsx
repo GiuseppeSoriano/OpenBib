@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import Skeleton from "@/components/ui/Skeleton";
@@ -8,6 +9,7 @@ import { BookMarked, FolderOpen, Search } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
 
   const { data: collections, isLoading: collectionsLoading } = useQuery({
@@ -33,55 +35,57 @@ export default function DashboardPage() {
     <div className="dashboard">
       <header className="dashboard-header">
         <h1>
-          Welcome{user?.display_name ? `, ${user.display_name}` : ""}
+          {user?.display_name
+            ? t("dashboard.welcomeNamed", { name: user.display_name })
+            : t("dashboard.welcome")}
         </h1>
-        <p>Your academic reference workspace</p>
+        <p>{t("dashboard.subtitle")}</p>
       </header>
 
       {/* Stats */}
       <div className="dashboard-stats">
         <div className="stat-card card">
           {statValue(stats?.total_collections ?? collections?.length)}
-          <span className="stat-label">Collections</span>
+          <span className="stat-label">{t("dashboard.statCollections")}</span>
         </div>
         <div className="stat-card card">
           {statValue(stats?.library_total)}
-          <span className="stat-label">In Library</span>
+          <span className="stat-label">{t("dashboard.statInLibrary")}</span>
         </div>
         <div className="stat-card card">
           {statValue(stats?.total_papers)}
-          <span className="stat-label">Total saves</span>
+          <span className="stat-label">{t("dashboard.statTotalSaves")}</span>
         </div>
         <div className="stat-card card">
           {statValue(stats?.distinct_papers)}
-          <span className="stat-label">Unique papers</span>
+          <span className="stat-label">{t("dashboard.statUniquePapers")}</span>
         </div>
       </div>
 
       <div className="dashboard-grid">
         <Link to="/search" className="dashboard-action card">
           <Search size={24} />
-          <h3>Search papers</h3>
-          <p>Search across OpenAlex, arXiv, Crossref, and Europe PMC</p>
+          <h3>{t("dashboard.searchTitle")}</h3>
+          <p>{t("dashboard.searchDesc")}</p>
         </Link>
 
         <Link to="/collections" className="dashboard-action card">
           <FolderOpen size={24} />
-          <h3>Collections</h3>
+          <h3>{t("dashboard.collectionsTitle")}</h3>
           <p>
             {collections
-              ? `${collections.length} collection${collections.length !== 1 ? "s" : ""}`
-              : "Organize your references"}
+              ? t("dashboard.collectionsCount", { count: collections.length })
+              : t("dashboard.collectionsFallback")}
           </p>
         </Link>
 
         <Link to="/library" className="dashboard-action card">
           <BookMarked size={24} />
-          <h3>Library</h3>
+          <h3>{t("dashboard.libraryTitle")}</h3>
           <p>
             {stats
-              ? `${stats.library_total} paper${stats.library_total !== 1 ? "s" : ""} archived`
-              : "Your persistent paper archive"}
+              ? t("dashboard.libraryCount", { count: stats.library_total })
+              : t("dashboard.libraryFallback")}
           </p>
         </Link>
 
@@ -95,19 +99,19 @@ export default function DashboardPage() {
 
       {collections && collections.length > 0 && (
         <section className="dashboard-recent">
-          <h2>Recent collections</h2>
+          <h2>{t("dashboard.recent")}</h2>
           <div className="collection-list">
             {collections.slice(0, 5).map((c) => (
               <Link to={`/collections/${c.id}`} key={c.id} className="card collection-card">
                 <div className="collection-card-header">
                   <h4>{c.name}</h4>
-                  <span className="badge">{c.visibility}</span>
+                  <span className="badge">{t(`collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`)}</span>
                 </div>
                 {c.description && (
                   <p className="collection-desc">{c.description}</p>
                 )}
                 <span className="collection-meta">
-                  {c.paper_count} paper{c.paper_count !== 1 ? "s" : ""}
+                  {t("dashboard.paperCount", { count: c.paper_count })}
                 </span>
               </Link>
             ))}

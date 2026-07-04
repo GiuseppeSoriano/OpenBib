@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/ui/Logo";
 import "./AuthPage.css";
 
 export default function RegisterPage() {
+  const { t } = useTranslation();
   const { register } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -19,7 +21,7 @@ export default function RegisterPage() {
       await register(email, password, displayName || undefined);
       navigate("/");
     } catch {
-      setError("Registration failed — email may already be in use");
+      setError(t("auth.registerError"));
     }
   };
 
@@ -28,15 +30,15 @@ export default function RegisterPage() {
       <div className="auth-card card">
         <div className="auth-header">
           <Logo size={44} className="auth-logo" />
-          <h1>Create account</h1>
-          <p>Get started with OpenBib</p>
+          <h1>{t("auth.createAccount")}</h1>
+          <p>{t("auth.getStarted")}</p>
         </div>
 
         {error && <div className="auth-error">{error}</div>}
 
         <form onSubmit={handleSubmit} className="auth-form">
           <label>
-            Email
+            {t("auth.email")}
             <input
               className="input"
               type="email"
@@ -47,17 +49,17 @@ export default function RegisterPage() {
             />
           </label>
           <label>
-            Display name
+            {t("auth.displayName")}
             <input
               className="input"
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Optional"
+              placeholder={t("auth.optional")}
             />
           </label>
           <label>
-            Password
+            {t("auth.password")}
             <input
               className="input"
               type="password"
@@ -68,12 +70,12 @@ export default function RegisterPage() {
             />
           </label>
           <button type="submit" className="btn btn-primary auth-submit">
-            Create account
+            {t("auth.createAccount")}
           </button>
         </form>
 
         <p className="auth-alt">
-          Already have an account? <Link to="/login">Sign in</Link>
+          {t("auth.haveAccount")} <Link to="/login">{t("auth.signIn")}</Link>
         </p>
       </div>
     </div>

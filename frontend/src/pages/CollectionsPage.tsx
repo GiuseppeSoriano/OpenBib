@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import type { Collection, Visibility } from "@/types";
 import { Plus, Trash2, FolderOpen } from "lucide-react";
@@ -10,6 +11,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import "./CollectionsPage.css";
 
 export default function CollectionsPage() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -56,10 +58,10 @@ export default function CollectionsPage() {
   return (
     <div className="collections-page">
       <div className="page-header">
-        <h1>Collections</h1>
+        <h1>{t("collections.title")}</h1>
         <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
           <Plus size={16} />
-          New collection
+          {t("collections.new")}
         </button>
       </div>
 
@@ -67,7 +69,7 @@ export default function CollectionsPage() {
         <form onSubmit={handleCreate} className="card create-form">
           <input
             className="input"
-            placeholder="Collection name"
+            placeholder={t("collections.namePlaceholder")}
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
@@ -75,7 +77,7 @@ export default function CollectionsPage() {
           />
           <input
             className="input"
-            placeholder="Description (optional)"
+            placeholder={t("collections.descriptionPlaceholder")}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -84,20 +86,20 @@ export default function CollectionsPage() {
             value={visibility}
             onChange={(e) => setVisibility(e.target.value as Visibility)}
           >
-            <option value="private">Private</option>
-            <option value="shared">Shared</option>
-            <option value="public">Public</option>
+            <option value="private">{t("collections.visibilityPrivate")}</option>
+            <option value="shared">{t("collections.visibilityShared")}</option>
+            <option value="public">{t("collections.visibilityPublic")}</option>
           </select>
           <div className="create-form-actions">
             <button type="submit" className="btn btn-primary">
-              Create
+              {t("collections.create")}
             </button>
             <button
               type="button"
               className="btn btn-secondary"
               onClick={() => setShowForm(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </form>
@@ -112,16 +114,16 @@ export default function CollectionsPage() {
               <h3>{c.name}</h3>
               {c.description && <p>{c.description}</p>}
               <div className="collection-item-meta">
-                <span className="badge">{c.visibility}</span>
-                <span>
-                  {c.paper_count} paper{c.paper_count !== 1 ? "s" : ""}
+                <span className="badge">
+                  {t(`collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`)}
                 </span>
+                <span>{t("collections.paperCount", { count: c.paper_count })}</span>
               </div>
             </Link>
             <button
               className="btn-ghost delete-btn"
               onClick={() => setPendingDelete(c)}
-              title="Delete collection"
+              title={t("collections.deleteCollectionTitle")}
             >
               <Trash2 size={14} />
             </button>
@@ -132,12 +134,12 @@ export default function CollectionsPage() {
       {collections && collections.length === 0 && (
         <EmptyState
           icon={FolderOpen}
-          title="No collections yet"
-          description="Create one to start organizing your references."
+          title={t("collections.emptyTitle")}
+          description={t("collections.emptyDescription")}
           action={
             <button className="btn btn-primary" onClick={() => setShowForm(true)}>
               <Plus size={16} />
-              New collection
+              {t("collections.new")}
             </button>
           }
         />
@@ -145,9 +147,9 @@ export default function CollectionsPage() {
 
       {pendingDelete && (
         <ConfirmModal
-          title={`Delete "${pendingDelete.name}"?`}
-          message={`This will permanently delete the collection and remove all ${pendingDelete.paper_count} paper${pendingDelete.paper_count !== 1 ? "s" : ""} saved inside it. This action cannot be undone.`}
-          confirmLabel="Delete collection"
+          title={t("collections.deleteTitle", { name: pendingDelete.name })}
+          message={t("collections.deleteMessage", { count: pendingDelete.paper_count })}
+          confirmLabel={t("collections.deleteConfirm")}
           onConfirm={() => {
             deleteMutation.mutate(pendingDelete.id);
             setPendingDelete(null);

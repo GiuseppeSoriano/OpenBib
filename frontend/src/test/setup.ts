@@ -1,6 +1,7 @@
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import i18n from "@/i18n";
 
 // jsdom does not implement matchMedia; ThemeContext needs it.
 Object.defineProperty(window, "matchMedia", {
@@ -17,8 +18,9 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   localStorage.clear();
   delete document.documentElement.dataset.theme;
+  await i18n.changeLanguage("en");
 });

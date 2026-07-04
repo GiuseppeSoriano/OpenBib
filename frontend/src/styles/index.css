@@ -135,6 +135,30 @@ button {
   padding: var(--space-sm);
 }
 
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-text-secondary);
+}
+.language-switcher:hover {
+  color: var(--color-text);
+}
+
+.language-select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.language-select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
 /* ── Card ───────────────────────────────────────────────── */
 
 .card {

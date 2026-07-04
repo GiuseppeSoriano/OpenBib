@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import type { AxiosError } from "axios";
 import api, { library } from "@/lib/api";
 import type {
@@ -41,12 +42,9 @@ function providerLabel(name: string): string {
   return PROVIDER_LABELS[name] ?? name;
 }
 
-function searchErrorMessage(error: unknown): string {
+function searchErrorMessage(error: unknown, fallback: string): string {
   const axiosError = error as AxiosError<{ detail?: string }>;
-  return (
-    axiosError.response?.data?.detail ||
-    "Search failed. The provider may be temporarily unavailable — please try again."
-  );
+  return axiosError.response?.data?.detail || fallback;
 }
 
 function getSelectedPaper(
@@ -59,6 +57,7 @@ function getSelectedPaper(
 }
 
 export default function SearchPage() {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [unsavedOnly, setUnsavedOnly] = useState(false);
@@ -137,7 +136,7 @@ export default function SearchPage() {
 
   return (
     <div className="search-page">
-      <h1>Search papers</h1>
+      <h1>{t("search.title")}</h1>
 
       <form onSubmit={handleSearch} className="search-bar">
         <div className="search-input-wrap">
@@ -145,14 +144,14 @@ export default function SearchPage() {
           <input
             className="input search-input"
             type="text"
-            placeholder="Search by title, author, DOI, keyword…"
+            placeholder={t("search.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
           />
         </div>
         <button type="submit" className="btn btn-primary">
-          Search
+          {t("search.submit")}
         </button>
       </form>
 
@@ -160,19 +159,22 @@ export default function SearchPage() {
 
       {isError && (
         <p className="search-status search-error">
-          {searchErrorMessage(error)}
+          {searchErrorMessage(error, t("search.errorFallback"))}
         </p>
       )}
 
       {data && (
         <div className="search-results">
           <p className="search-meta">
-            {data.total_count.toLocaleString()} grouped results from{" "}
-            <strong>
-              {data.providers.length > 0 ? data.providers.map(providerLabel).join(", ") : "no providers"}
-            </strong>
+            {t("search.resultsMeta", {
+              count: data.total_count,
+              providers:
+                data.providers.length > 0
+                  ? data.providers.map(providerLabel).join(", ")
+                  : t("search.noProviders"),
+            })}
             {data.raw_total_count !== data.total_count && (
-              <> · {data.raw_total_count.toLocaleString()} raw matches before grouping</>
+              <> · {t("search.rawMatches", { count: data.raw_total_count })}</>
             )}
           </p>
 
@@ -183,7 +185,7 @@ export default function SearchPage() {
                 checked={unsavedOnly}
                 onChange={(e) => setUnsavedOnly(e.target.checked)}
               />
-              <span>Unsaved only</span>
+              <span>{t("search.unsavedOnly")}</span>
             </label>
             <label className="filter-toggle">
               <input
@@ -191,11 +193,11 @@ export default function SearchPage() {
                 checked={hideDismissed}
                 onChange={(e) => setHideDismissed(e.target.checked)}
               />
-              <span>Hide dismissed</span>
+              <span>{t("search.hideDismissed")}</span>
             </label>
             {filteredItems && filteredItems.length !== data.items.length && (
               <span className="filter-count">
-                Showing {filteredItems.length} of {data.items.length}
+                {t("search.showingOf", { shown: filteredItems.length, total: data.items.length })}
               </span>
             )}
           </div>
@@ -240,8 +242,8 @@ export default function SearchPage() {
       {filteredItems && filteredItems.length === 0 && (
         <EmptyState
           icon={SearchX}
-          title="No papers found"
-          description="Try a different query or adjust the filters."
+          title={t("search.emptyTitle")}
+          description={t("search.emptyDescription")}
         />
       )}
     </div>
@@ -263,6 +265,7 @@ function PaperGroupCard({
   isDismissed: boolean;
   inLibrary: boolean;
 }) {
+  const { t } = useTranslation();
   const [showVersions, setShowVersions] = useState(false);
 
   return (
@@ -274,7 +277,7 @@ function PaperGroupCard({
           onClick={() => setShowVersions((current) => !current)}
         >
           <Layers3 size={14} />
-          {item.version_count} versions
+          {t("paper.versions", { count: item.version_count })}
           <ChevronDown size={14} className={showVersions ? "group-toggle-icon open" : "group-toggle-icon"} />
         </button>
       </div>
@@ -290,7 +293,7 @@ function PaperGroupCard({
                 className={`version-chip${isActive ? " active" : ""}`}
                 onClick={() => onSelectVersion(version)}
               >
-                <span>{version.version || version.publication_date?.slice(0, 4) || "Undated"}</span>
+                <span>{version.version || version.publication_date?.slice(0, 4) || t("paper.undated")}</span>
                 <span>{providerLabel(version.provider_source)}</span>
               </button>
             );
@@ -308,7 +311,7 @@ function PaperGroupCard({
         headerBadges={[
           <span key="versions" className="badge badge-grouped">
             <Layers3 size={11} />
-            {item.version_count} versions grouped
+            {t("paper.versionsGrouped", { count: item.version_count })}
           </span>,
         ]}
       />
@@ -333,6 +336,7 @@ function PaperCard({
   className?: string;
   headerBadges?: ReactNode[];
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showCollections, setShowCollections] = useState(false);
   const [sessionAdded, setSessionAdded] = useState<Set<string>>(new Set());
@@ -453,18 +457,18 @@ function PaperCard({
           {headerBadges}
           {paper.version && <span className="badge badge-version">{paper.version}</span>}
           {isSaved && (
-            <span className="badge badge-saved" title="Saved in a collection">
+            <span className="badge badge-saved" title={t("paper.savedTitle")}>
               <FolderCheck size={11} />
-              Saved
+              {t("paper.saved")}
             </span>
           )}
           {inLibraryNow && (
-            <span className="badge badge-library" title="Saved in your Library">
+            <span className="badge badge-library" title={t("paper.inLibraryTitle")}>
               <BookMarked size={11} />
-              In Library
+              {t("paper.inLibrary")}
             </span>
           )}
-          {isDismissed && <span className="badge badge-dismissed">Dismissed</span>}
+          {isDismissed && <span className="badge badge-dismissed">{t("paper.dismissed")}</span>}
         </div>
         <div className="paper-links">
           {paper.doi && (
@@ -497,8 +501,10 @@ function PaperCard({
       <div className="paper-meta">
         {paper.venue && <span>{paper.venue}</span>}
         {paper.publication_date && <span>{paper.publication_date.slice(0, 4)}</span>}
-        {paper.cited_by_count != null && <span>{paper.cited_by_count} citations</span>}
-        {paper.open_access && <span className="badge">Open Access</span>}
+        {paper.cited_by_count != null && (
+          <span>{t("paper.citations", { count: paper.cited_by_count })}</span>
+        )}
+        {paper.open_access && <span className="badge">{t("paper.openAccess")}</span>}
       </div>
 
       {paper.abstract && (
@@ -523,32 +529,28 @@ function PaperCard({
           className="btn btn-secondary save-to-library-btn"
           onClick={() => saveToLibraryMutation.mutate()}
           disabled={inLibraryNow || saveToLibraryMutation.isPending}
-          title={
-            inLibraryNow
-              ? "Already in your Library"
-              : "Save this version to your persistent Library"
-          }
+          title={inLibraryNow ? t("paper.alreadyInLibrary") : t("paper.saveToLibraryTitle")}
         >
           <BookMarked size={14} />
-          {inLibraryNow ? "In Library" : "Save to Library"}
+          {inLibraryNow ? t("paper.inLibrary") : t("paper.saveToLibrary")}
         </button>
 
         <div className="add-to-collection" ref={dropdownRef}>
           <button
             className="btn btn-secondary"
             onClick={() => setShowCollections((current) => !current)}
-            title="Add to collection"
+            title={t("paper.addToCollection")}
           >
             <FolderPlus size={14} />
-            Add to collection
+            {t("paper.addToCollection")}
           </button>
           {showCollections && (
             <div className="add-to-collection-dropdown">
               {!collections || collections.length === 0 ? (
                 <div className="no-collections">
-                  No collections yet.{" "}
+                  {t("paper.noCollectionsYet")}{" "}
                   <Link to="/collections" onClick={() => setShowCollections(false)}>
-                    Create one
+                    {t("paper.createOne")}
                   </Link>
                 </div>
               ) : (
@@ -562,7 +564,7 @@ function PaperCard({
                     {alreadyInCollection(collection.id) ? (
                       <>
                         <Check size={12} style={{ display: "inline", marginRight: 4 }} />
-                        Already saved
+                        {t("paper.alreadySaved")}
                       </>
                     ) : (
                       collection.name
@@ -579,7 +581,7 @@ function PaperCard({
           className="btn btn-secondary explore-graph-link"
         >
           <GitFork size={14} />
-          Explore graph
+          {t("paper.exploreGraph")}
         </Link>
 
         {isDismissed ? (
@@ -587,20 +589,20 @@ function PaperCard({
             className="btn btn-secondary dismiss-btn"
             onClick={() => undismissMutation.mutate()}
             disabled={undismissMutation.isPending}
-            title="Undo dismiss"
+            title={t("paper.undoDismiss")}
           >
             <Undo2 size={14} />
-            Undo dismiss
+            {t("paper.undoDismiss")}
           </button>
         ) : (
           <button
             className="btn btn-secondary dismiss-btn"
             onClick={() => dismissMutation.mutate()}
             disabled={dismissMutation.isPending}
-            title="Not relevant to my research"
+            title={t("paper.notRelevantTitle")}
           >
             <EyeOff size={14} />
-            Not relevant
+            {t("paper.notRelevant")}
           </button>
         )}
       </div>

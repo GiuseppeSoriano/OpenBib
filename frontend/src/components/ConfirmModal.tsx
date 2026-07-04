@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import Modal from "@/components/ui/Modal";
 
 interface ConfirmModalProps {
@@ -12,20 +13,21 @@ interface ConfirmModalProps {
 export default function ConfirmModal({
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  const { t } = useTranslation();
   return (
     <Modal open onClose={onCancel} title={title}>
       <p className="confirm-message">{message}</p>
       <div className="confirm-actions">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
-          {cancelLabel}
+          {cancelLabel ?? t("common.cancel")}
         </button>
         <button type="button" className="btn btn-danger" onClick={onConfirm}>
-          {confirmLabel}
+          {confirmLabel ?? t("common.confirm")}
         </button>
       </div>
     </Modal>

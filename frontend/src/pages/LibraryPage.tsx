@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { library } from "@/lib/api";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -31,6 +32,7 @@ function providerLabel(name: string | null | undefined): string {
 }
 
 export default function LibraryPage() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const focusKey = searchParams.get("focus");
   const [expanded, setExpanded] = useState<string | null>(focusKey);
@@ -50,15 +52,12 @@ export default function LibraryPage() {
     <div className="library-page">
       <header className="library-header">
         <h1>
-          <BookMarked size={20} /> Library
+          <BookMarked size={20} /> {t("library.title")}
         </h1>
-        <p className="library-subtitle">
-          Your persistent archive of saved papers. Notes and tags anchor here so
-          they survive moving papers between collections and version upgrades.
-        </p>
+        <p className="library-subtitle">{t("library.subtitle")}</p>
         <div className="library-toolbar">
           <Link to="/graph/library" className="btn btn-secondary">
-            <GitFork size={14} /> View citation graph
+            <GitFork size={14} /> {t("library.viewGraph")}
           </Link>
         </div>
       </header>
@@ -74,11 +73,11 @@ export default function LibraryPage() {
       {entries && entries.length === 0 && (
         <EmptyState
           icon={BookMarked}
-          title="Your library is empty"
-          description="Save a paper from Search or add one to a collection to start filling it."
+          title={t("library.emptyTitle")}
+          description={t("library.emptyDescription")}
           action={
             <Link to="/search" className="btn btn-primary">
-              Search papers
+              {t("library.searchPapers")}
             </Link>
           }
         />
@@ -103,9 +102,9 @@ export default function LibraryPage() {
 
       {pendingDelete && (
         <ConfirmModal
-          title="Delete from Library"
-          message="This deletes the entry, all pinned versions, and any notes/tags/states anchored to this paper. This cannot be undone. Continue?"
-          confirmLabel="Delete"
+          title={t("library.deleteTitle")}
+          message={t("library.deleteMessage")}
+          confirmLabel={t("common.delete")}
           onConfirm={async () => {
             const groupKey = pendingDelete;
             setPendingDelete(null);
@@ -115,12 +114,9 @@ export default function LibraryPage() {
               const status = (err as { response?: { status?: number; data?: { detail?: string } } }).response?.status;
               const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
               if (status === 409) {
-                setErrorMessage(
-                  detail ??
-                    "Cannot delete this library entry — at least one pinned version is still in a collection. Remove it from the relevant collection(s) first.",
-                );
+                setErrorMessage(detail ?? t("library.delete409"));
               } else {
-                setErrorMessage(detail ?? "Delete failed");
+                setErrorMessage(detail ?? t("library.deleteFailed"));
               }
             }
           }}
@@ -144,6 +140,7 @@ function LibraryEntryCard({
   onRequestDelete: () => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const primary = item.primary_version;
   const title = primary?.title ?? item.paper_group_key;
@@ -155,7 +152,7 @@ function LibraryEntryCard({
           <h3>{title}</h3>
           {item.version_count > 1 && (
             <span className="badge badge-grouped">
-              <Layers3 size={11} /> {item.version_count} versions
+              <Layers3 size={11} /> {t("paper.versions", { count: item.version_count })}
             </span>
           )}
           {primary?.version && (
@@ -167,7 +164,7 @@ function LibraryEntryCard({
             <Link
               to={`/graph/${encodeURIComponent(primary.canonical_key)}`}
               className="btn-ghost"
-              title="Explore in graph"
+              title={t("library.exploreInGraph")}
             >
               <GitFork size={14} />
             </Link>
@@ -178,12 +175,12 @@ function LibraryEntryCard({
               target="_blank"
               rel="noopener noreferrer"
               className="btn-ghost"
-              title="DOI"
+              title={t("paper.doi")}
             >
               <ExternalLink size={14} />
             </a>
           )}
-          <button className="btn-ghost" onClick={onRequestDelete} title="Delete from Library">
+          <button className="btn-ghost" onClick={onRequestDelete} title={t("library.deleteFromLibrary")}>
             <Trash2 size={14} />
           </button>
         </div>
@@ -199,7 +196,7 @@ function LibraryEntryCard({
         {primary?.venue && <span>{primary.venue}</span>}
         {primary?.publication_date && <span>{primary.publication_date.slice(0, 4)}</span>}
         {primary?.cited_by_count != null && (
-          <span>{primary.cited_by_count} citations</span>
+          <span>{t("paper.citations", { count: primary.cited_by_count })}</span>
         )}
         {primary?.provider_sources && primary.provider_sources.length > 0 && (
           <span className="library-entry-providers">
@@ -220,7 +217,7 @@ function LibraryEntryCard({
 
       <button className="library-entry-toggle btn-ghost" onClick={onToggle}>
         {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        {expanded ? "Hide details" : "View details"}
+        {expanded ? t("library.hideDetails") : t("library.viewDetails")}
       </button>
 
       {expanded && (
@@ -246,6 +243,7 @@ function LibraryEntryDetail({
   onError: (msg: string) => void;
   onRefresh: () => void;
 }) {
+  const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const detailKey = ["library-entry", groupKey] as const;
 
@@ -262,7 +260,7 @@ function LibraryEntryDetail({
     },
     onError: (err: unknown) => {
       const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      onError(detail ?? "Re-pin failed");
+      onError(detail ?? t("library.repinFailed"));
     },
   });
 
@@ -276,22 +274,19 @@ function LibraryEntryDetail({
       const status = (err as { response?: { status?: number } }).response?.status;
       const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
       if (status === 409) {
-        onError(
-          detail ??
-            "Cannot remove this version — it is still referenced by one or more collections. Remove it from those collections first.",
-        );
+        onError(detail ?? t("library.remove409"));
       } else {
-        onError(detail ?? "Remove failed");
+        onError(detail ?? t("library.removeFailed"));
       }
     },
   });
 
-  if (isLoading) return <p className="library-status">Loading details…</p>;
+  if (isLoading) return <p className="library-status">{t("library.loadingDetails")}</p>;
   if (!entry) return null;
 
   return (
     <div className="library-entry-detail">
-      <h4>Pinned versions</h4>
+      <h4>{t("library.pinnedVersions")}</h4>
       <div className="library-pin-list">
         {entry.pinned_versions.map((pin) => {
           const isPrimary = pin.paper_canonical_key === entry.primary_canonical_key;
@@ -305,8 +300,8 @@ function LibraryEntryDetail({
                   {pin.paper_canonical_key}
                 </code>
                 {isPrimary && (
-                  <span className="badge badge-primary" title="Default version shown for this entry">
-                    <Pin size={10} /> Primary
+                  <span className="badge badge-primary" title={t("library.primaryTitle")}>
+                    <Pin size={10} /> {t("library.primary")}
                   </span>
                 )}
                 {pin.source_provider && (
@@ -315,7 +310,7 @@ function LibraryEntryDetail({
                   </span>
                 )}
                 {stateForPin && (
-                  <span className="badge badge-state">{stateForPin.state.replace("_", " ")}</span>
+                  <span className="badge badge-state">{t(`paper.states.${stateForPin.state}`)}</span>
                 )}
               </div>
               <div className="library-pin-actions">
@@ -325,9 +320,9 @@ function LibraryEntryDetail({
                     className="btn-ghost"
                     disabled={repinMutation.isPending}
                     onClick={() => repinMutation.mutate(pin.paper_canonical_key)}
-                    title="Make this version the default shown"
+                    title={t("library.repinTitle")}
                   >
-                    <Pin size={12} /> Re-pin as primary
+                    <Pin size={12} /> {t("library.repin")}
                   </button>
                 )}
                 <button
@@ -335,17 +330,13 @@ function LibraryEntryDetail({
                   className="btn-ghost"
                   disabled={removeVersionMutation.isPending}
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        `Remove this version pin? Will fail with 409 if "${pin.paper_canonical_key}" is still in any of your collections.`,
-                      )
-                    ) {
+                    if (window.confirm(t("library.removeConfirm"))) {
                       removeVersionMutation.mutate(pin.paper_canonical_key);
                     }
                   }}
-                  title="Remove this version pin"
+                  title={t("library.removeVersionTitle")}
                 >
-                  <Trash2 size={12} /> Remove version
+                  <Trash2 size={12} /> {t("library.removeVersion")}
                 </button>
               </div>
             </div>
@@ -354,8 +345,10 @@ function LibraryEntryDetail({
       </div>
 
       <p className="library-entry-meta">
-        {entry.notes_count} note{entry.notes_count !== 1 ? "s" : ""} · Added{" "}
-        {new Date(entry.created_at).toLocaleDateString()}
+        {t("library.notesCount", { count: entry.notes_count })} ·{" "}
+        {t("library.addedOn", {
+          date: new Intl.DateTimeFormat(i18n.language).format(new Date(entry.created_at)),
+        })}
       </p>
     </div>
   );

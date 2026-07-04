@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Outlet, NavLink, Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/ui/Logo";
 import ThemeToggle from "@/components/ui/ThemeToggle";
+import LanguageSwitcher from "@/components/ui/LanguageSwitcher";
 import {
   Search,
   LayoutDashboard,
@@ -17,14 +19,15 @@ import {
 import "./Layout.css";
 
 const NAV_ITEMS = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/search", icon: Search, label: "Search" },
-  { to: "/collections", icon: FolderOpen, label: "Collections" },
-  { to: "/library", icon: BookMarked, label: "Library" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+  { to: "/search", icon: Search, labelKey: "nav.search" },
+  { to: "/collections", icon: FolderOpen, labelKey: "nav.collections" },
+  { to: "/library", icon: BookMarked, labelKey: "nav.library" },
+  { to: "/settings", icon: Settings, labelKey: "nav.settings" },
 ] as const;
 
 export default function Layout() {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -53,6 +56,7 @@ export default function Layout() {
           <Logo size={24} className="brand-logo" />
           <span className="brand-text">OpenBib</span>
         </Link>
+        <LanguageSwitcher />
         <ThemeToggle />
       </header>
 
@@ -65,7 +69,7 @@ export default function Layout() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+          {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => (
             <NavLink
               key={to}
               to={to}
@@ -76,7 +80,7 @@ export default function Layout() {
               }
             >
               <Icon size={18} />
-              <span>{label}</span>
+              <span>{t(labelKey)}</span>
             </NavLink>
           ))}
         </nav>
@@ -84,6 +88,7 @@ export default function Layout() {
         <div className="sidebar-footer">
           <div className="sidebar-theme">
             <ThemeToggle />
+            <LanguageSwitcher />
           </div>
           {user ? (
             <>
@@ -97,16 +102,16 @@ export default function Layout() {
                 type="button"
                 className="btn-ghost nav-link"
                 onClick={handleLogout}
-                title="Logout"
+                title={t("nav.logout")}
               >
                 <LogOut size={18} />
-                <span>Logout</span>
+                <span>{t("nav.logout")}</span>
               </button>
             </>
           ) : (
             <NavLink to="/login" className="nav-link" onClick={closeSidebar}>
               <LogIn size={18} />
-              <span>Sign in</span>
+              <span>{t("nav.signIn")}</span>
             </NavLink>
           )}
         </div>
@@ -118,7 +123,7 @@ export default function Layout() {
 
       {/* Bottom navigation — visible below 640px */}
       <nav className="bottom-nav">
-        {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+        {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => (
           <NavLink
             key={to}
             to={to}
@@ -128,7 +133,7 @@ export default function Layout() {
             }
           >
             <Icon size={20} />
-            <span>{label}</span>
+            <span>{t(labelKey)}</span>
           </NavLink>
         ))}
       </nav>
