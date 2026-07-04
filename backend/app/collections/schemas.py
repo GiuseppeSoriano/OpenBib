@@ -6,6 +6,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.papers.schemas import PaperMetadataRead
+
 
 class Visibility(str, Enum):
     private = "private"
@@ -57,5 +59,6 @@ class CollectionPaperRead(BaseModel):
     paper_group_key: str | None = None
     position: int
     added_at: datetime
+    paper: PaperMetadataRead | None = None
 
     model_config = {"from_attributes": True}

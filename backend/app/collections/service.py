@@ -211,9 +211,10 @@ async def list_papers(
         raise ForbiddenError()
 
     from app.papers.models import CachedPaperMetadata
+    from app.papers.service import cached_paper_to_read
 
     stmt = (
-        select(CollectionPaper, CachedPaperMetadata.paper_group_key)
+        select(CollectionPaper, CachedPaperMetadata)
         .outerjoin(
             CachedPaperMetadata,
             CachedPaperMetadata.canonical_key == CollectionPaper.paper_canonical_key,
@@ -225,11 +226,14 @@ async def list_papers(
     return [
         {
             "paper_canonical_key": cp.paper_canonical_key,
-            "paper_group_key": group_key,
+            "paper_group_key": cached.paper_group_key if cached else None,
             "position": cp.position,
             "added_at": cp.added_at,
+            # Full metadata snapshot; None when no cached row exists yet —
+            # the frontend degrades to showing the canonical key.
+            "paper": cached_paper_to_read(cached) if cached else None,
         }
-        for cp, group_key in rows
+        for cp, cached in rows
     ]
 
 

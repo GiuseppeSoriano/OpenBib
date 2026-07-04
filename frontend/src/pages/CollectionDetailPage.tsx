@@ -1,30 +1,35 @@
 import { useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import type { Collection, CollectionPaper, Note } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
+import PaperCard from "@/components/paper/PaperCard";
+import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
+import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import EmptyState from "@/components/ui/EmptyState";
+import { useToast } from "@/components/ui/Toast";
 import {
   Trash2,
   GitFork,
   BookMarked,
   StickyNote,
   Plus,
-  X,
   ChevronDown,
   ChevronUp,
   Edit3,
   Save,
   Download,
   Upload,
+  FileText,
 } from "lucide-react";
 import "./CollectionDetailPage.css";
 
-const READING_STATES = [
-  "unseen", "seen", "saved", "to_read", "reading", "read", "important", "ignored", "excluded",
-] as const;
-
 export default function CollectionDetailPage() {
+  const { t, i18n } = useTranslation();
+  const { toast } = useToast();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -36,6 +41,7 @@ export default function CollectionDetailPage() {
   const [showImport, setShowImport] = useState(false);
   const [importDois, setImportDois] = useState("");
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
   const { data: collection, isLoading } = useQuery({
     queryKey: ["collection", id],
@@ -140,7 +146,7 @@ export default function CollectionDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["collection", id] });
       setImportDois("");
       setShowImport(false);
-      alert(`Imported: ${data.added} added, ${data.skipped} skipped`);
+      toast(t("collections.imported", { added: data.added, skipped: data.skipped }), "success");
     },
   });
 
@@ -157,12 +163,19 @@ export default function CollectionDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      alert("Export failed");
+      toast(t("collections.exportFailed"), "error");
     }
   };
 
-  if (isLoading) return <p className="loading-text">Loading…</p>;
-  if (!collection) return <p className="loading-text">Collection not found</p>;
+  const formatDate = (value: string) =>
+    new Intl.DateTimeFormat(i18n.language).format(new Date(value));
+
+  if (isLoading) return <SkeletonCard count={3} />;
+  if (!collection) return <p className="cd-empty">{t("collections.notFound")}</p>;
+
+  const visibilityLabel = t(
+    `collections.visibility${collection.visibility.charAt(0).toUpperCase()}${collection.visibility.slice(1)}`,
+  );
 
   return (
     <div className="collection-detail">
@@ -174,20 +187,20 @@ export default function CollectionDetailPage() {
               className="input"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              placeholder="Collection name"
+              placeholder={t("collections.namePlaceholder")}
             />
             <input
               className="input"
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
-              placeholder="Description"
+              placeholder={t("collections.descriptionPlaceholder")}
             />
             <div className="cd-edit-actions">
               <button className="btn btn-primary" onClick={() => updateMutation.mutate()}>
-                <Save size={14} /> Save
+                <Save size={14} /> {t("collections.save")}
               </button>
               <button className="btn btn-secondary" onClick={() => setEditing(false)}>
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
@@ -195,7 +208,7 @@ export default function CollectionDetailPage() {
           <>
             <div className="cd-title-row">
               <h1>{collection.name}</h1>
-              <span className="badge">{collection.visibility}</span>
+              <span className="badge">{visibilityLabel}</span>
               <button
                 className="btn-ghost"
                 onClick={() => {
@@ -203,7 +216,7 @@ export default function CollectionDetailPage() {
                   setEditDesc(collection.description || "");
                   setEditing(true);
                 }}
-                title="Edit collection"
+                title={t("collections.edit")}
               >
                 <Edit3 size={16} />
               </button>
@@ -212,25 +225,25 @@ export default function CollectionDetailPage() {
               <p className="cd-description">{collection.description}</p>
             )}
             <p className="cd-meta">
-              {collection.paper_count} paper{collection.paper_count !== 1 ? "s" : ""} ·
-              Created {new Date(collection.created_at).toLocaleDateString()}
+              {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
+              {t("collections.createdOn", { date: formatDate(collection.created_at) })}
             </p>
             <div className="cd-toolbar">
               <Link to={`/graph/collection/${id}`} className="btn btn-secondary">
-                <GitFork size={14} /> View citation graph
+                <GitFork size={14} /> {t("collections.viewGraph")}
               </Link>
               <button className="btn btn-secondary" onClick={handleExportBibtex}>
-                <Download size={14} /> Export BibTeX
+                <Download size={14} /> {t("collections.exportBibtex")}
               </button>
               <button className="btn btn-secondary" onClick={() => setShowImport((s) => !s)}>
-                <Upload size={14} /> Import DOIs
+                <Upload size={14} /> {t("collections.importDois")}
               </button>
             </div>
             {showImport && (
               <div className="cd-import-form card">
                 <textarea
                   className="input note-textarea"
-                  placeholder="Paste DOIs, one per line…"
+                  placeholder={t("collections.importPlaceholder")}
                   value={importDois}
                   onChange={(e) => setImportDois(e.target.value)}
                   rows={4}
@@ -243,7 +256,9 @@ export default function CollectionDetailPage() {
                     if (dois.length > 0) importDoisMutation.mutate(dois);
                   }}
                 >
-                  Import {importDois.split("\n").filter((d) => d.trim()).length} DOIs
+                  {t("collections.importButton", {
+                    count: importDois.split("\n").filter((d) => d.trim()).length,
+                  })}
                 </button>
               </div>
             )}
@@ -262,39 +277,45 @@ export default function CollectionDetailPage() {
         >
           <input
             className="input"
-            placeholder="Paste a DOI or canonical key to add…"
+            placeholder={t("collections.addPaperPlaceholder")}
             value={addPaperKey}
             onChange={(e) => setAddPaperKey(e.target.value)}
           />
           <button type="submit" className="btn btn-primary" disabled={!addPaperKey.trim()}>
-            <Plus size={14} /> Add paper
+            <Plus size={14} /> {t("collections.addPaper")}
           </button>
         </form>
       </div>
 
       {/* Paper list */}
       <div className="cd-papers">
-        <h2>Papers</h2>
+        <h2>{t("collections.papersHeading")}</h2>
         {papers && papers.length === 0 && (
-          <p className="cd-empty">
-            No papers yet. Search for papers and add them, or paste a DOI/canonical key above.
-          </p>
-        )}
-        {papers && papers.map((cp) => (
-          <CollectionPaperItem
-            key={cp.paper_canonical_key}
-            paper={cp}
-            onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
+          <EmptyState
+            icon={FileText}
+            title={t("collections.emptyPapersTitle")}
+            description={t("collections.emptyPapersDescription")}
           />
-        ))}
+        )}
+        {papers &&
+          papers.map((cp) => (
+            <CollectionPaperItem
+              key={cp.paper_canonical_key}
+              item={cp}
+              onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
+              onOpenDetails={setDetailsKey}
+            />
+          ))}
       </div>
 
       {/* Delete confirmation modal */}
       {pendingDeleteKey && (
         <ConfirmModal
-          title="Remove paper"
-          message={`Are you sure you want to remove "${pendingDeleteKey.length > 60 ? pendingDeleteKey.slice(0, 60) + "…" : pendingDeleteKey}" from this collection?`}
-          confirmLabel="Remove"
+          title={t("collections.removePaperTitle")}
+          message={t("collections.removePaperMessage", {
+            name: paperDisplayName(papers, pendingDeleteKey),
+          })}
+          confirmLabel={t("collections.remove")}
           onConfirm={() => {
             removePaperMutation.mutate(pendingDeleteKey);
             setPendingDeleteKey(null);
@@ -303,14 +324,11 @@ export default function CollectionDetailPage() {
         />
       )}
 
-      {/* Notes section */}
+      {/* Collection notes section */}
       <div className="cd-notes-section">
-        <button
-          className="btn btn-secondary"
-          onClick={() => setShowNotes((s) => !s)}
-        >
+        <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)}>
           <StickyNote size={14} />
-          Notes
+          {t("collections.notes")}
           {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
 
@@ -325,13 +343,13 @@ export default function CollectionDetailPage() {
             >
               <textarea
                 className="input note-textarea"
-                placeholder="Write a note about this collection…"
+                placeholder={t("collections.notePlaceholder")}
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 rows={3}
               />
               <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
-                Add note
+                {t("paper.addNote")}
               </button>
             </form>
 
@@ -339,11 +357,11 @@ export default function CollectionDetailPage() {
               <div key={note.id} className="note-item card">
                 <p>{note.content}</p>
                 <div className="note-meta">
-                  <span>{new Date(note.updated_at).toLocaleString()}</span>
+                  <span>{formatDate(note.updated_at)}</span>
                   <button
                     className="btn-ghost"
                     onClick={() => deleteNoteMutation.mutate(note.id)}
-                    title="Delete note"
+                    title={t("common.delete")}
                   >
                     <Trash2 size={12} />
                   </button>
@@ -353,219 +371,110 @@ export default function CollectionDetailPage() {
           </div>
         )}
       </div>
+
+      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }
 
-function CollectionPaperItem({
-  paper,
-  onRemove,
-}: {
-  paper: CollectionPaper;
-  onRemove: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [showNotes, setShowNotes] = useState(false);
-  const [newTag, setNewTag] = useState("");
-  const [newNote, setNewNote] = useState("");
+function paperDisplayName(papers: CollectionPaper[] | undefined, key: string): string {
+  const match = papers?.find((cp) => cp.paper_canonical_key === key);
+  const name = match?.paper?.title ?? key;
+  return name.length > 60 ? `${name.slice(0, 60)}…` : name;
+}
 
-  const { data: states } = useQuery({
-    queryKey: ["paper-state", paper.paper_canonical_key],
-    queryFn: async () => {
-      const { data } = await api.get(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/states`);
-      return data as { state: string }[];
-    },
-  });
+function CollectionPaperItem({
+  item,
+  onRemove,
+  onOpenDetails,
+}: {
+  item: CollectionPaper;
+  onRemove: () => void;
+  onOpenDetails: (key: string) => void;
+}) {
+  const { t, i18n } = useTranslation();
 
   const { data: tags } = useQuery({
-    queryKey: ["paper-tags", paper.paper_canonical_key],
+    queryKey: ["paper-tags", item.paper_canonical_key],
     queryFn: async () => {
-      const { data } = await api.get(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/tags`);
+      const { data } = await api.get(
+        `/papers/${encodeURIComponent(item.paper_canonical_key)}/tags`,
+      );
       return data as { tag: string }[];
     },
   });
 
-  const { data: notes } = useQuery({
-    queryKey: ["notes", "paper", paper.paper_canonical_key],
-    queryFn: async () => {
-      const { data } = await api.get<Note[]>("/notes", {
-        params: { target_type: "paper", target_key: paper.paper_canonical_key },
-      });
-      return data;
-    },
-    enabled: showNotes,
-  });
+  const actions = (
+    <>
+      <div className="cp-state">
+        <ReadingStateSelect paperKey={item.paper_canonical_key} />
+      </div>
+      {item.paper_group_key && (
+        <Link
+          to={`/library?focus=${encodeURIComponent(item.paper_group_key)}`}
+          className="btn-ghost"
+          title={t("collections.openInLibrary")}
+        >
+          <BookMarked size={14} />
+        </Link>
+      )}
+      <Link
+        to={`/graph/${encodeURIComponent(item.paper_canonical_key)}`}
+        className="btn-ghost"
+        title={t("paper.exploreGraph")}
+      >
+        <GitFork size={14} />
+      </Link>
+      <button className="btn-ghost" onClick={onRemove} title={t("collections.removeFromCollection")}>
+        <Trash2 size={14} />
+      </button>
+      <span className="cp-added">
+        {t("collections.addedOn", {
+          date: new Intl.DateTimeFormat(i18n.language).format(new Date(item.added_at)),
+        })}
+      </span>
+    </>
+  );
 
-  const setStateMutation = useMutation({
-    mutationFn: async (state: string) => {
-      await api.put(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/state`, {
-        state,
-      });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paper-state", paper.paper_canonical_key] });
-    },
-  });
-
-  const addTagMutation = useMutation({
-    mutationFn: async (tag: string) => {
-      await api.post(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/tags`, { tag });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paper-tags", paper.paper_canonical_key] });
-      setNewTag("");
-    },
-  });
-
-  const removeTagMutation = useMutation({
-    mutationFn: async (tag: string) => {
-      await api.delete(`/papers/${encodeURIComponent(paper.paper_canonical_key)}/tags/${encodeURIComponent(tag)}`);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paper-tags", paper.paper_canonical_key] });
-    },
-  });
-
-  const createNoteMutation = useMutation({
-    mutationFn: async () => {
-      await api.post("/notes", {
-        target_type: "paper",
-        target_key: paper.paper_canonical_key,
-        content: newNote,
-      });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notes", "paper", paper.paper_canonical_key] });
-      setNewNote("");
-    },
-  });
-
-  const deleteNoteMutation = useMutation({
-    mutationFn: async (noteId: string) => {
-      await api.delete(`/notes/${noteId}`);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notes", "paper", paper.paper_canonical_key] });
-    },
-  });
-
-  const currentState = states?.[0]?.state ?? "unseen";
-
-  return (
-    <div className="cp-item card">
-      <div className="cp-header">
-        <span className="cp-key" title={paper.paper_canonical_key}>
-          {paper.paper_canonical_key.length > 60
-            ? paper.paper_canonical_key.slice(0, 60) + "…"
-            : paper.paper_canonical_key}
-        </span>
-        <div className="cp-actions">
-          {paper.paper_group_key && (
-            <Link
-              to={`/library?focus=${encodeURIComponent(paper.paper_group_key)}`}
-              className="btn-ghost"
-              title="Open in Library — notes and tags live there"
-            >
-              <BookMarked size={14} />
-            </Link>
-          )}
-          <Link
-            to={`/graph/${encodeURIComponent(paper.paper_canonical_key)}`}
-            className="btn-ghost"
-            title="Explore in graph"
-          >
-            <GitFork size={14} />
-          </Link>
+  if (!item.paper) {
+    // No cached metadata yet — degrade to the canonical key.
+    return (
+      <div className="cp-item card">
+        <div className="cp-header">
           <button
-            className="btn-ghost"
-            onClick={onRemove}
-            title="Remove from collection (the paper stays in your Library)"
+            type="button"
+            className="cp-key paper-title-btn"
+            title={item.paper_canonical_key}
+            onClick={() => onOpenDetails(item.paper_canonical_key)}
           >
-            <Trash2 size={14} />
+            {item.paper_canonical_key.length > 60
+              ? item.paper_canonical_key.slice(0, 60) + "…"
+              : item.paper_canonical_key}
           </button>
         </div>
+        <div className="paper-actions">{actions}</div>
       </div>
+    );
+  }
 
-      <div className="cp-controls">
-        {/* Reading state */}
-        <div className="state-selector">
-          <span>State:</span>
-          <select
-            value={currentState}
-            onChange={(e) => setStateMutation.mutate(e.target.value)}
-          >
-            {READING_STATES.map((s) => (
-              <option key={s} value={s}>{s.replace("_", " ")}</option>
+  return (
+    <PaperCard
+      paper={item.paper}
+      onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
+      showAbstract={false}
+      showTopics={false}
+      headerBadges={
+        tags && tags.length > 0 ? (
+          <>
+            {tags.slice(0, 4).map(({ tag }) => (
+              <span key={tag} className="paper-tag">
+                {tag}
+              </span>
             ))}
-          </select>
-        </div>
-
-        {/* Tags */}
-        <div className="paper-tags">
-          {tags?.map((t) => (
-            <span key={t.tag} className="paper-tag">
-              {t.tag}
-              <button onClick={() => removeTagMutation.mutate(t.tag)} title="Remove tag">
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-          <form
-            className="tag-add-input"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (newTag.trim()) addTagMutation.mutate(newTag.trim());
-            }}
-          >
-            <input
-              placeholder="+ tag"
-              value={newTag}
-              onChange={(e) => setNewTag(e.target.value)}
-            />
-          </form>
-        </div>
-      </div>
-
-      {/* Notes toggle */}
-      <div className="cp-notes-toggle">
-        <button className="btn-ghost" onClick={() => setShowNotes((s) => !s)}>
-          <StickyNote size={12} />
-          Notes
-          {showNotes ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
-      </div>
-
-      {showNotes && (
-        <div className="cp-notes">
-          <form
-            onSubmit={(e: FormEvent) => {
-              e.preventDefault();
-              if (newNote.trim()) createNoteMutation.mutate();
-            }}
-            className="note-form-inline"
-          >
-            <input
-              className="input"
-              placeholder="Write a note…"
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-            />
-            <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
-              Add
-            </button>
-          </form>
-          {notes?.map((note) => (
-            <div key={note.id} className="note-inline">
-              <p>{note.content}</p>
-              <button className="btn-ghost" onClick={() => deleteNoteMutation.mutate(note.id)}>
-                <Trash2 size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <span className="cp-added">Added {new Date(paper.added_at).toLocaleDateString()}</span>
-    </div>
+          </>
+        ) : undefined
+      }
+      actions={actions}
+    />
   );
 }

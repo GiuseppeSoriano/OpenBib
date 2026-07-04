@@ -150,6 +150,7 @@ export interface CollectionPaper {
   paper_group_key: string | null;
   position: number;
   added_at: string;
+  paper?: PaperMetadata | null;
 }
 
 export interface SearchPaperItem {
