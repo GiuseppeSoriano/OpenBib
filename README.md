@@ -1,4 +1,4 @@
-# RefMan — Academic Reference Manager
+# OpenBib — Academic Reference Manager
 
 A full-stack application for searching, organizing, and exploring academic papers across multiple providers (OpenAlex, arXiv, Crossref, Europe PMC).
 
@@ -28,7 +28,6 @@ A full-stack application for searching, organizing, and exploring academic paper
 # 1. Clone and enter the repository
 git clone <repo-url>
 cd ReferenceManager
-git checkout feat/production-architecture
 
 # 2. Create your environment file
 cp .env.example .env
@@ -54,6 +53,18 @@ docker compose exec api alembic upgrade head
 ```bash
 docker compose down          # stop containers
 docker compose down -v       # stop and delete data volumes
+```
+
+### ⚠️ Upgrading from the RefMan prototype
+
+The database credentials were renamed from `refman` to `openbib`. **Existing dev
+volumes were initialized with the old credentials and will fail to start.** Reset
+them once (this deletes local dev data):
+
+```bash
+docker compose down -v
+docker compose up --build -d
+docker compose exec api alembic upgrade head
 ```
 
 ---
@@ -106,16 +117,15 @@ The frontend will be available at `http://localhost:5173`.
 ### Running Tests
 
 ```bash
-cd backend
+# Backend (inside the api container — no host installs needed)
+docker compose exec api pytest -q
 
-# Run all tests
-pytest
+# Frontend (one-off node container, also maintains package-lock.json)
+docker compose run --rm web-test
 
-# With coverage
-pytest --cov=app --cov-report=term-missing
-
-# Run a specific test file
-pytest tests/test_auth.py -v
+# Or locally:
+cd backend && pytest --cov=app --cov-report=term-missing
+cd frontend && npm test
 ```
 
 ---
@@ -124,7 +134,7 @@ pytest tests/test_auth.py -v
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://refman:refman@localhost:5432/refman` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://openbib:openbib@localhost:5432/openbib` |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
 | `JWT_SECRET_KEY` | Secret for JWT signing (CHANGE IN PRODUCTION) | `change-me-...` |
 | `JWT_ACCESS_EXPIRE_MINUTES` | Access token lifetime | `30` |

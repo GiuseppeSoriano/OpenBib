@@ -1,6 +1,6 @@
 # System Architecture
 
-> Architecture for the **Reference Manager MVP** — a prototype targeting < 100 concurrent users,
+> Architecture for the **OpenBib MVP** — a prototype targeting < 100 concurrent users,
 > designed for vertical-slice development and future horizontal scaling.
 
 ---
@@ -377,12 +377,12 @@ ProviderCache.get(provider, query_type, params)
 ### 6.2 Key schema
 
 ```
-refman:cache:{provider}:{query_type}:{sha256(sorted_params)}
+openbib:cache:{provider}:{query_type}:{sha256(sorted_params)}
 ```
 
 Examples:
-- `refman:cache:openalex:lookup:sha256("doi=10.1234/example")`
-- `refman:cache:arxiv:search:sha256("query=attention+is+all&start=0&max=25")`
+- `openbib:cache:openalex:lookup:sha256("doi=10.1234/example")`
+- `openbib:cache:arxiv:search:sha256("query=attention+is+all&start=0&max=25")`
 
 ### 6.3 TTL configuration
 
@@ -501,9 +501,9 @@ volumes:
 
 ```env
 # Database
-DB_USER=refman
+DB_USER=openbib
 DB_PASSWORD=<strong-random>
-DB_NAME=reference_manager
+DB_NAME=openbib
 DB_HOST=db
 DB_PORT=5432
 DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}

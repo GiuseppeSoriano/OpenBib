@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql+asyncpg://refman:refman@localhost:5432/reference_manager"
+    database_url: str = "postgresql+asyncpg://openbib:openbib@localhost:5432/openbib"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

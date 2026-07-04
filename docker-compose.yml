@@ -4,15 +4,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: refman
-      POSTGRES_PASSWORD: refman
-      POSTGRES_DB: refman
+      POSTGRES_USER: openbib
+      POSTGRES_PASSWORD: openbib
+      POSTGRES_DB: openbib
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U refman"]
+      test: ["CMD-SHELL", "pg_isready -U openbib"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://refman:refman@db:5432/refman
+      DATABASE_URL: postgresql+asyncpg://openbib:openbib@db:5432/openbib
       REDIS_URL: redis://cache:6379/0
     ports:
       - "8000:8000"

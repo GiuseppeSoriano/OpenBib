@@ -12,9 +12,9 @@ from app.config import settings
 
 
 def _cache_key(provider: str, query_type: str, identifier: str) -> str:
-    """Build a Redis cache key: refman:cache:{provider}:{query_type}:{hash}."""
+    """Build a Redis cache key: openbib:cache:{provider}:{query_type}:{hash}."""
     h = hashlib.sha256(identifier.encode()).hexdigest()[:12]
-    return f"refman:cache:{provider}:{query_type}:{h}"
+    return f"openbib:cache:{provider}:{query_type}:{h}"
 
 
 def _ttl_for(query_type: str) -> int:

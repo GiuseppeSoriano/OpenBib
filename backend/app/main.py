@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from app.common.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.config import settings
 
-logger = logging.getLogger("refman")
+logger = logging.getLogger("openbib")
 
 # ---------------------------------------------------------------------------
 # Lifespan — startup / shutdown
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="RefMan — Academic Reference Manager",
+        title="OpenBib — Academic Reference Manager",
         version="0.1.0",
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",

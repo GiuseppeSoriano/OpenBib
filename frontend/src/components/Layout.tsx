@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import Logo from "@/components/ui/Logo";
 import {
   Search,
   LayoutDashboard,
@@ -31,8 +32,8 @@ export default function Layout() {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="brand-icon">R</span>
-          <span className="brand-text">RefMan</span>
+          <Logo size={28} className="brand-logo" />
+          <span className="brand-text">OpenBib</span>
         </div>
 
         <nav className="sidebar-nav">

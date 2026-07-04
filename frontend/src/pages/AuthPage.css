@@ -18,17 +18,8 @@
   margin-bottom: var(--space-xl);
 }
 
-.auth-brand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: var(--radius-lg);
-  font-weight: 700;
-  font-size: 1.4rem;
+.auth-logo {
+  color: var(--color-accent);
   margin-bottom: var(--space-md);
 }
 

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import Logo from "@/components/ui/Logo";
 import "./AuthPage.css";
 
 export default function RegisterPage() {
@@ -26,9 +27,9 @@ export default function RegisterPage() {
     <div className="auth-page">
       <div className="auth-card card">
         <div className="auth-header">
-          <span className="auth-brand">R</span>
+          <Logo size={44} className="auth-logo" />
           <h1>Create account</h1>
-          <p>Get started with RefMan</p>
+          <p>Get started with OpenBib</p>
         </div>
 
         {error && <div className="auth-error">{error}</div>}

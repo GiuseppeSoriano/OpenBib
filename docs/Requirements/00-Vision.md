@@ -2,7 +2,7 @@
 
 ## 1. Product Vision
 
-**Reference Manager** is an academic platform for discovering, organizing, and exploring research papers — designed the way Spotify and YouTube handle music and video: through personal collections, social sharing, intelligent discovery, and visual exploration.
+**OpenBib** is an academic platform for discovering, organizing, and exploring research papers — designed the way Spotify and YouTube handle music and video: through personal collections, social sharing, intelligent discovery, and visual exploration.
 
 The platform connects researchers and students around papers by combining:
 

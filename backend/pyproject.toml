@@ -1,5 +1,5 @@
 [project]
-name = "reference-manager-backend"
+name = "openbib-backend"
 version = "0.1.0"
 description = "Academic paper management platform — backend API"
 requires-python = ">=3.12"
