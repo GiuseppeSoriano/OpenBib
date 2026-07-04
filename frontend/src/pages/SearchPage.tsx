@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AxiosError } from "axios";
 import api, { library } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type {
   Collection,
   PaperMemberships,
@@ -47,8 +48,11 @@ function getSelectedPaper(
 
 export default function SearchPage() {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const [submitted, setSubmitted] = useState("");
+  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const initialQuery = searchParams.get("q") ?? "";
+  const [query, setQuery] = useState(initialQuery);
+  const [submitted, setSubmitted] = useState(initialQuery);
   const [unsavedOnly, setUnsavedOnly] = useState(false);
   const [hideDismissed, setHideDismissed] = useState(true);
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
@@ -81,13 +85,14 @@ export default function SearchPage() {
     setSelectedVersions(nextSelections);
   }, [data]);
 
+  // User-scoped overlays: never fired anonymously (no 401 noise).
   const { data: memberships } = useQuery({
     queryKey: ["paper-memberships"],
     queryFn: async () => {
       const { data } = await api.get<PaperMemberships>("/collections/paper-memberships");
       return data;
     },
-    enabled: !!data,
+    enabled: !!data && !!user,
     staleTime: 30_000,
   });
 
@@ -97,14 +102,14 @@ export default function SearchPage() {
       const { data } = await api.get<string[]>("/papers/dismissed");
       return data;
     },
-    enabled: !!data,
+    enabled: !!data && !!user,
     staleTime: 30_000,
   });
 
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
     queryFn: () => library.listKeys(),
-    enabled: !!data,
+    enabled: !!data && !!user,
     staleTime: 30_000,
   });
 
@@ -336,6 +341,7 @@ function SearchPaperCard({
   headerBadges?: ReactNode[];
 }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [showCollections, setShowCollections] = useState(false);
   const [sessionAdded, setSessionAdded] = useState<Set<string>>(new Set());
@@ -465,6 +471,8 @@ function SearchPaperCard({
       }
       actions={
         <>
+        {user && (
+        <>
         <button
           type="button"
           className="btn btn-secondary save-to-library-btn"
@@ -516,6 +524,8 @@ function SearchPaperCard({
             </div>
           )}
         </div>
+        </>
+        )}
 
         <Link
           to={`/graph/${encodeURIComponent(paper.canonical_key)}`}
@@ -525,27 +535,28 @@ function SearchPaperCard({
           {t("paper.exploreGraph")}
         </Link>
 
-        {isDismissed ? (
-          <button
-            className="btn btn-secondary dismiss-btn"
-            onClick={() => undismissMutation.mutate()}
-            disabled={undismissMutation.isPending}
-            title={t("paper.undoDismiss")}
-          >
-            <Undo2 size={14} />
-            {t("paper.undoDismiss")}
-          </button>
-        ) : (
-          <button
-            className="btn btn-secondary dismiss-btn"
-            onClick={() => dismissMutation.mutate()}
-            disabled={dismissMutation.isPending}
-            title={t("paper.notRelevantTitle")}
-          >
-            <EyeOff size={14} />
-            {t("paper.notRelevant")}
-          </button>
-        )}
+        {user &&
+          (isDismissed ? (
+            <button
+              className="btn btn-secondary dismiss-btn"
+              onClick={() => undismissMutation.mutate()}
+              disabled={undismissMutation.isPending}
+              title={t("paper.undoDismiss")}
+            >
+              <Undo2 size={14} />
+              {t("paper.undoDismiss")}
+            </button>
+          ) : (
+            <button
+              className="btn btn-secondary dismiss-btn"
+              onClick={() => dismissMutation.mutate()}
+              disabled={dismissMutation.isPending}
+              title={t("paper.notRelevantTitle")}
+            >
+              <EyeOff size={14} />
+              {t("paper.notRelevant")}
+            </button>
+          ))}
         </>
       }
     />

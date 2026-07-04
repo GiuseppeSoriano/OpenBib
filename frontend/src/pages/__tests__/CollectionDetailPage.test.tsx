@@ -51,6 +51,10 @@ const hydratedRow = {
 
 vi.mock("@/lib/api", () => {
   const get = vi.fn((url: string) => {
+    if (url === "/users/me")
+      return Promise.resolve({
+        data: { id: "u1", email: "me@example.com", display_name: "Me", created_at: "2026-01-01" },
+      });
     if (url === "/collections/c1") return Promise.resolve({ data: collection });
     if (url === "/collections/c1/papers") return Promise.resolve({ data: [hydratedRow] });
     return Promise.resolve({ data: [] });
@@ -68,6 +72,8 @@ vi.mock("@/lib/api", () => {
 });
 
 function renderPage() {
+  // Simulate an authenticated session: AuthProvider hydrates from /users/me.
+  localStorage.setItem("access_token", "test-token");
   return renderWithProviders(
     <Routes>
       <Route path="/collections/:id" element={<CollectionDetailPage />} />

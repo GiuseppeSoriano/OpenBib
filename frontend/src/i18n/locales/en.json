@@ -203,6 +203,17 @@
     "exploreInGraph": "Explore in graph",
     "deleteFromLibrary": "Delete from Library"
   },
+  "landing": {
+    "tagline": "Discover, organize, and explore research papers",
+    "searchPlaceholder": "Search millions of papers by title, author, DOI…",
+    "hint": "Free to explore — no account needed. Sign up to build your library.",
+    "featureSearchTitle": "Multi-provider search",
+    "featureSearchDesc": "One search across OpenAlex, arXiv, Crossref, and Europe PMC.",
+    "featureGraphTitle": "Citation graph",
+    "featureGraphDesc": "Explore how papers cite each other, fluidly.",
+    "featureLibraryTitle": "Personal library",
+    "featureLibraryDesc": "Collections, notes, tags, and reading states."
+  },
   "settings": {
     "title": "Settings",
     "email": "Email",

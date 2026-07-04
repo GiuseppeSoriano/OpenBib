@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Collection, CollectionPaper, Note } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import PaperCard from "@/components/paper/PaperCard";
@@ -30,6 +31,7 @@ import "./CollectionDetailPage.css";
 export default function CollectionDetailPage() {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -209,17 +211,19 @@ export default function CollectionDetailPage() {
             <div className="cd-title-row">
               <h1>{collection.name}</h1>
               <span className="badge">{visibilityLabel}</span>
-              <button
-                className="btn-ghost"
-                onClick={() => {
-                  setEditName(collection.name);
-                  setEditDesc(collection.description || "");
-                  setEditing(true);
-                }}
-                title={t("collections.edit")}
-              >
-                <Edit3 size={16} />
-              </button>
+              {user && (
+                <button
+                  className="btn-ghost"
+                  onClick={() => {
+                    setEditName(collection.name);
+                    setEditDesc(collection.description || "");
+                    setEditing(true);
+                  }}
+                  title={t("collections.edit")}
+                >
+                  <Edit3 size={16} />
+                </button>
+              )}
             </div>
             {collection.description && (
               <p className="cd-description">{collection.description}</p>
@@ -235,9 +239,11 @@ export default function CollectionDetailPage() {
               <button className="btn btn-secondary" onClick={handleExportBibtex}>
                 <Download size={14} /> {t("collections.exportBibtex")}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowImport((s) => !s)}>
-                <Upload size={14} /> {t("collections.importDois")}
-              </button>
+              {user && (
+                <button className="btn btn-secondary" onClick={() => setShowImport((s) => !s)}>
+                  <Upload size={14} /> {t("collections.importDois")}
+                </button>
+              )}
             </div>
             {showImport && (
               <div className="cd-import-form card">
@@ -267,6 +273,7 @@ export default function CollectionDetailPage() {
       </div>
 
       {/* Add paper */}
+      {user && (
       <div className="cd-add-paper">
         <form
           onSubmit={(e: FormEvent) => {
@@ -286,6 +293,7 @@ export default function CollectionDetailPage() {
           </button>
         </form>
       </div>
+      )}
 
       {/* Paper list */}
       <div className="cd-papers">
@@ -325,6 +333,7 @@ export default function CollectionDetailPage() {
       )}
 
       {/* Collection notes section */}
+      {user && (
       <div className="cd-notes-section">
         <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)}>
           <StickyNote size={14} />
@@ -371,6 +380,7 @@ export default function CollectionDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
@@ -393,6 +403,7 @@ function CollectionPaperItem({
   onOpenDetails: (key: string) => void;
 }) {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
 
   const { data: tags } = useQuery({
     queryKey: ["paper-tags", item.paper_canonical_key],
@@ -402,14 +413,17 @@ function CollectionPaperItem({
       );
       return data as { tag: string }[];
     },
+    enabled: !!user,
   });
 
   const actions = (
     <>
-      <div className="cp-state">
-        <ReadingStateSelect paperKey={item.paper_canonical_key} />
-      </div>
-      {item.paper_group_key && (
+      {user && (
+        <div className="cp-state">
+          <ReadingStateSelect paperKey={item.paper_canonical_key} />
+        </div>
+      )}
+      {user && item.paper_group_key && (
         <Link
           to={`/library?focus=${encodeURIComponent(item.paper_group_key)}`}
           className="btn-ghost"
@@ -425,9 +439,11 @@ function CollectionPaperItem({
       >
         <GitFork size={14} />
       </Link>
-      <button className="btn-ghost" onClick={onRemove} title={t("collections.removeFromCollection")}>
-        <Trash2 size={14} />
-      </button>
+      {user && (
+        <button className="btn-ghost" onClick={onRemove} title={t("collections.removeFromCollection")}>
+          <Trash2 size={14} />
+        </button>
+      )}
       <span className="cp-added">
         {t("collections.addedOn", {
           date: new Intl.DateTimeFormat(i18n.language).format(new Date(item.added_at)),

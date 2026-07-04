@@ -203,6 +203,17 @@
     "exploreInGraph": "Esplora nel grafo",
     "deleteFromLibrary": "Elimina dalla Libreria"
   },
+  "landing": {
+    "tagline": "Scopri, organizza ed esplora articoli scientifici",
+    "searchPlaceholder": "Cerca tra milioni di articoli per titolo, autore, DOI…",
+    "hint": "Esplora liberamente — nessun account richiesto. Registrati per costruire la tua libreria.",
+    "featureSearchTitle": "Ricerca multi-provider",
+    "featureSearchDesc": "Una sola ricerca su OpenAlex, arXiv, Crossref ed Europe PMC.",
+    "featureGraphTitle": "Grafo delle citazioni",
+    "featureGraphDesc": "Esplora in modo fluido come gli articoli si citano.",
+    "featureLibraryTitle": "Libreria personale",
+    "featureLibraryDesc": "Raccolte, note, tag e stati di lettura."
+  },
   "settings": {
     "title": "Impostazioni",
     "email": "Email",

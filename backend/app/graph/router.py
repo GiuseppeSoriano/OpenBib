@@ -1,5 +1,10 @@
 """Graph router — citation graphs for a paper, a collection, or the library,
-plus one-level citation expansion."""
+plus one-level citation expansion.
+
+Single-paper graphs, public-collection graphs, and expansion are usable
+without an account (anonymous exploration); only the library graph is
+inherently user-scoped and requires auth.
+"""
 
 import uuid
 from typing import Literal
@@ -7,7 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, Query
 
 from app.collections import service as collection_service
-from app.dependencies import DB, CurrentUser, Redis
+from app.dependencies import DB, CurrentUser, OptionalUser, Redis
 from app.graph import service
 from app.graph.schemas import ExpandRequest, ExpandResponse, GraphResponse
 
@@ -17,10 +22,13 @@ Order = Literal["cited_by_count", "recent"]
 
 
 @router.post("/expand", response_model=ExpandResponse)
-async def expand_graph(body: ExpandRequest, user: CurrentUser, db: DB, redis: Redis):
+async def expand_graph(body: ExpandRequest, user: OptionalUser, db: DB, redis: Redis):
     """Add papers that cite the chosen node(s) as new leaves (focused if
-    ``focus_key`` is set, otherwise global over ``from_keys``)."""
-    saved = await service.saved_canonical_keys(db, user.id)
+    ``focus_key`` is set, otherwise global over ``from_keys``).
+
+    Anonymous callers get the same expansion but with no saved-paper set,
+    so no user-scoped edges are persisted."""
+    saved = await service.saved_canonical_keys(db, user.id) if user else set()
     return await service.expand_graph(
         db,
         redis,
@@ -49,13 +57,16 @@ async def library_graph(
 @router.get("/collection/{collection_id}", response_model=GraphResponse)
 async def collection_graph(
     collection_id: uuid.UUID,
-    user: CurrentUser,
+    user: OptionalUser,
     db: DB,
     redis: Redis,
     order: Order = Query("cited_by_count"),
 ):
-    """Citation graph of every paper in a collection (view RBAC enforced)."""
-    rows = await collection_service.list_papers(db, collection_id, user.id)
+    """Citation graph of every paper in a collection. View RBAC is enforced
+    by list_papers: anonymous users can only see public collections."""
+    rows = await collection_service.list_papers(
+        db, collection_id, user.id if user else None
+    )
     seeds = [row["paper_canonical_key"] for row in rows]
     return await service.build_base_graph(db, redis, seeds, order=order)
 
@@ -63,20 +74,17 @@ async def collection_graph(
 @router.get("/paper/{paper_key:path}", response_model=GraphResponse)
 async def paper_graph(
     paper_key: str,
-    user: CurrentUser,
     db: DB,
     redis: Redis,
     order: Order = Query("cited_by_count"),
 ):
-    """Single-seed base graph. The frontend immediately expands it once so the
-    first level of citing papers is shown."""
+    """Single-seed base graph (public — anonymous exploration entry point)."""
     return await service.build_base_graph(db, redis, [paper_key], order=order)
 
 
 @router.get("/{paper_key:path}", response_model=GraphResponse)
 async def get_graph(
     paper_key: str,
-    user: CurrentUser,
     db: DB,
     redis: Redis,
     order: Order = Query("cited_by_count"),
