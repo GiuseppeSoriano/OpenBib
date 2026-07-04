@@ -1,0 +1,222 @@
+.pd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.pd-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pd-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.pd-authors {
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+}
+
+.pd-venue {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.pd-counts {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.pd-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.pd-section h3 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.pd-abstract {
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.pd-identifiers {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 0.85rem;
+}
+
+.pd-identifiers a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.pd-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.pd-versions {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.pd-version {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+}
+
+.pd-version.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.pd-version-provider {
+  color: var(--color-text-secondary);
+}
+
+.pd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.pd-signin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+}
+
+.pd-error {
+  color: var(--color-danger);
+  font-size: 0.88rem;
+}
+
+/* Tag editor */
+.tag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.tag-editor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.paper-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.paper-tag button {
+  display: inline-flex;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  padding: 0;
+}
+.paper-tag button:hover {
+  color: var(--color-danger);
+}
+
+.tag-editor-form {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.tag-editor-input {
+  flex: 1;
+  font-size: 0.82rem;
+}
+
+/* Notes */
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.notes-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.note-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.85rem;
+}
+
+.note-content {
+  white-space: pre-wrap;
+}
+
+.note-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-xs);
+}
+
+.note-date {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+.note-delete {
+  padding: 2px;
+}
+
+.notes-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.notes-textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.reading-state-select {
+  max-width: 220px;
+}

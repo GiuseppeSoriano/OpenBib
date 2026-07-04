@@ -158,6 +158,34 @@ async def get_cached_papers_by_group(
     return list(result.scalars().all())
 
 
+async def get_paper_detail(db: AsyncSession, canonical_key: str) -> dict:
+    """Hydrate a single paper from the durable metadata snapshot, falling
+    back to a live DOI lookup (which upserts the snapshot) on a cache miss.
+
+    hash:-keyed papers with no cached row cannot be re-fetched and 404.
+    """
+    row = await get_cached_paper(db, canonical_key)
+
+    if row is None and canonical_key.startswith("doi:"):
+        from app.providers import registry
+
+        doi = canonical_key[len("doi:") :]
+        paper = await registry.lookup_by_doi(doi)
+        if paper is not None:
+            await cache_papers(db, [paper])
+            row = await get_cached_paper(db, paper.canonical_key)
+
+    if row is None:
+        raise NotFoundError(f"Paper not found: {canonical_key}")
+
+    detail = cached_paper_to_read(row).model_dump(mode="json")
+    siblings = await get_cached_papers_by_group(db, row.paper_group_key)
+    detail["versions"] = [
+        cached_paper_to_read(sibling).model_dump(mode="json") for sibling in siblings
+    ]
+    return detail
+
+
 async def get_cached_papers_by_keys(
     db: AsyncSession, canonical_keys: set[str]
 ) -> dict[str, CachedPaperMetadata]:

@@ -7,6 +7,10 @@ import type {
   LibraryEntry,
   LibraryEntryListItem,
   LibraryVersionPin,
+  Note,
+  PaperDetail,
+  PaperState,
+  ReadingState,
 } from "@/types";
 
 const api = axios.create({
@@ -51,6 +55,68 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+/* ── Papers namespace ──────────────────────────────────── */
+export const papers = {
+  async getDetail(canonicalKey: string) {
+    const { data } = await api.get<PaperDetail>(
+      `/papers/${encodeURIComponent(canonicalKey)}`,
+    );
+    return data;
+  },
+  async getStates(canonicalKey: string) {
+    const { data } = await api.get<PaperState[]>(
+      `/papers/${encodeURIComponent(canonicalKey)}/states`,
+    );
+    return data;
+  },
+  async setState(canonicalKey: string, state: ReadingState) {
+    const { data } = await api.put<PaperState>(
+      `/papers/${encodeURIComponent(canonicalKey)}/state`,
+      { state },
+    );
+    return data;
+  },
+  async getTags(canonicalKey: string) {
+    const { data } = await api.get<{ tag: string }[]>(
+      `/papers/${encodeURIComponent(canonicalKey)}/tags`,
+    );
+    return data;
+  },
+  async addTag(canonicalKey: string, tag: string) {
+    const { data } = await api.post(
+      `/papers/${encodeURIComponent(canonicalKey)}/tags`,
+      { tag },
+    );
+    return data;
+  },
+  async removeTag(canonicalKey: string, tag: string) {
+    await api.delete(
+      `/papers/${encodeURIComponent(canonicalKey)}/tags/${encodeURIComponent(tag)}`,
+    );
+  },
+};
+
+/* ── Notes namespace ───────────────────────────────────── */
+export const notes = {
+  async listForPaperGroup(paperGroupKey: string) {
+    const { data } = await api.get<Note[]>("/notes", {
+      params: { paper_group_key: paperGroupKey },
+    });
+    return data;
+  },
+  async createForPaper(paperCanonicalKey: string, content: string) {
+    const { data } = await api.post<Note>("/notes", {
+      target_type: "paper",
+      target_key: paperCanonicalKey,
+      content,
+    });
+    return data;
+  },
+  async remove(noteId: string) {
+    await api.delete(`/notes/${noteId}`);
+  },
+};
 
 /* ── Library namespace ─────────────────────────────────── */
 export const library = {

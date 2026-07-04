@@ -70,6 +70,22 @@ export interface PaperState {
   state: ReadingState;
 }
 
+export const READING_STATES: ReadingState[] = [
+  "unseen",
+  "seen",
+  "saved",
+  "to_read",
+  "reading",
+  "read",
+  "important",
+  "ignored",
+  "excluded",
+];
+
+export interface PaperDetail extends PaperMetadata {
+  versions: PaperMetadata[];
+}
+
 /* ── Collection ─────────────────────────────────────────── */
 export type Visibility = "private" | "shared" | "public";
 export type MemberRole = "owner" | "editor" | "viewer";

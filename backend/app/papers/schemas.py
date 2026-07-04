@@ -45,6 +45,13 @@ class PaperMetadataRead(BaseModel):
     provider_sources: list[str] = []
 
 
+class PaperDetailRead(PaperMetadataRead):
+    """Full paper detail: primary metadata plus sibling versions of the
+    same logical paper (shared paper_group_key)."""
+
+    versions: list[PaperMetadataRead] = []
+
+
 class SearchPaperItemRead(BaseModel):
     kind: Literal["paper"]
     paper: PaperMetadataRead

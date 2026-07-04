@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from app.dependencies import DB, CurrentUser, Redis
 from app.papers import service
 from app.papers.schemas import (
+    PaperDetailRead,
     PaperMetadataRead,
     SearchQuery,
     SearchResultRead,
@@ -133,3 +134,13 @@ async def dismiss_paper(paper_key: str, user: CurrentUser, db: DB):
 @router.delete("/{paper_key:path}/dismiss", status_code=204)
 async def undismiss_paper(paper_key: str, user: CurrentUser, db: DB):
     await service.undismiss_paper(db, user.id, paper_key)
+
+
+# ── Paper detail (public) ────────────────────────────────────
+# MUST stay the last route in this router: the greedy {paper_key:path}
+# with no suffix would otherwise swallow /search, /dismissed, and the
+# /{key}/states|tags|dismiss sub-routes above.
+
+@router.get("/{paper_key:path}", response_model=PaperDetailRead)
+async def get_paper(paper_key: str, db: DB):
+    return await service.get_paper_detail(db, paper_key)

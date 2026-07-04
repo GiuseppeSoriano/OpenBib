@@ -14,10 +14,8 @@ import type {
 } from "@/types";
 import {
   BookMarked,
-  BookOpen,
   Check,
   ChevronDown,
-  ExternalLink,
   EyeOff,
   FolderCheck,
   FolderPlus,
@@ -29,18 +27,9 @@ import {
 } from "lucide-react";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
+import PaperCard, { providerLabel } from "@/components/paper/PaperCard";
+import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
 import "./SearchPage.css";
-
-const PROVIDER_LABELS: Record<string, string> = {
-  openalex: "OpenAlex",
-  crossref: "Crossref",
-  arxiv: "arXiv",
-  europepmc: "Europe PMC",
-};
-
-function providerLabel(name: string): string {
-  return PROVIDER_LABELS[name] ?? name;
-}
 
 function searchErrorMessage(error: unknown, fallback: string): string {
   const axiosError = error as AxiosError<{ detail?: string }>;
@@ -63,6 +52,7 @@ export default function SearchPage() {
   const [unsavedOnly, setUnsavedOnly] = useState(false);
   const [hideDismissed, setHideDismissed] = useState(true);
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["search", submitted],
@@ -206,13 +196,14 @@ export default function SearchPage() {
             {filteredItems?.map((item) => {
               if (item.kind === "paper") {
                 return (
-                  <PaperCard
+                  <SearchPaperCard
                     key={item.paper.canonical_key}
                     paper={item.paper}
                     providerSources={item.paper.provider_sources ?? []}
                     savedInCollections={membershipsMap[item.paper.canonical_key] ?? []}
                     isDismissed={dismissedSet.has(item.paper.canonical_key)}
                     inLibrary={librarySet.has(item.paper.paper_group_key)}
+                    onOpenDetails={setDetailsKey}
                   />
                 );
               }
@@ -232,6 +223,7 @@ export default function SearchPage() {
                   savedInCollections={membershipsMap[selected.canonical_key] ?? []}
                   isDismissed={dismissedSet.has(selected.canonical_key)}
                   inLibrary={librarySet.has(item.paper_group_key)}
+                  onOpenDetails={setDetailsKey}
                 />
               );
             })}
@@ -246,6 +238,8 @@ export default function SearchPage() {
           description={t("search.emptyDescription")}
         />
       )}
+
+      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }
@@ -257,6 +251,7 @@ function PaperGroupCard({
   savedInCollections,
   isDismissed,
   inLibrary,
+  onOpenDetails,
 }: {
   item: SearchPaperGroupItem;
   selectedPaper: PaperMetadata;
@@ -264,6 +259,7 @@ function PaperGroupCard({
   savedInCollections: string[];
   isDismissed: boolean;
   inLibrary: boolean;
+  onOpenDetails: (key: string) => void;
 }) {
   const { t } = useTranslation();
   const [showVersions, setShowVersions] = useState(false);
@@ -301,12 +297,13 @@ function PaperGroupCard({
         </div>
       )}
 
-      <PaperCard
+      <SearchPaperCard
         paper={selectedPaper}
         providerSources={item.provider_sources ?? selectedPaper.provider_sources ?? []}
         savedInCollections={savedInCollections}
         isDismissed={isDismissed}
         inLibrary={inLibrary}
+        onOpenDetails={onOpenDetails}
         className="paper-card--grouped"
         headerBadges={[
           <span key="versions" className="badge badge-grouped">
@@ -319,12 +316,13 @@ function PaperGroupCard({
   );
 }
 
-function PaperCard({
+function SearchPaperCard({
   paper,
   providerSources,
   savedInCollections,
   isDismissed,
   inLibrary,
+  onOpenDetails,
   className = "",
   headerBadges = [],
 }: {
@@ -333,6 +331,7 @@ function PaperCard({
   savedInCollections: string[];
   isDismissed: boolean;
   inLibrary: boolean;
+  onOpenDetails: (key: string) => void;
   className?: string;
   headerBadges?: ReactNode[];
 }) {
@@ -441,21 +440,14 @@ function PaperCard({
     savedInCollections.includes(collectionId) || sessionAdded.has(collectionId);
 
   return (
-    <div className={`card paper-card${isDismissed ? " paper-card--dismissed" : ""} ${className}`.trim()}>
-      {providerSources.length > 0 && (
-        <div className="provider-badges">
-          {providerSources.map((source) => (
-            <span key={source} className="badge badge-provider">
-              {providerLabel(source)}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="paper-card-top">
-        <div className="paper-title-row">
-          <h3 className="paper-title">{paper.title}</h3>
+    <PaperCard
+      paper={paper}
+      providerSources={providerSources}
+      onOpenDetails={() => onOpenDetails(paper.canonical_key)}
+      className={`${isDismissed ? "paper-card--dismissed" : ""} ${className}`.trim()}
+      headerBadges={
+        <>
           {headerBadges}
-          {paper.version && <span className="badge badge-version">{paper.version}</span>}
           {isSaved && (
             <span className="badge badge-saved" title={t("paper.savedTitle")}>
               <FolderCheck size={11} />
@@ -469,61 +461,10 @@ function PaperCard({
             </span>
           )}
           {isDismissed && <span className="badge badge-dismissed">{t("paper.dismissed")}</span>}
-        </div>
-        <div className="paper-links">
-          {paper.doi && (
-            <a
-              href={`https://doi.org/${paper.doi}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-ghost"
-              title="DOI"
-            >
-              <ExternalLink size={14} />
-            </a>
-          )}
-          {paper.pdf_url && (
-            <a
-              href={paper.pdf_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-ghost"
-              title="PDF"
-            >
-              <BookOpen size={14} />
-            </a>
-          )}
-        </div>
-      </div>
-
-      <p className="paper-authors">{paper.authors.map((author) => author.name).join(", ")}</p>
-
-      <div className="paper-meta">
-        {paper.venue && <span>{paper.venue}</span>}
-        {paper.publication_date && <span>{paper.publication_date.slice(0, 4)}</span>}
-        {paper.cited_by_count != null && (
-          <span>{t("paper.citations", { count: paper.cited_by_count })}</span>
-        )}
-        {paper.open_access && <span className="badge">{t("paper.openAccess")}</span>}
-      </div>
-
-      {paper.abstract && (
-        <p className="paper-abstract">
-          {paper.abstract.length > 300 ? `${paper.abstract.slice(0, 300)}…` : paper.abstract}
-        </p>
-      )}
-
-      {paper.topics.length > 0 && (
-        <div className="paper-topics">
-          {paper.topics.slice(0, 5).map((topic) => (
-            <span key={topic} className="badge">
-              {topic}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="paper-actions">
+        </>
+      }
+      actions={
+        <>
         <button
           type="button"
           className="btn btn-secondary save-to-library-btn"
@@ -605,7 +546,8 @@ function PaperCard({
             {t("paper.notRelevant")}
           </button>
         )}
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 }

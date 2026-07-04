@@ -6,6 +6,7 @@ import { library } from "@/lib/api";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
+import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
 import type { LibraryEntryListItem } from "@/types";
 import {
   BookMarked,
@@ -38,6 +39,7 @@ export default function LibraryPage() {
   const [expanded, setExpanded] = useState<string | null>(focusKey);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (focusKey) setExpanded(focusKey);
@@ -96,9 +98,12 @@ export default function LibraryPage() {
             }
             onRequestDelete={() => setPendingDelete(item.paper_group_key)}
             onError={(msg) => setErrorMessage(msg)}
+            onOpenDetails={setDetailsKey}
           />
         ))}
       </div>
+
+      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
 
       {pendingDelete && (
         <ConfirmModal
@@ -133,12 +138,14 @@ function LibraryEntryCard({
   onToggle,
   onRequestDelete,
   onError,
+  onOpenDetails,
 }: {
   item: LibraryEntryListItem;
   expanded: boolean;
   onToggle: () => void;
   onRequestDelete: () => void;
   onError: (msg: string) => void;
+  onOpenDetails: (key: string) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -149,7 +156,18 @@ function LibraryEntryCard({
     <div className="library-entry-card card">
       <div className="library-entry-top">
         <div className="library-entry-titlerow">
-          <h3>{title}</h3>
+          {primary ? (
+            <button
+              type="button"
+              className="paper-title paper-title-btn"
+              onClick={() => onOpenDetails(primary.canonical_key)}
+              title={t("paper.viewDetails")}
+            >
+              {title}
+            </button>
+          ) : (
+            <h3>{title}</h3>
+          )}
           {item.version_count > 1 && (
             <span className="badge badge-grouped">
               <Layers3 size={11} /> {t("paper.versions", { count: item.version_count })}
