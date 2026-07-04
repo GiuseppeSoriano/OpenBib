@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import Skeleton from "@/components/ui/Skeleton";
 import type { Collection, UserStats } from "@/types";
 import { BookMarked, FolderOpen, Search } from "lucide-react";
 import "./DashboardPage.css";
@@ -9,7 +10,7 @@ import "./DashboardPage.css";
 export default function DashboardPage() {
   const { user } = useAuth();
 
-  const { data: collections } = useQuery({
+  const { data: collections, isLoading: collectionsLoading } = useQuery({
     queryKey: ["collections"],
     queryFn: async () => {
       const { data } = await api.get<Collection[]>("/collections");
@@ -17,13 +18,16 @@ export default function DashboardPage() {
     },
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["user-stats"],
     queryFn: async () => {
       const { data } = await api.get<UserStats>("/users/me/stats");
       return data;
     },
   });
+
+  const statValue = (value: number | undefined) =>
+    statsLoading ? <Skeleton width="2.5rem" height="1.6rem" /> : <span className="stat-value">{value ?? 0}</span>;
 
   return (
     <div className="dashboard">
@@ -37,19 +41,19 @@ export default function DashboardPage() {
       {/* Stats */}
       <div className="dashboard-stats">
         <div className="stat-card card">
-          <span className="stat-value">{stats?.total_collections ?? collections?.length ?? 0}</span>
+          {statValue(stats?.total_collections ?? collections?.length)}
           <span className="stat-label">Collections</span>
         </div>
         <div className="stat-card card">
-          <span className="stat-value">{stats?.library_total ?? 0}</span>
+          {statValue(stats?.library_total)}
           <span className="stat-label">In Library</span>
         </div>
         <div className="stat-card card">
-          <span className="stat-value">{stats?.total_papers ?? 0}</span>
+          {statValue(stats?.total_papers)}
           <span className="stat-label">Total saves</span>
         </div>
         <div className="stat-card card">
-          <span className="stat-value">{stats?.distinct_papers ?? 0}</span>
+          {statValue(stats?.distinct_papers)}
           <span className="stat-label">Unique papers</span>
         </div>
       </div>
@@ -82,6 +86,12 @@ export default function DashboardPage() {
         </Link>
 
       </div>
+
+      {collectionsLoading && (
+        <section className="dashboard-recent">
+          <Skeleton height="4rem" lines={3} />
+        </section>
+      )}
 
       {collections && collections.length > 0 && (
         <section className="dashboard-recent">

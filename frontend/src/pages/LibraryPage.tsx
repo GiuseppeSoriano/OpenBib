@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { library } from "@/lib/api";
 import ConfirmModal from "@/components/ConfirmModal";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import EmptyState from "@/components/ui/EmptyState";
 import type { LibraryEntryListItem } from "@/types";
 import {
   BookMarked,
@@ -67,13 +69,19 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {isLoading && <p className="library-status">Loading…</p>}
+      {isLoading && <SkeletonCard count={4} />}
 
       {entries && entries.length === 0 && (
-        <p className="library-status">
-          Your library is empty. Save a paper from <Link to="/search">Search</Link> or
-          add one to a <Link to="/collections">collection</Link> to start filling it.
-        </p>
+        <EmptyState
+          icon={BookMarked}
+          title="Your library is empty"
+          description="Save a paper from Search or add one to a collection to start filling it."
+          action={
+            <Link to="/search" className="btn btn-primary">
+              Search papers
+            </Link>
+          }
+        />
       )}
 
       <div className="library-list">

@@ -30,9 +30,9 @@
 }
 
 .library-error {
-  background: rgba(197, 48, 48, 0.06);
-  border-color: rgba(197, 48, 48, 0.4);
-  color: #c53030;
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
   cursor: pointer;
   font-size: 0.85rem;
 }
@@ -169,7 +169,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: rgba(224, 175, 160, 0.18);
+  background: var(--color-accent-soft);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   padding: 1px 8px;
@@ -178,7 +178,7 @@
 }
 
 .badge-state {
-  background: rgba(70, 63, 58, 0.06);
+  background: var(--color-surface-hover);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   padding: 1px 8px;

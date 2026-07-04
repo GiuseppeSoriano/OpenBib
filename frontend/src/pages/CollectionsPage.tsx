@@ -3,8 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import type { Collection, Visibility } from "@/types";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, FolderOpen } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import EmptyState from "@/components/ui/EmptyState";
 import "./CollectionsPage.css";
 
 export default function CollectionsPage() {
@@ -101,7 +103,7 @@ export default function CollectionsPage() {
         </form>
       )}
 
-      {isLoading && <p className="loading-text">Loading collections…</p>}
+      {isLoading && <SkeletonCard count={3} />}
 
       <div className="collection-grid">
         {collections?.map((c) => (
@@ -128,9 +130,17 @@ export default function CollectionsPage() {
       </div>
 
       {collections && collections.length === 0 && (
-        <p className="loading-text">
-          No collections yet. Create one to start organizing your references.
-        </p>
+        <EmptyState
+          icon={FolderOpen}
+          title="No collections yet"
+          description="Create one to start organizing your references."
+          action={
+            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+              <Plus size={16} />
+              New collection
+            </button>
+          }
+        />
       )}
 
       {pendingDelete && (

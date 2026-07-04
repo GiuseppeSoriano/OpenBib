@@ -23,8 +23,11 @@ import {
   GitFork,
   Layers3,
   Search,
+  SearchX,
   Undo2,
 } from "lucide-react";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import EmptyState from "@/components/ui/EmptyState";
 import "./SearchPage.css";
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -153,7 +156,7 @@ export default function SearchPage() {
         </button>
       </form>
 
-      {isLoading && <p className="search-status">Searching…</p>}
+      {isLoading && <SkeletonCard count={4} />}
 
       {isError && (
         <p className="search-status search-error">
@@ -235,7 +238,11 @@ export default function SearchPage() {
       )}
 
       {filteredItems && filteredItems.length === 0 && (
-        <p className="search-status">No papers found. Try a different query or adjust filters.</p>
+        <EmptyState
+          icon={SearchX}
+          title="No papers found"
+          description="Try a different query or adjust the filters."
+        />
       )}
     </div>
   );

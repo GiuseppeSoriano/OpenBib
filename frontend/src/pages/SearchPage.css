@@ -35,7 +35,7 @@
   text-align: center;
 }
 .search-error {
-  color: #c53030;
+  color: var(--color-danger);
 }
 
 .search-meta {
@@ -98,7 +98,7 @@
   gap: 6px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  background: rgba(224, 175, 160, 0.12);
+  background: var(--color-accent-soft);
   color: var(--color-charcoal);
   padding: 4px 10px;
   font-size: 0.78rem;
@@ -131,7 +131,7 @@
 }
 
 .version-chip.active {
-  background: rgba(70, 63, 58, 0.08);
+  background: var(--color-surface-hover);
   border-color: var(--color-charcoal);
   color: var(--color-charcoal);
 }
@@ -152,7 +152,7 @@
 .badge-provider {
   display: inline-flex;
   align-items: center;
-  background: rgba(70, 63, 58, 0.08);
+  background: var(--color-surface-hover);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   font-weight: 500;
@@ -187,8 +187,8 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: rgba(76, 175, 80, 0.12);
-  color: #2e7d32;
+  background: var(--color-success-soft);
+  color: var(--color-success);
   font-size: 0.7rem;
   padding: 1px 8px;
   border-radius: 999px;
@@ -200,7 +200,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: rgba(224, 175, 160, 0.22);
+  background: var(--color-accent-soft);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   padding: 1px 8px;
@@ -215,7 +215,7 @@
 }
 
 .badge-dismissed {
-  background: rgba(138, 129, 124, 0.12);
+  background: var(--color-surface-hover);
   color: var(--color-warm-gray);
   font-size: 0.7rem;
   padding: 1px 8px;
@@ -228,7 +228,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(70, 63, 58, 0.08);
+  background: var(--color-surface-hover);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   padding: 1px 8px;
@@ -237,7 +237,7 @@
 }
 
 .badge-version {
-  background: rgba(224, 175, 160, 0.16);
+  background: var(--color-accent-soft);
   color: var(--color-charcoal);
   font-size: 0.7rem;
   padding: 1px 8px;
@@ -329,7 +329,7 @@
   transition: background 0.1s;
 }
 .add-to-collection-dropdown button:hover {
-  background: rgba(224, 175, 160, 0.1);
+  background: var(--color-accent-soft);
 }
 .add-to-collection-dropdown button.already-saved {
   color: var(--color-warm-gray);
@@ -374,7 +374,7 @@
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 500;
-  background: rgba(70, 63, 58, 0.08);
+  background: var(--color-surface-hover);
   color: var(--color-charcoal);
 }
 .paper-tag button {
@@ -386,7 +386,7 @@
   line-height: 1;
 }
 .paper-tag button:hover {
-  color: #c53030;
+  color: var(--color-danger);
 }
 .tag-add-input {
   display: inline-flex;

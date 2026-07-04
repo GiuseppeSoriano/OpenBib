@@ -1,4 +1,4 @@
-import "./ConfirmModal.css";
+import Modal from "@/components/ui/Modal";
 
 interface ConfirmModalProps {
   title: string;
@@ -18,19 +18,16 @@ export default function ConfirmModal({
   onCancel,
 }: ConfirmModalProps) {
   return (
-    <div className="confirm-overlay" onClick={onCancel}>
-      <div className="confirm-modal card" onClick={(e) => e.stopPropagation()}>
-        <h3 className="confirm-title">{title}</h3>
-        <p className="confirm-message">{message}</p>
-        <div className="confirm-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button className="btn btn-danger" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
+    <Modal open onClose={onCancel} title={title}>
+      <p className="confirm-message">{message}</p>
+      <div className="confirm-actions">
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          {cancelLabel}
+        </button>
+        <button type="button" className="btn btn-danger" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -63,7 +63,7 @@
   color: var(--color-warm-gray);
 }
 .delete-btn:hover {
-  color: #c53030;
+  color: var(--color-danger);
 }
 
 .loading-text {

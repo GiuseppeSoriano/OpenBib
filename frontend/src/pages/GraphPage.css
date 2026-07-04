@@ -12,7 +12,7 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--color-charcoal);
-  background: rgba(224, 175, 160, 0.22);
+  background: var(--color-accent-soft);
   border-radius: 999px;
   padding: 3px 10px;
 }
@@ -37,7 +37,7 @@
 }
 .graph-order-toggle button.active {
   background: var(--color-charcoal);
-  color: var(--color-off-white, #f4f3ee);
+  color: var(--color-bg);
 }
 
 @keyframes graph-spin {
@@ -166,7 +166,7 @@
   gap: 4px;
   font-size: 0.72rem;
   color: var(--color-charcoal);
-  background: rgba(224, 175, 160, 0.18);
+  background: var(--color-accent-soft);
   border-radius: 999px;
   padding: 2px 8px;
 }
@@ -202,7 +202,7 @@
   font-size: 0.72rem;
 }
 .graph-version-chip.active {
-  background: rgba(70, 63, 58, 0.08);
+  background: var(--color-surface-hover);
   border-color: var(--color-charcoal);
   color: var(--color-charcoal);
 }
@@ -236,7 +236,7 @@
   height: 10px;
   border-radius: 50%;
   background: var(--color-accent);
-  border: 2px solid #d49a8a;
+  border: 2px solid var(--color-accent-hover);
 }
 .legend-dot.seed {
   background: var(--color-charcoal);
@@ -244,7 +244,7 @@
 }
 .legend-dot.grouped {
   border-style: dashed;
-  background: #F4E3DA;
+  background: var(--color-accent-soft);
   border-color: var(--color-warm-gray);
 }
 .legend-line {

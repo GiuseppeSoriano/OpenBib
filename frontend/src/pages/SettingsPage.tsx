@@ -61,12 +61,12 @@ export default function SettingsPage() {
       </form>
 
       <div style={{ marginTop: "2rem" }}>
-        <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem", color: "#c53030" }}>
+        <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem", color: "var(--color-danger)" }}>
           Danger zone
         </h2>
         <button
           className="btn btn-secondary"
-          style={{ borderColor: "#c53030", color: "#c53030" }}
+          style={{ borderColor: "var(--color-danger)", color: "var(--color-danger)" }}
           onClick={() => {
             if (confirm("Permanently delete your account? This cannot be undone.")) {
               deleteMutation.mutate();

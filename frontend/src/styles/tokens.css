@@ -1,0 +1,111 @@
+/*
+ * OpenBib — Design tokens.
+ * Light theme on :root, dark theme via [data-theme="dark"] on <html>.
+ * Palette: "Scholar Slate + Indigo".
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f3f7;
+
+  /* Text */
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+
+  /* Lines */
+  --color-border: #e2e8f0;
+
+  /* Accent */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef2ff;
+  --color-on-accent: #ffffff;
+
+  /* Status */
+  --color-success: #059669;
+  --color-success-soft: #ecfdf5;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-warning: #d97706;
+  --color-warning-soft: #fffbeb;
+
+  /* Citation graph */
+  --graph-node: #94a3b8;
+  --graph-node-seed: var(--color-accent);
+  --graph-node-saved: var(--color-success);
+  --graph-edge: #cbd5e1;
+
+  /* Legacy palette aliases (older page CSS still references these) */
+  --color-charcoal: var(--color-text);
+  --color-warm-gray: var(--color-text-secondary);
+  --color-light-gray: var(--color-border);
+  --color-offwhite: var(--color-bg);
+  --color-rose: var(--color-accent);
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+
+  /* Spacing */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14);
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --topbar-height: 56px;
+  --bottomnav-height: 60px;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0b1220;
+  --color-surface: #151e2e;
+  --color-surface-hover: #1c2740;
+
+  --color-text: #e5e9f0;
+  --color-text-secondary: #8b98ab;
+
+  --color-border: #2a3648;
+
+  --color-accent: #818cf8;
+  --color-accent-hover: #a5acfa;
+  --color-accent-soft: #1e2447;
+  --color-on-accent: #0b1220;
+
+  --color-success: #34d399;
+  --color-success-soft: #0a2e22;
+  --color-danger: #f87171;
+  --color-danger-soft: #3b1212;
+  --color-warning: #fbbf24;
+  --color-warning-soft: #33240a;
+
+  --graph-node: #64748b;
+  --graph-edge: #334155;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
