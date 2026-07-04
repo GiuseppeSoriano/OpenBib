@@ -6,7 +6,7 @@ ENV PYTHONPATH=/app
 RUN adduser --disabled-password --gecos "" appuser
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[dev]"
 
 COPY . .
 RUN chown -R appuser:appuser /app

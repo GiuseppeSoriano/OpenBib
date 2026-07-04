@@ -47,6 +47,17 @@ services:
       cache:
         condition: service_healthy
 
+  # ── Frontend test runner (opt-in: --profile test) ──────
+  # Runs vitest and regenerates package-lock.json without
+  # requiring node/npm on the host.
+  web-test:
+    image: node:20-alpine
+    profiles: ["test"]
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm run test"
+
   # ── Frontend ────────────────────────────────────────────
   web:
     build:
