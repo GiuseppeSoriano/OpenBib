@@ -36,8 +36,8 @@
   border-right: none;
 }
 .graph-order-toggle button.active {
-  background: var(--color-charcoal);
-  color: var(--color-bg);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
 @keyframes graph-spin {
@@ -134,10 +134,17 @@
   color: var(--color-text-secondary);
 }
 
-.graph-canvas {
+.graph-canvas-container {
   width: 100%;
   height: 600px;
   display: block;
+  overflow: hidden;
+}
+
+@media (max-width: 767px) {
+  .graph-canvas-container {
+    height: 65vh;
+  }
 }
 
 /* ── Node detail panel ──────────────────────────────────── */
@@ -235,25 +242,41 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--color-accent);
-  border: 2px solid var(--color-accent-hover);
+  background: var(--graph-node);
 }
 .legend-dot.seed {
-  background: var(--color-charcoal);
-  border-color: var(--color-charcoal);
+  background: var(--graph-node-seed);
 }
-.legend-dot.grouped {
-  border-style: dashed;
-  background: var(--color-accent-soft);
-  border-color: var(--color-warm-gray);
+.legend-dot.saved {
+  background: var(--graph-node-saved);
+}
+.legend-hint {
+  margin-left: auto;
+  font-style: italic;
 }
 .legend-line {
   display: inline-block;
   width: 20px;
   height: 0;
-  border-top: 2px solid var(--color-warm-gray);
+  border-top: 2px solid var(--graph-edge);
 }
-.legend-line.dashed {
-  border-top-style: dashed;
-  border-top-color: var(--color-accent);
+
+/* ── Mobile ─────────────────────────────────────────────── */
+@media (max-width: 639px) {
+  .graph-node-detail {
+    top: auto;
+    bottom: var(--space-md);
+    left: var(--space-md);
+    right: var(--space-md);
+    width: auto;
+  }
+
+  .graph-legend {
+    flex-wrap: wrap;
+    gap: var(--space-sm) var(--space-md);
+  }
+
+  .legend-hint {
+    display: none;
+  }
 }
