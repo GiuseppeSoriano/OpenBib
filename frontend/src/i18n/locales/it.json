@@ -53,6 +53,7 @@
     "libraryCount_other": "{{count}} articoli archiviati",
     "libraryFallback": "Il tuo archivio personale di articoli",
     "recent": "Raccolte recenti",
+    "viewAll": "Vedi tutte",
     "paperCount_one": "{{count}} articolo",
     "paperCount_other": "{{count}} articoli"
   },

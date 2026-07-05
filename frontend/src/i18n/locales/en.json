@@ -53,6 +53,7 @@
     "libraryCount_other": "{{count}} papers archived",
     "libraryFallback": "Your persistent paper archive",
     "recent": "Recent collections",
+    "viewAll": "View all",
     "paperCount_one": "{{count}} paper",
     "paperCount_other": "{{count}} papers"
   },

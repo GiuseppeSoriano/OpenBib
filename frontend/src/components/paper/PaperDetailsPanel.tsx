@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, ExternalLink, FileText, GitFork, LogIn } from "lucide-react";
+import { BookMarked, ExternalLink, FileText, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
 import api, { library, papers } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
@@ -11,14 +11,25 @@ import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
-import { versionLabel } from "@/components/paper/versionLabel";
-import type { PaperMemberships } from "@/types";
+import { providerLabel, versionLabel } from "@/components/paper/versionLabel";
+import type { LibraryVersionPin, PaperDetail, PaperMemberships } from "@/types";
 import "./PaperDetailsPanel.css";
 
 interface PaperDetailsPanelProps {
   /** Canonical key of the paper to show; null keeps the panel closed. */
   paperKey: string | null;
   onClose: () => void;
+}
+
+/** Human label for a pinned version — metadata match first, provider fallback. */
+function pinLabel(
+  pin: LibraryVersionPin,
+  paper: PaperDetail,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const match = paper.versions.find((v) => v.canonical_key === pin.paper_canonical_key);
+  if (match) return versionLabel(match, t as never);
+  return providerLabel(pin.source_provider);
 }
 
 /**
@@ -56,6 +67,37 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
   });
 
   const inLibrary = !!paper && !!libraryKeys?.includes(paper.paper_group_key);
+
+  // Library entry (managed version pins) — only for papers in the library.
+  const entryQueryKey = ["library-entry", paper?.paper_group_key] as const;
+  const { data: entry } = useQuery({
+    queryKey: entryQueryKey,
+    queryFn: () => library.getEntry(paper!.paper_group_key),
+    enabled: !!user && inLibrary,
+  });
+
+  const invalidateEntry = () => {
+    void queryClient.invalidateQueries({ queryKey: entryQueryKey });
+    void queryClient.invalidateQueries({ queryKey: ["library-entries"] });
+    void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
+  };
+
+  const repinMutation = useMutation({
+    mutationFn: (canonicalKey: string) =>
+      library.repinPrimary(paper!.paper_group_key, canonicalKey),
+    onSuccess: invalidateEntry,
+    onError: () => toast(t("library.repinFailed"), "error"),
+  });
+
+  const removeVersionMutation = useMutation({
+    mutationFn: (canonicalKey: string) =>
+      library.removeVersion(paper!.paper_group_key, canonicalKey),
+    onSuccess: invalidateEntry,
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      toast(status === 409 ? t("library.remove409") : t("library.removeFailed"), "error");
+    },
+  });
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -198,24 +240,71 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
             </div>
           )}
 
-          {paper.versions.length > 1 && (
-            <section className="pd-section">
-              <h3>{t("paper.versionsHeading")}</h3>
+          {entry && entry.pinned_versions.length > 0 ? (
+            <section className="pd-section" data-testid="managed-versions">
+              <h3>{t("library.pinnedVersions")}</h3>
               <ul className="pd-versions">
-                {paper.versions.map((version) => (
-                  <li
-                    key={version.canonical_key}
-                    className={
-                      version.canonical_key === paper.canonical_key
-                        ? "pd-version active"
-                        : "pd-version"
-                    }
-                  >
-                    <span>{versionLabel(version, t)}</span>
-                  </li>
-                ))}
+                {entry.pinned_versions.map((pin) => {
+                  const isPrimary = pin.paper_canonical_key === entry.primary_canonical_key;
+                  return (
+                    <li
+                      key={pin.paper_canonical_key}
+                      className={isPrimary ? "pd-version active" : "pd-version"}
+                    >
+                      <span>{pinLabel(pin, paper, t)}</span>
+                      <span className="pd-version-actions">
+                        {isPrimary ? (
+                          <span className="badge">{t("library.primary")}</span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              disabled={repinMutation.isPending}
+                              onClick={() => repinMutation.mutate(pin.paper_canonical_key)}
+                              title={t("library.repinTitle")}
+                            >
+                              <Pin size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              disabled={removeVersionMutation.isPending}
+                              onClick={() =>
+                                removeVersionMutation.mutate(pin.paper_canonical_key)
+                              }
+                              title={t("library.removeVersionTitle")}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
+          ) : (
+            paper.versions.length > 1 && (
+              <section className="pd-section">
+                <h3>{t("paper.versionsHeading")}</h3>
+                <ul className="pd-versions">
+                  {paper.versions.map((version) => (
+                    <li
+                      key={version.canonical_key}
+                      className={
+                        version.canonical_key === paper.canonical_key
+                          ? "pd-version active"
+                          : "pd-version"
+                      }
+                    >
+                      <span>{versionLabel(version, t)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
           )}
 
           {user ? (

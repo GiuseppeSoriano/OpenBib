@@ -4,8 +4,9 @@ import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import Skeleton from "@/components/ui/Skeleton";
+import EmptyState from "@/components/ui/EmptyState";
 import type { Collection, UserStats } from "@/types";
-import { BookMarked, FolderOpen, Search } from "lucide-react";
+import { ArrowRight, FolderOpen } from "lucide-react";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
@@ -28,8 +29,16 @@ export default function DashboardPage() {
     },
   });
 
-  const statValue = (value: number | undefined) =>
-    statsLoading ? <Skeleton width="2.5rem" height="1.6rem" /> : <span className="stat-value">{value ?? 0}</span>;
+  const stat = (value: number | undefined, label: string) => (
+    <div className="stat-tile card">
+      {statsLoading ? (
+        <Skeleton width="2.4rem" height="1.5rem" />
+      ) : (
+        <span className="stat-value">{value ?? 0}</span>
+      )}
+      <span className="stat-label">{label}</span>
+    </div>
+  );
 
   return (
     <div className="dashboard">
@@ -42,82 +51,54 @@ export default function DashboardPage() {
         <p>{t("dashboard.subtitle")}</p>
       </header>
 
-      {/* Stats */}
       <div className="dashboard-stats">
-        <div className="stat-card card">
-          {statValue(stats?.total_collections ?? collections?.length)}
-          <span className="stat-label">{t("dashboard.statCollections")}</span>
-        </div>
-        <div className="stat-card card">
-          {statValue(stats?.library_total)}
-          <span className="stat-label">{t("dashboard.statInLibrary")}</span>
-        </div>
-        <div className="stat-card card">
-          {statValue(stats?.total_papers)}
-          <span className="stat-label">{t("dashboard.statTotalSaves")}</span>
-        </div>
-        <div className="stat-card card">
-          {statValue(stats?.distinct_papers)}
-          <span className="stat-label">{t("dashboard.statUniquePapers")}</span>
-        </div>
+        {stat(stats?.total_collections ?? collections?.length, t("dashboard.statCollections"))}
+        {stat(stats?.library_total, t("dashboard.statInLibrary"))}
+        {stat(stats?.total_papers, t("dashboard.statTotalSaves"))}
+        {stat(stats?.distinct_papers, t("dashboard.statUniquePapers"))}
       </div>
 
-      <div className="dashboard-grid">
-        <Link to="/search" className="dashboard-action card">
-          <Search size={24} />
-          <h3>{t("dashboard.searchTitle")}</h3>
-          <p>{t("dashboard.searchDesc")}</p>
-        </Link>
-
-        <Link to="/collections" className="dashboard-action card">
-          <FolderOpen size={24} />
-          <h3>{t("dashboard.collectionsTitle")}</h3>
-          <p>
-            {collections
-              ? t("dashboard.collectionsCount", { count: collections.length })
-              : t("dashboard.collectionsFallback")}
-          </p>
-        </Link>
-
-        <Link to="/library" className="dashboard-action card">
-          <BookMarked size={24} />
-          <h3>{t("dashboard.libraryTitle")}</h3>
-          <p>
-            {stats
-              ? t("dashboard.libraryCount", { count: stats.library_total })
-              : t("dashboard.libraryFallback")}
-          </p>
-        </Link>
-
-      </div>
-
-      {collectionsLoading && (
-        <section className="dashboard-recent">
-          <Skeleton height="4rem" lines={3} />
-        </section>
-      )}
-
-      {collections && collections.length > 0 && (
-        <section className="dashboard-recent">
+      <section className="dashboard-recent">
+        <div className="dashboard-recent-head">
           <h2>{t("dashboard.recent")}</h2>
-          <div className="collection-list">
-            {collections.slice(0, 5).map((c) => (
-              <Link to={`/collections/${c.id}`} key={c.id} className="card collection-card">
-                <div className="collection-card-header">
-                  <h4>{c.name}</h4>
-                  <span className="badge">{t(`collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`)}</span>
-                </div>
-                {c.description && (
-                  <p className="collection-desc">{c.description}</p>
-                )}
-                <span className="collection-meta">
-                  {t("dashboard.paperCount", { count: c.paper_count })}
+          <Link to="/collections" className="btn-ghost dashboard-viewall">
+            {t("dashboard.viewAll")}
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {collectionsLoading && <Skeleton height="4rem" lines={3} />}
+
+        {collections && collections.length === 0 && (
+          <EmptyState
+            icon={FolderOpen}
+            title={t("collections.emptyTitle")}
+            description={t("collections.emptyDescription")}
+            action={
+              <Link to="/collections" className="btn btn-primary">
+                {t("collections.new")}
+              </Link>
+            }
+          />
+        )}
+
+        {collections && collections.length > 0 && (
+          <div className="dashboard-collections">
+            {collections.slice(0, 6).map((c) => (
+              <Link to={`/collections/${c.id}`} key={c.id} className="card dashboard-collection">
+                <h3>{c.name}</h3>
+                {c.description && <p className="dashboard-collection-desc">{c.description}</p>}
+                <span className="dashboard-collection-meta">
+                  {t("dashboard.paperCount", { count: c.paper_count })} ·{" "}
+                  {t(
+                    `collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`,
+                  )}
                 </span>
               </Link>
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
 }

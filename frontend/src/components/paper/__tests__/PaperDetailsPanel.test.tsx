@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperDetail } from "@/types";
@@ -34,10 +34,35 @@ const detail: PaperDetail = {
   versions: [],
 };
 
+const libState: {
+  keys: string[];
+  entry: unknown;
+} = { keys: [], entry: null };
+
+const repinPrimary = vi.fn(() => Promise.resolve({}));
+const removeVersion = vi.fn(() => Promise.resolve());
+
 vi.mock("@/lib/api", () => ({
-  default: { get: vi.fn(() => Promise.resolve({ data: [] })), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  default: {
+    get: vi.fn((url: string) => {
+      if (url === "/users/me")
+        return Promise.resolve({
+          data: { id: "u1", email: "me@example.com", display_name: "Me", created_at: "2026-01-01" },
+        });
+      return Promise.resolve({ data: [] });
+    }),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
   papers: { getDetail: vi.fn(() => Promise.resolve(detail)) },
-  library: { listKeys: vi.fn(() => Promise.resolve([])) },
+  library: {
+    listKeys: vi.fn(() => Promise.resolve(libState.keys)),
+    getEntry: vi.fn(() => Promise.resolve(libState.entry)),
+    ensureEntry: vi.fn(),
+    repinPrimary: (...args: unknown[]) => repinPrimary(...(args as [])),
+    removeVersion: (...args: unknown[]) => removeVersion(...(args as [])),
+  },
   notes: { listForPaperGroup: vi.fn(() => Promise.resolve([])) },
   graph: {},
   zotero: {},
@@ -85,5 +110,67 @@ describe("PaperDetailsPanel", () => {
   it("renders nothing while closed", () => {
     renderWithProviders(<PaperDetailsPanel paperKey={null} onClose={() => {}} />);
     expect(screen.queryByTestId("paper-details")).toBeNull();
+  });
+});
+
+describe("PaperDetailsPanel — managed library versions", () => {
+  function setupLibraryPaper() {
+    libState.keys = ["group:panel"];
+    libState.entry = {
+      paper_group_key: "group:panel",
+      primary_canonical_key: "doi:10.1/panel",
+      created_at: "2026-01-01T00:00:00Z",
+      primary_version: detail,
+      pinned_versions: [
+        {
+          paper_canonical_key: "doi:10.1/panel",
+          paper_group_key: "group:panel",
+          source_provider: "crossref",
+          added_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          paper_canonical_key: "hash:preprint1",
+          paper_group_key: "group:panel",
+          source_provider: "arxiv",
+          added_at: "2026-01-02T00:00:00Z",
+        },
+      ],
+      notes_count: 0,
+      tags: [],
+      states: [],
+    };
+    localStorage.setItem("access_token", "test-token");
+    repinPrimary.mockClear();
+    removeVersion.mockClear();
+  }
+
+  it("shows humanized managed pins with a primary badge", async () => {
+    setupLibraryPaper();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+
+    const section = await screen.findByTestId("managed-versions");
+    expect(section).toHaveTextContent("Pinned versions");
+    expect(section).toHaveTextContent("Primary");
+    // Pin without matching metadata degrades to the provider label — never a raw key.
+    expect(section).toHaveTextContent("arXiv");
+    expect(section.textContent).not.toMatch(/hash:|doi:/);
+  });
+
+  it("repins and removes versions through the panel", async () => {
+    setupLibraryPaper();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+    const section = await screen.findByTestId("managed-versions");
+
+    const [repinBtn] = within(section).getAllByTitle("Make this version the default shown");
+    fireEvent.click(repinBtn!);
+    await waitFor(() =>
+      expect(repinPrimary).toHaveBeenCalledWith("group:panel", "hash:preprint1"),
+    );
+
+    const [removeBtn] = within(section).getAllByTitle("Remove this version pin");
+    fireEvent.click(removeBtn!);
+    await waitFor(() =>
+      expect(removeVersion).toHaveBeenCalledWith("group:panel", "hash:preprint1"),
+    );
   });
 });
