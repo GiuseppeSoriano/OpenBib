@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "openbib-backend"
 version = "0.1.0"
@@ -28,6 +32,11 @@ dev = [
     "respx>=0.21.0",
     "aiosqlite>=0.20.0",
 ]
+
+# CI installs with the full source tree present; without explicit discovery
+# setuptools aborts on the flat layout ("multiple top-level packages: app, alembic").
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 target-version = "py312"
