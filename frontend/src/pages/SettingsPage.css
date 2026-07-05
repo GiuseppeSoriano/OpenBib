@@ -1,0 +1,99 @@
+@layer pages {
+  .settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    max-width: 560px;
+  }
+
+  .settings h1 {
+    font-size: 1.35rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--space-xs);
+  }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .settings-section h2 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    font-size: 0.84rem;
+    font-weight: 500;
+  }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+  }
+
+  .settings-label {
+    font-size: 0.84rem;
+    font-weight: 500;
+    min-width: 70px;
+  }
+
+  .settings-saved {
+    font-size: 0.84rem;
+    color: var(--color-success);
+  }
+
+  .settings-hint {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+  }
+
+  .settings-self-start {
+    align-self: flex-start;
+  }
+
+  .settings-zotero-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.85rem;
+  }
+  .settings-zotero-status svg {
+    color: var(--color-success);
+  }
+  .settings-zotero-status code {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+
+  .settings-zotero-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .settings-danger h2 {
+    color: var(--color-danger);
+  }
+
+  .settings-danger-btn {
+    align-self: flex-start;
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+  }
+  .settings-danger-btn:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+    border-color: var(--color-danger);
+  }
+}

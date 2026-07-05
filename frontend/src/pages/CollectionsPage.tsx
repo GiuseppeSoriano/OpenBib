@@ -6,14 +6,21 @@ import api from "@/lib/api";
 import type { Collection, Visibility } from "@/types";
 import { Plus, Trash2, FolderOpen } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
+import Modal from "@/components/ui/Modal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import "./CollectionsPage.css";
 
+const VISIBILITIES: Visibility[] = ["private", "shared", "public"];
+
+function visibilityLabel(v: Visibility, t: (key: string) => string) {
+  return t(`collections.visibility${v.charAt(0).toUpperCase()}${v.slice(1)}`);
+}
+
 export default function CollectionsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("private");
@@ -33,9 +40,10 @@ export default function CollectionsPage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["collections"] });
-      setShowForm(false);
+      setShowCreate(false);
       setName("");
       setDescription("");
+      setVisibility("private");
     },
   });
 
@@ -59,51 +67,11 @@ export default function CollectionsPage() {
     <div className="collections-page">
       <div className="page-header">
         <h1>{t("collections.title")}</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          <Plus size={16} />
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <Plus size={15} />
           {t("collections.new")}
         </button>
       </div>
-
-      {showForm && (
-        <form onSubmit={handleCreate} className="card create-form">
-          <input
-            className="input"
-            placeholder={t("collections.namePlaceholder")}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            autoFocus
-          />
-          <input
-            className="input"
-            placeholder={t("collections.descriptionPlaceholder")}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-          <select
-            className="input"
-            value={visibility}
-            onChange={(e) => setVisibility(e.target.value as Visibility)}
-          >
-            <option value="private">{t("collections.visibilityPrivate")}</option>
-            <option value="shared">{t("collections.visibilityShared")}</option>
-            <option value="public">{t("collections.visibilityPublic")}</option>
-          </select>
-          <div className="create-form-actions">
-            <button type="submit" className="btn btn-primary">
-              {t("collections.create")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShowForm(false)}
-            >
-              {t("common.cancel")}
-            </button>
-          </div>
-        </form>
-      )}
 
       {isLoading && <SkeletonCard count={3} />}
 
@@ -114,14 +82,12 @@ export default function CollectionsPage() {
               <h3>{c.name}</h3>
               {c.description && <p>{c.description}</p>}
               <div className="collection-item-meta">
-                <span className="badge">
-                  {t(`collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`)}
-                </span>
+                <span className="badge badge--neutral">{visibilityLabel(c.visibility, t)}</span>
                 <span>{t("collections.paperCount", { count: c.paper_count })}</span>
               </div>
             </Link>
             <button
-              className="btn-ghost delete-btn"
+              className="btn-ghost collection-delete"
               onClick={() => setPendingDelete(c)}
               title={t("collections.deleteCollectionTitle")}
             >
@@ -137,13 +103,57 @@ export default function CollectionsPage() {
           title={t("collections.emptyTitle")}
           description={t("collections.emptyDescription")}
           action={
-            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-              <Plus size={16} />
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+              <Plus size={15} />
               {t("collections.new")}
             </button>
           }
         />
       )}
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title={t("collections.new")}>
+        <form onSubmit={handleCreate} className="collection-create-form">
+          <input
+            className="input"
+            placeholder={t("collections.namePlaceholder")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus
+          />
+          <input
+            className="input"
+            placeholder={t("collections.descriptionPlaceholder")}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <div className="segmented" role="group" aria-label={t("collections.visibilityPrivate")}>
+            {VISIBILITIES.map((v) => (
+              <button
+                key={v}
+                type="button"
+                className={visibility === v ? "active" : ""}
+                aria-pressed={visibility === v}
+                onClick={() => setVisibility(v)}
+              >
+                {visibilityLabel(v, t)}
+              </button>
+            ))}
+          </div>
+          <div className="confirm-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowCreate(false)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={!name.trim()}>
+              {t("collections.create")}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {pendingDelete && (
         <ConfirmModal

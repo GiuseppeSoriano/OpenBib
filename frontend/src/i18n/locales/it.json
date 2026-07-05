@@ -165,6 +165,7 @@
     "emptyPapersTitle": "Nessun articolo",
     "emptyPapersDescription": "Cerca articoli e aggiungili, oppure incolla un DOI o una chiave canonica qui sopra.",
     "removePaperTitle": "Rimuovi articolo",
+    "thisPaper": "questo articolo",
     "removePaperMessage": "Rimuovere \"{{name}}\" da questa raccolta?",
     "remove": "Rimuovi",
     "removeFromCollection": "Rimuovi dalla raccolta (l'articolo resta nella tua Libreria)",
@@ -281,6 +282,9 @@
     "deleteAccountConfirm": "Eliminare definitivamente il tuo account? Questa azione non può essere annullata.",
     "appearance": "Aspetto",
     "language": "Lingua",
-    "profile": "Profilo"
+    "profile": "Profilo",
+    "themeLight": "Chiaro",
+    "themeDark": "Scuro",
+    "themeSystem": "Sistema"
   }
 }

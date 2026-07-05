@@ -165,6 +165,7 @@
     "emptyPapersTitle": "No papers yet",
     "emptyPapersDescription": "Search for papers and add them, or paste a DOI or canonical key above.",
     "removePaperTitle": "Remove paper",
+    "thisPaper": "this paper",
     "removePaperMessage": "Remove \"{{name}}\" from this collection?",
     "remove": "Remove",
     "removeFromCollection": "Remove from collection (the paper stays in your Library)",
@@ -281,6 +282,9 @@
     "deleteAccountConfirm": "Permanently delete your account? This cannot be undone.",
     "appearance": "Appearance",
     "language": "Language",
-    "profile": "Profile"
+    "profile": "Profile",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System"
   }
 }

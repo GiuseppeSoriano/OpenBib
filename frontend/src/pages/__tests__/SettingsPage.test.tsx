@@ -37,6 +37,38 @@ beforeEach(() => {
   zoteroState.status = { connected: false, zotero_user_id: null, api_key_masked: null };
 });
 
+describe("SettingsPage — appearance", () => {
+  it("theme segmented control sets and persists the preference", async () => {
+    localStorage.setItem("access_token", "test-token");
+    renderWithProviders(<SettingsPage />);
+
+    const segment = await screen.findByTestId("theme-segment");
+    const { fireEvent } = await import("@testing-library/react");
+    const darkBtn = Array.from(segment.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Dark"),
+    )!;
+    fireEvent.click(darkBtn);
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("openbib.theme")).toBe("dark");
+  });
+
+  it("language segmented control switches and persists the language", async () => {
+    localStorage.setItem("access_token", "test-token");
+    renderWithProviders(<SettingsPage />);
+
+    const segment = await screen.findByTestId("language-segment");
+    const { fireEvent, waitFor } = await import("@testing-library/react");
+    const itBtn = Array.from(segment.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Italiano"),
+    )!;
+    fireEvent.click(itBtn);
+
+    await waitFor(() => expect(localStorage.getItem("openbib.lang")).toBe("it"));
+    expect(document.documentElement.lang).toBe("it");
+  });
+});
+
 describe("SettingsPage — Zotero", () => {
   it("shows the connect form when Zotero is not configured", async () => {
     localStorage.setItem("access_token", "test-token");

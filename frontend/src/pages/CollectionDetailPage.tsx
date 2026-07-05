@@ -4,9 +4,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import api, { zotero } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import type { ZoteroSyncReport } from "@/types";
-import type { Collection, CollectionPaper, Note } from "@/types";
+import type { Collection, CollectionPaper, Note, ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
+import Modal from "@/components/ui/Modal";
 import PaperCard from "@/components/paper/PaperCard";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
@@ -16,14 +16,12 @@ import { useToast } from "@/components/ui/Toast";
 import {
   Trash2,
   GitFork,
-  BookMarked,
   BookUp,
   StickyNote,
   Plus,
   ChevronDown,
   ChevronUp,
   Edit3,
-  Save,
   Upload,
   FileText,
 } from "lucide-react";
@@ -184,23 +182,32 @@ export default function CollectionDetailPage() {
     new Intl.DateTimeFormat(i18n.language).format(new Date(value));
 
   if (isLoading) return <SkeletonCard count={3} />;
-  if (!collection) return <p className="cd-empty">{t("collections.notFound")}</p>;
+  if (!collection) return <p className="cd-notfound">{t("collections.notFound")}</p>;
 
   const visibilityLabel = t(
     `collections.visibility${collection.visibility.charAt(0).toUpperCase()}${collection.visibility.slice(1)}`,
   );
 
+  const importCount = importDois.split("\n").filter((d) => d.trim()).length;
+
   return (
     <div className="collection-detail">
       {/* Header */}
-      <div className="cd-header">
+      <header className="cd-header">
         {editing ? (
-          <div className="cd-edit-form">
+          <form
+            className="cd-edit-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateMutation.mutate();
+            }}
+          >
             <input
               className="input"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               placeholder={t("collections.namePlaceholder")}
+              required
             />
             <input
               className="input"
@@ -209,19 +216,19 @@ export default function CollectionDetailPage() {
               placeholder={t("collections.descriptionPlaceholder")}
             />
             <div className="cd-edit-actions">
-              <button className="btn btn-primary" onClick={() => updateMutation.mutate()}>
-                <Save size={14} /> {t("collections.save")}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setEditing(false)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setEditing(false)}>
                 {t("common.cancel")}
               </button>
+              <button type="submit" className="btn btn-primary">
+                {t("collections.save")}
+              </button>
             </div>
-          </div>
+          </form>
         ) : (
           <>
             <div className="cd-title-row">
               <h1>{collection.name}</h1>
-              <span className="badge">{visibilityLabel}</span>
+              <span className="badge badge--neutral">{visibilityLabel}</span>
               {user && (
                 <button
                   className="btn-ghost"
@@ -232,13 +239,11 @@ export default function CollectionDetailPage() {
                   }}
                   title={t("collections.edit")}
                 >
-                  <Edit3 size={16} />
+                  <Edit3 size={15} />
                 </button>
               )}
             </div>
-            {collection.description && (
-              <p className="cd-description">{collection.description}</p>
-            )}
+            {collection.description && <p className="cd-description">{collection.description}</p>}
             <p className="cd-meta">
               {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
               {t("collections.createdOn", { date: formatDate(collection.created_at) })}
@@ -248,53 +253,27 @@ export default function CollectionDetailPage() {
                 <GitFork size={14} /> {t("collections.viewGraph")}
               </Link>
               {user && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => zoteroSyncMutation.mutate()}
-                  disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
-                  title={
-                    zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")
-                  }
-                >
-                  <BookUp size={14} /> {t("zotero.sync")}
-                </button>
-              )}
-              {user && (
-                <button className="btn btn-secondary" onClick={() => setShowImport((s) => !s)}>
-                  <Upload size={14} /> {t("collections.importDois")}
-                </button>
+                <>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => zoteroSyncMutation.mutate()}
+                    disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
+                    title={zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")}
+                  >
+                    <BookUp size={14} /> {t("zotero.sync")}
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
+                    <Upload size={14} /> {t("collections.importDois")}
+                  </button>
+                </>
               )}
             </div>
-            {showImport && (
-              <div className="cd-import-form card">
-                <textarea
-                  className="input note-textarea"
-                  placeholder={t("collections.importPlaceholder")}
-                  value={importDois}
-                  onChange={(e) => setImportDois(e.target.value)}
-                  rows={4}
-                />
-                <button
-                  className="btn btn-primary"
-                  disabled={!importDois.trim()}
-                  onClick={() => {
-                    const dois = importDois.split("\n").map((d) => d.trim()).filter(Boolean);
-                    if (dois.length > 0) importDoisMutation.mutate(dois);
-                  }}
-                >
-                  {t("collections.importButton", {
-                    count: importDois.split("\n").filter((d) => d.trim()).length,
-                  })}
-                </button>
-              </div>
-            )}
           </>
         )}
-      </div>
+      </header>
 
       {/* Add paper */}
       {user && (
-      <div className="cd-add-paper">
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -312,12 +291,10 @@ export default function CollectionDetailPage() {
             <Plus size={14} /> {t("collections.addPaper")}
           </button>
         </form>
-      </div>
       )}
 
       {/* Paper list */}
-      <div className="cd-papers">
-        <h2>{t("collections.papersHeading")}</h2>
+      <section className="cd-papers">
         {papers && papers.length === 0 && (
           <EmptyState
             icon={FileText}
@@ -325,23 +302,102 @@ export default function CollectionDetailPage() {
             description={t("collections.emptyPapersDescription")}
           />
         )}
-        {papers &&
-          papers.map((cp) => (
-            <CollectionPaperItem
-              key={cp.paper_canonical_key}
-              item={cp}
-              onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
-              onOpenDetails={setDetailsKey}
-            />
-          ))}
-      </div>
+        {papers?.map((cp) => (
+          <CollectionPaperItem
+            key={cp.paper_canonical_key}
+            item={cp}
+            onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
+            onOpenDetails={setDetailsKey}
+          />
+        ))}
+      </section>
 
-      {/* Delete confirmation modal */}
+      {/* Collection notes */}
+      {user && (
+        <section className="cd-notes-section">
+          <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)}>
+            <StickyNote size={14} />
+            {t("collections.notes")}
+            {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {showNotes && (
+            <div className="cd-notes">
+              <form
+                onSubmit={(e: FormEvent) => {
+                  e.preventDefault();
+                  if (newNote.trim()) createNoteMutation.mutate();
+                }}
+                className="cd-note-form"
+              >
+                <textarea
+                  className="input"
+                  placeholder={t("collections.notePlaceholder")}
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  rows={3}
+                />
+                <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
+                  {t("paper.addNote")}
+                </button>
+              </form>
+
+              {notes?.map((note) => (
+                <div key={note.id} className="card cd-note">
+                  <p>{note.content}</p>
+                  <div className="cd-note-meta">
+                    <span>{formatDate(note.updated_at)}</span>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => deleteNoteMutation.mutate(note.id)}
+                      title={t("common.delete")}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Import modal */}
+      <Modal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        title={t("collections.importDois")}
+      >
+        <textarea
+          className="input"
+          placeholder={t("collections.importPlaceholder")}
+          value={importDois}
+          onChange={(e) => setImportDois(e.target.value)}
+          rows={5}
+          autoFocus
+        />
+        <div className="confirm-actions">
+          <button type="button" className="btn btn-secondary" onClick={() => setShowImport(false)}>
+            {t("common.cancel")}
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={importCount === 0 || importDoisMutation.isPending}
+            onClick={() => {
+              const dois = importDois.split("\n").map((d) => d.trim()).filter(Boolean);
+              if (dois.length > 0) importDoisMutation.mutate(dois);
+            }}
+          >
+            {t("collections.importButton", { count: importCount })}
+          </button>
+        </div>
+      </Modal>
+
       {pendingDeleteKey && (
         <ConfirmModal
           title={t("collections.removePaperTitle")}
           message={t("collections.removePaperMessage", {
-            name: paperDisplayName(papers, pendingDeleteKey),
+            name: paperDisplayName(papers, pendingDeleteKey, t("collections.thisPaper")),
           })}
           confirmLabel={t("collections.remove")}
           onConfirm={() => {
@@ -352,64 +408,19 @@ export default function CollectionDetailPage() {
         />
       )}
 
-      {/* Collection notes section */}
-      {user && (
-      <div className="cd-notes-section">
-        <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)}>
-          <StickyNote size={14} />
-          {t("collections.notes")}
-          {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-
-        {showNotes && (
-          <div className="cd-notes">
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault();
-                if (newNote.trim()) createNoteMutation.mutate();
-              }}
-              className="note-form"
-            >
-              <textarea
-                className="input note-textarea"
-                placeholder={t("collections.notePlaceholder")}
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                rows={3}
-              />
-              <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
-                {t("paper.addNote")}
-              </button>
-            </form>
-
-            {notes?.map((note) => (
-              <div key={note.id} className="note-item card">
-                <p>{note.content}</p>
-                <div className="note-meta">
-                  <span>{formatDate(note.updated_at)}</span>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => deleteNoteMutation.mutate(note.id)}
-                    title={t("common.delete")}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      )}
-
       <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }
 
-function paperDisplayName(papers: CollectionPaper[] | undefined, key: string): string {
+/** Never surface a raw canonical key — degrade to a generic label. */
+function paperDisplayName(
+  papers: CollectionPaper[] | undefined,
+  key: string,
+  fallback: string,
+): string {
   const match = papers?.find((cp) => cp.paper_canonical_key === key);
-  const name = match?.paper?.title ?? key;
+  const name = match?.paper?.title ?? fallback;
   return name.length > 60 ? `${name.slice(0, 60)}…` : name;
 }
 
@@ -422,7 +433,7 @@ function CollectionPaperItem({
   onRemove: () => void;
   onOpenDetails: (key: string) => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { user } = useAuth();
 
   const { data: tags } = useQuery({
@@ -439,55 +450,40 @@ function CollectionPaperItem({
   const actions = (
     <>
       {user && (
-        <div className="cp-state">
+        <div className="cd-state">
           <ReadingStateSelect paperKey={item.paper_canonical_key} />
         </div>
       )}
-      {user && item.paper_group_key && (
-        <Link
-          to={`/library?focus=${encodeURIComponent(item.paper_group_key)}`}
-          className="btn-ghost"
-          title={t("collections.openInLibrary")}
-        >
-          <BookMarked size={14} />
-        </Link>
-      )}
       <Link
         to={`/graph/${encodeURIComponent(item.paper_canonical_key)}`}
-        className="btn-ghost"
-        title={t("paper.exploreGraph")}
+        className="btn btn-secondary"
       >
         <GitFork size={14} />
+        {t("paper.exploreGraph")}
       </Link>
       {user && (
-        <button className="btn-ghost" onClick={onRemove} title={t("collections.removeFromCollection")}>
+        <button
+          className="btn-ghost cd-remove"
+          onClick={onRemove}
+          title={t("collections.removeFromCollection")}
+        >
           <Trash2 size={14} />
         </button>
       )}
-      <span className="cp-added">
-        {t("collections.addedOn", {
-          date: new Intl.DateTimeFormat(i18n.language).format(new Date(item.added_at)),
-        })}
-      </span>
     </>
   );
 
   if (!item.paper) {
-    // No cached metadata yet — degrade to the canonical key.
+    // No cached metadata yet — a minimal row that still opens the panel.
     return (
-      <div className="cp-item card">
-        <div className="cp-header">
-          <button
-            type="button"
-            className="cp-key paper-title-btn"
-            title={item.paper_canonical_key}
-            onClick={() => onOpenDetails(item.paper_canonical_key)}
-          >
-            {item.paper_canonical_key.length > 60
-              ? item.paper_canonical_key.slice(0, 60) + "…"
-              : item.paper_canonical_key}
-          </button>
-        </div>
+      <div className="card cd-paper-fallback">
+        <button
+          type="button"
+          className="paper-title paper-title-btn"
+          onClick={() => onOpenDetails(item.paper_canonical_key)}
+        >
+          {t("paper.detailsTitle")}
+        </button>
         <div className="paper-actions">{actions}</div>
       </div>
     );
@@ -498,19 +494,17 @@ function CollectionPaperItem({
       paper={item.paper}
       onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
       showAbstract={false}
-      showTopics={false}
-      headerBadges={
-        tags && tags.length > 0 ? (
-          <>
-            {tags.slice(0, 4).map(({ tag }) => (
-              <span key={tag} className="paper-tag">
-                {tag}
-              </span>
-            ))}
-          </>
-        ) : undefined
-      }
       actions={actions}
-    />
+    >
+      {tags && tags.length > 0 && (
+        <div className="cd-paper-tags">
+          {tags.slice(0, 4).map(({ tag }) => (
+            <span key={tag} className="paper-tag">
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+    </PaperCard>
   );
 }
