@@ -2,14 +2,24 @@
 
 A full-stack application for searching, organizing, and exploring academic papers across multiple providers (OpenAlex, arXiv, Crossref, Europe PMC).
 
+**Search, paper details, and citation-graph exploration are free to use without an account** — sign up to build collections, a persistent library, notes, tags, and reading states, and to sync everything to Zotero.
+
+## Highlights
+
+- 🔍 Parallel multi-provider search (OpenAlex, arXiv, Crossref, Europe PMC) with cross-provider dedup, version grouping, and Redis-cached results
+- 🕸️ Fluid, Obsidian-style citation graph (continuous force simulation — nodes stay where you left them as the graph grows)
+- 📚 Personal library with version pins, collections with sharing roles, notes, tags, and reading states
+- 🔄 One-way Zotero sync (collections and library) — Zotero handles export, PDFs, and citations
+- 🌗 Dark & light themes, 🇬🇧 English + 🇮🇹 Italian, fully responsive down to mobile
+
 ## Architecture
 
 | Layer | Stack |
 |-------|-------|
-| **Frontend** | React 18 · TypeScript 5 · Vite · TanStack Query · Cytoscape.js |
+| **Frontend** | React 18 · TypeScript 5 · Vite · TanStack Query · react-force-graph · react-i18next |
 | **Backend** | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · Pydantic v2 |
-| **Database** | PostgreSQL 16 · Redis 7 |
-| **Deploy** | Docker Compose (4 services) |
+| **Database** | PostgreSQL 16 · Redis 7 (see [docs/Architecture/Persistence.md](docs/Architecture/Persistence.md)) |
+| **Deploy** | Docker Compose (4 services) · GitHub Actions CI |
 
 ## Prerequisites
 
@@ -202,18 +212,24 @@ ReferenceManager/
 | `PATCH` | `/api/v1/users/me` | Update profile |
 | `GET` | `/api/v1/collections` | List collections |
 | `POST` | `/api/v1/collections` | Create collection |
-| `GET` | `/api/v1/collections/{id}` | Collection detail |
-| `GET` | `/api/v1/papers/search` | Search papers across providers |
-| `GET` | `/api/v1/papers/{key}` | Look up a single paper |
+| `GET` | `/api/v1/collections/{id}` | Collection detail (public collections work anonymously) |
+| `GET` | `/api/v1/papers/search` | Search papers across providers (public, Redis-cached) |
+| `GET` | `/api/v1/papers/{key}` | Full paper details + sibling versions (public) |
 | `GET/PUT` | `/api/v1/papers/{key}/states` | Reading state |
 | `GET/POST/DELETE` | `/api/v1/papers/{key}/tags` | Paper tags |
-| `GET/POST/DELETE` | `/api/v1/collections/{id}/papers` | Papers in a collection |
-| `GET` | `/api/v1/collections/{id}/export/bibtex` | Export collection as BibTeX |
+| `GET/POST/DELETE` | `/api/v1/collections/{id}/papers` | Papers in a collection (hydrated with metadata) |
 | `POST` | `/api/v1/collections/{id}/import/dois` | Import papers by DOI list |
 | `POST` | `/api/v1/collections/{id}/import/keys` | Import papers by canonical key list |
 | `GET/POST/DELETE` | `/api/v1/collections/{id}/members` | Collaboration members |
 | `GET/POST/PATCH/DELETE` | `/api/v1/notes` | Notes on papers / collections |
-| `GET` | `/api/v1/graph/{paper_key}` | Citation graph (BFS expansion) |
+| `GET` | `/api/v1/library/entries` | Persistent library (entries + version pins) |
+| `GET` | `/api/v1/graph/paper/{key}` | Single-paper citation graph (public) |
+| `GET` | `/api/v1/graph/collection/{id}` | Collection citation graph |
+| `GET` | `/api/v1/graph/library` | Library citation graph |
+| `POST` | `/api/v1/graph/expand` | Expand citers/references one level (public) |
+| `PUT/GET/DELETE` | `/api/v1/zotero/credentials` | Connect / inspect / disconnect Zotero |
+| `POST` | `/api/v1/zotero/sync/collection/{id}` | One-way sync a collection to Zotero |
+| `POST` | `/api/v1/zotero/sync/library` | One-way sync the library to Zotero |
 | `GET` | `/api/v1/recommendations/{paper_key}` | Co-citation recommendations |
 | `GET` | `/api/health` | Health check |
 
@@ -223,15 +239,23 @@ Full interactive docs at `http://localhost:8000/api/docs` when the server is run
 
 ## Design
 
-The UI follows the **Neutral Elegance** palette:
+The UI follows the **Scholar Slate + Indigo** design system — light and dark
+themes driven entirely by CSS custom properties (`[data-theme]`), with the
+preference (light / dark / system) persisted per user:
 
-| Role | Color | Hex |
-|------|-------|-----|
-| Dark Charcoal (sidebar, text) | ■ | `#463F3A` |
-| Warm Gray (secondary text) | ■ | `#8A817C` |
-| Light Gray (borders) | ■ | `#BCB8B1` |
-| Off White (background) | ■ | `#F4F3EE` |
-| Dusty Rose (accent, CTAs) | ■ | `#E0AFA0` |
+| Role | Light | Dark |
+|------|-------|------|
+| Background | `#F6F7F9` | `#0B1220` |
+| Surface | `#FFFFFF` | `#151E2E` |
+| Text | `#0F172A` | `#E5E9F0` |
+| Accent (indigo) | `#4F46E5` | `#818CF8` |
+| Success | `#059669` | `#34D399` |
+| Danger | `#DC2626` | `#F87171` |
+
+Full token sheet in `frontend/src/styles/tokens.css`. The interface is
+available in **English and Italian** (auto-detected, switchable in Settings)
+and is responsive from desktop down to 375 px phones (collapsible sidebar,
+bottom navigation, bottom-sheet dialogs).
 
 ---
 

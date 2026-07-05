@@ -29,7 +29,10 @@ async def register(body: RegisterRequest, db: DB):
         display_name=body.display_name,
     )
     db.add(user)
-    await db.flush()
+    # Commit before issuing tokens: the session normally commits in
+    # dependency teardown AFTER the response is sent, so a client using
+    # the token immediately could race the insert and get 401.
+    await db.commit()
 
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
