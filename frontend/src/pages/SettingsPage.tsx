@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import ThemeToggle from "@/components/ui/ThemeToggle";
-import LanguageSwitcher from "@/components/ui/LanguageSwitcher";
+import LanguageSegment from "@/components/ui/LanguageSegment";
 import { useToast } from "@/components/ui/Toast";
 import { BookUp, CheckCircle2 } from "lucide-react";
 import api, { zotero } from "@/lib/api";
@@ -75,7 +75,7 @@ export default function SettingsPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{t("settings.language")}</span>
-          <LanguageSwitcher />
+          <LanguageSegment />
         </div>
       </div>
 

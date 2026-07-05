@@ -7,7 +7,7 @@ import { renderWithProviders } from "@/test/utils";
 describe("i18n", () => {
   it("renders the navigation in English by default", async () => {
     renderWithProviders(<Layout />);
-    expect((await screen.findAllByText("Settings")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Search")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("Collections")).length).toBeGreaterThan(0);
   });
 
@@ -16,7 +16,7 @@ describe("i18n", () => {
     await act(async () => {
       await i18n.changeLanguage("it");
     });
-    expect((await screen.findAllByText("Impostazioni")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Cerca")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("Raccolte")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("Libreria")).length).toBeGreaterThan(0);
     expect(document.documentElement.lang).toBe("it");
