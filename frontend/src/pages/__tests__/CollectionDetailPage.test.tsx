@@ -93,8 +93,7 @@ describe("CollectionDetailPage", () => {
 
     expect(await screen.findByText("Attention Is All You Need")).toBeInTheDocument();
     expect(screen.getByText("Ashish Vaswani")).toBeInTheDocument();
-    expect(screen.getByText("NeurIPS")).toBeInTheDocument();
-    expect(screen.getByText("2017")).toBeInTheDocument();
+    expect(screen.getByText(/NeurIPS · 2017/)).toBeInTheDocument();
     // The raw canonical key must no longer be the visible label.
     expect(screen.queryByText("doi:10.1/attention")).toBeNull();
   });

@@ -1,25 +1,32 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, BookOpen, ExternalLink, GitFork, LogIn } from "lucide-react";
-import { library, papers } from "@/lib/api";
+import { BookMarked, ExternalLink, FileText, GitFork, LogIn } from "lucide-react";
+import api, { library, papers } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
-import Drawer from "@/components/ui/Drawer";
+import Panel from "@/components/ui/Panel";
 import Skeleton from "@/components/ui/Skeleton";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
-import { providerLabel } from "@/components/paper/PaperCard";
-import "./PaperDetailsDrawer.css";
+import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
+import { versionLabel } from "@/components/paper/versionLabel";
+import type { PaperMemberships } from "@/types";
+import "./PaperDetailsPanel.css";
 
-interface PaperDetailsDrawerProps {
-  /** Canonical key of the paper to show; null keeps the drawer closed. */
+interface PaperDetailsPanelProps {
+  /** Canonical key of the paper to show; null keeps the panel closed. */
   paperKey: string | null;
   onClose: () => void;
 }
 
-export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDrawerProps) {
+/**
+ * The paper detail view: rich human-readable metadata and actions.
+ * Low-level identifiers (DOIs, canonical keys) never appear as text —
+ * external references are presented as link chips.
+ */
+export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPanelProps) {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -34,6 +41,16 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
     queryFn: () => library.listKeys(),
+    enabled: !!user && !!paperKey,
+    staleTime: 30_000,
+  });
+
+  const { data: memberships } = useQuery({
+    queryKey: ["paper-memberships"],
+    queryFn: async () => {
+      const { data } = await api.get<PaperMemberships>("/collections/paper-memberships");
+      return data;
+    },
     enabled: !!user && !!paperKey,
     staleTime: 30_000,
   });
@@ -55,10 +72,12 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
   });
 
   const formatDate = (value: string | null | undefined) =>
-    value ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }).format(new Date(value)) : null;
+    value
+      ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }).format(new Date(value))
+      : null;
 
   return (
-    <Drawer open={!!paperKey} onClose={onClose} title={t("paper.detailsTitle")}>
+    <Panel open={!!paperKey} onClose={onClose} title={t("paper.detailsTitle")}>
       {isLoading && <Skeleton lines={8} />}
       {isError && <p className="pd-error">{t("paper.notFound")}</p>}
 
@@ -68,13 +87,9 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
 
           <div className="pd-badges">
             {paper.open_access && <span className="badge">{t("paper.openAccess")}</span>}
-            {paper.paper_type && <span className="badge badge--neutral">{paper.paper_type}</span>}
-            {paper.version && <span className="badge badge-version">{paper.version}</span>}
-            {(paper.provider_sources ?? []).map((source) => (
-              <span key={source} className="badge badge--neutral">
-                {providerLabel(source)}
-              </span>
-            ))}
+            {inLibrary && (
+              <span className="badge badge--success">{t("paper.inLibrary")}</span>
+            )}
           </div>
 
           {paper.authors.length > 0 && (
@@ -97,6 +112,34 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
             )}
           </div>
 
+          <div className="pd-actions">
+            <Link
+              to={`/graph/${encodeURIComponent(paper.canonical_key)}`}
+              className="btn btn-secondary"
+              onClick={onClose}
+            >
+              <GitFork size={14} />
+              {t("paper.exploreGraph")}
+            </Link>
+            {user && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={inLibrary || saveMutation.isPending}
+                >
+                  <BookMarked size={14} />
+                  {inLibrary ? t("paper.inLibrary") : t("paper.saveToLibrary")}
+                </button>
+                <AddToCollectionMenu
+                  canonicalKey={paper.canonical_key}
+                  savedInCollections={memberships?.[paper.canonical_key] ?? []}
+                />
+              </>
+            )}
+          </div>
+
           {paper.abstract && (
             <section className="pd-section">
               <h3>{t("paper.abstractHeading")}</h3>
@@ -104,42 +147,51 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
             </section>
           )}
 
-          <section className="pd-section">
-            <h3>{t("paper.identifiers")}</h3>
-            <ul className="pd-identifiers">
-              {paper.doi && (
-                <li>
-                  <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink size={12} /> DOI: {paper.doi}
-                  </a>
-                </li>
-              )}
-              {paper.arxiv_id && (
-                <li>
+          {(paper.doi || paper.arxiv_id || paper.pdf_url) && (
+            <section className="pd-section">
+              <h3>{t("paper.linksHeading")}</h3>
+              <div className="pd-links">
+                {paper.doi && (
                   <a
+                    className="link-chip"
+                    href={`https://doi.org/${paper.doi}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t("paper.publisherLink")}
+                    <ExternalLink size={12} />
+                  </a>
+                )}
+                {paper.arxiv_id && (
+                  <a
+                    className="link-chip"
                     href={`https://arxiv.org/abs/${paper.arxiv_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <ExternalLink size={12} /> arXiv: {paper.arxiv_id}
+                    arXiv
+                    <ExternalLink size={12} />
                   </a>
-                </li>
-              )}
-              {paper.pmid && <li>PMID: {paper.pmid}</li>}
-              {paper.pdf_url && (
-                <li>
-                  <a href={paper.pdf_url} target="_blank" rel="noopener noreferrer">
-                    <BookOpen size={12} /> {t("paper.pdf")}
+                )}
+                {paper.pdf_url && (
+                  <a
+                    className="link-chip"
+                    href={paper.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <FileText size={12} />
+                    {t("paper.pdf")}
                   </a>
-                </li>
-              )}
-            </ul>
-          </section>
+                )}
+              </div>
+            </section>
+          )}
 
           {(paper.topics.length > 0 || paper.keywords.length > 0) && (
             <div className="pd-topics">
-              {[...paper.topics, ...paper.keywords].slice(0, 10).map((topic) => (
-                <span key={topic} className="badge">
+              {[...paper.topics, ...paper.keywords].slice(0, 8).map((topic) => (
+                <span key={topic} className="badge badge--neutral">
                   {topic}
                 </span>
               ))}
@@ -154,44 +206,17 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
                   <li
                     key={version.canonical_key}
                     className={
-                      version.canonical_key === paper.canonical_key ? "pd-version active" : "pd-version"
+                      version.canonical_key === paper.canonical_key
+                        ? "pd-version active"
+                        : "pd-version"
                     }
                   >
-                    <span>
-                      {version.version ||
-                        version.publication_date?.slice(0, 4) ||
-                        t("paper.undated")}
-                    </span>
-                    <span className="pd-version-provider">
-                      {providerLabel(version.provider_source)}
-                    </span>
+                    <span>{versionLabel(version, t)}</span>
                   </li>
                 ))}
               </ul>
             </section>
           )}
-
-          <div className="pd-actions">
-            <Link
-              to={`/graph/${encodeURIComponent(paper.canonical_key)}`}
-              className="btn btn-secondary"
-              onClick={onClose}
-            >
-              <GitFork size={14} />
-              {t("paper.exploreGraph")}
-            </Link>
-            {user && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => saveMutation.mutate()}
-                disabled={inLibrary || saveMutation.isPending}
-              >
-                <BookMarked size={14} />
-                {inLibrary ? t("paper.inLibrary") : t("paper.saveToLibrary")}
-              </button>
-            )}
-          </div>
 
           {user ? (
             <>
@@ -219,6 +244,6 @@ export default function PaperDetailsDrawer({ paperKey, onClose }: PaperDetailsDr
           )}
         </div>
       )}
-    </Drawer>
+    </Panel>
   );
 }

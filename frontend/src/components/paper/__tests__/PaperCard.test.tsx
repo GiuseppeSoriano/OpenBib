@@ -46,15 +46,18 @@ function renderCard(props: Partial<Parameters<typeof PaperCard>[0]> = {}) {
 }
 
 describe("PaperCard", () => {
-  it("renders title, authors, venue, year, citations, and topics", () => {
+  it("renders title, authors, and a quiet meta line", () => {
     renderCard();
     expect(screen.getByText("A Very Important Paper")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith, Bob Jones")).toBeInTheDocument();
-    expect(screen.getByText("Journal of Tests")).toBeInTheDocument();
-    expect(screen.getByText("2024")).toBeInTheDocument();
-    expect(screen.getByText("12 citations")).toBeInTheDocument();
-    expect(screen.getByText("Machine Learning")).toBeInTheDocument();
-    expect(screen.getByText("OpenAlex")).toBeInTheDocument();
+    expect(screen.getByText(/Journal of Tests · 2024 · 12 citations/)).toBeInTheDocument();
+    expect(screen.getByText(/OpenAlex/)).toBeInTheDocument();
+  });
+
+  it("never shows the raw DOI or canonical key", () => {
+    renderCard();
+    expect(screen.queryByText(/doi:10/)).toBeNull();
+    expect(screen.queryByText("10.1/test")).toBeNull();
   });
 
   it("opens details when the title is clicked", () => {
@@ -64,10 +67,11 @@ describe("PaperCard", () => {
     expect(onOpenDetails).toHaveBeenCalledOnce();
   });
 
-  it("renders a plain heading when no details handler is given", () => {
+  it("renders topics only when requested", () => {
     renderCard();
-    expect(screen.queryByRole("button", { name: "A Very Important Paper" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "A Very Important Paper" })).toBeInTheDocument();
+    expect(screen.queryByText("Machine Learning")).toBeNull();
+    renderCard({ showTopics: true });
+    expect(screen.getByText("Machine Learning")).toBeInTheDocument();
   });
 
   it("renders the actions slot", () => {

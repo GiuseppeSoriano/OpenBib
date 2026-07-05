@@ -10,7 +10,7 @@ import {
   mergeGraph,
   type ForceGraphData,
 } from "@/components/graph/mergeGraph";
-import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
+import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import { providerLabel } from "@/components/paper/PaperCard";
 import type {
   CitingOrder,
@@ -415,7 +415,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
         </div>
       )}
 
-      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
 
-interface DrawerProps {
+interface PanelProps {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
@@ -9,10 +9,10 @@ interface DrawerProps {
 }
 
 /**
- * Side panel: right drawer on desktop, bottom sheet below 768px.
- * The breakpoint switch is pure CSS (.drawer in index.css).
+ * Overlay detail panel: right sheet on desktop (≥768px), bottom sheet
+ * with a grab handle on phones. Escape and overlay-click close it.
  */
-export default function Drawer({ open, onClose, title, children }: DrawerProps) {
+export default function Panel({ open, onClose, title, children }: PanelProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -25,20 +25,21 @@ export default function Drawer({ open, onClose, title, children }: DrawerProps) 
   if (!open) return null;
 
   return (
-    <div className="drawer-overlay" onClick={onClose}>
+    <div className="panel-overlay" onClick={onClose}>
       <aside
-        className="drawer"
+        className="panel"
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="drawer-header">
-          <div className="drawer-title">{title}</div>
+        <div className="panel-handle" aria-hidden="true" />
+        <div className="panel-header">
+          <div className="panel-title">{title}</div>
           <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
-        <div className="drawer-body">{children}</div>
+        <div className="panel-body">{children}</div>
       </aside>
     </div>
   );

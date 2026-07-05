@@ -8,7 +8,7 @@ import type { ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
-import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
+import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import type { LibraryEntryListItem } from "@/types";
 import {
   BookMarked,
@@ -141,7 +141,7 @@ export default function LibraryPage() {
         ))}
       </div>
 
-      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
 
       {pendingDelete && (
         <ConfirmModal

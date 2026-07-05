@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -6,7 +6,6 @@ import type { AxiosError } from "axios";
 import api, { library } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
-  Collection,
   PaperMemberships,
   PaperMetadata,
   SearchPaperGroupItem,
@@ -15,11 +14,9 @@ import type {
 } from "@/types";
 import {
   BookMarked,
-  Check,
   ChevronDown,
   EyeOff,
   FolderCheck,
-  FolderPlus,
   GitFork,
   Layers3,
   Search,
@@ -29,7 +26,8 @@ import {
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import PaperCard, { providerLabel } from "@/components/paper/PaperCard";
-import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
+import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
+import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
 import "./SearchPage.css";
 
 function searchErrorMessage(error: unknown, fallback: string): string {
@@ -244,7 +242,7 @@ export default function SearchPage() {
         />
       )}
 
-      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }
@@ -343,46 +341,11 @@ function SearchPaperCard({
   const { t } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [showCollections, setShowCollections] = useState(false);
-  const [sessionAdded, setSessionAdded] = useState<Set<string>>(new Set());
   const [sessionLibrarySaved, setSessionLibrarySaved] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowCollections(false);
-      }
-    };
-    if (showCollections) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showCollections]);
 
   useEffect(() => {
     setSessionLibrarySaved(false);
   }, [paper.paper_group_key]);
-
-  const { data: collections } = useQuery({
-    queryKey: ["collections"],
-    queryFn: async () => {
-      const { data } = await api.get<Collection[]>("/collections");
-      return data;
-    },
-    enabled: showCollections,
-  });
-
-  const addMutation = useMutation({
-    mutationFn: async (collectionId: string) => {
-      await api.post(`/collections/${collectionId}/papers`, {
-        paper_canonical_key: paper.canonical_key,
-      });
-    },
-    onSuccess: (_data, collectionId) => {
-      setSessionAdded((prev) => new Set(prev).add(collectionId));
-      void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
-      void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
-    },
-  });
 
   const saveToLibraryMutation = useMutation({
     mutationFn: async () => {
@@ -439,11 +402,8 @@ function SearchPaperCard({
     },
   });
 
-  const isSaved = savedInCollections.length > 0 || sessionAdded.size > 0;
+  const isSaved = savedInCollections.length > 0;
   const inLibraryNow = inLibrary || sessionLibrarySaved;
-
-  const alreadyInCollection = (collectionId: string) =>
-    savedInCollections.includes(collectionId) || sessionAdded.has(collectionId);
 
   return (
     <PaperCard
@@ -484,46 +444,10 @@ function SearchPaperCard({
           {inLibraryNow ? t("paper.inLibrary") : t("paper.saveToLibrary")}
         </button>
 
-        <div className="add-to-collection" ref={dropdownRef}>
-          <button
-            className="btn btn-secondary"
-            onClick={() => setShowCollections((current) => !current)}
-            title={t("paper.addToCollection")}
-          >
-            <FolderPlus size={14} />
-            {t("paper.addToCollection")}
-          </button>
-          {showCollections && (
-            <div className="add-to-collection-dropdown">
-              {!collections || collections.length === 0 ? (
-                <div className="no-collections">
-                  {t("paper.noCollectionsYet")}{" "}
-                  <Link to="/collections" onClick={() => setShowCollections(false)}>
-                    {t("paper.createOne")}
-                  </Link>
-                </div>
-              ) : (
-                collections.map((collection) => (
-                  <button
-                    key={collection.id}
-                    onClick={() => addMutation.mutate(collection.id)}
-                    disabled={alreadyInCollection(collection.id) || addMutation.isPending}
-                    className={alreadyInCollection(collection.id) ? "already-saved" : ""}
-                  >
-                    {alreadyInCollection(collection.id) ? (
-                      <>
-                        <Check size={12} style={{ display: "inline", marginRight: 4 }} />
-                        {t("paper.alreadySaved")}
-                      </>
-                    ) : (
-                      collection.name
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+        <AddToCollectionMenu
+          canonicalKey={paper.canonical_key}
+          savedInCollections={savedInCollections}
+        />
         </>
         )}
 

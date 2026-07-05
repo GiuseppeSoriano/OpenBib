@@ -8,7 +8,7 @@ import type { ZoteroSyncReport } from "@/types";
 import type { Collection, CollectionPaper, Note } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import PaperCard from "@/components/paper/PaperCard";
-import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
+import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -402,7 +402,7 @@ export default function CollectionDetailPage() {
       </div>
       )}
 
-      <PaperDetailsDrawer paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }
