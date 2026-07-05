@@ -1,112 +1,135 @@
 @layer pages {
-.landing {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xl);
-  max-width: 860px;
-  margin: 0 auto;
-  padding-top: var(--space-2xl);
-}
-
-.landing-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--space-md);
-}
-
-.landing-logo {
-  color: var(--color-accent);
-}
-
-.landing-title {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.landing-tagline {
-  font-size: 1.05rem;
-  color: var(--color-text-secondary);
-}
-
-.landing-search {
-  display: flex;
-  gap: var(--space-sm);
-  width: 100%;
-  max-width: 560px;
-  margin-top: var(--space-sm);
-}
-
-.landing-search-wrap {
-  position: relative;
-  flex: 1;
-}
-
-.landing-search-icon {
-  position: absolute;
-  left: var(--space-md);
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-secondary);
-  pointer-events: none;
-}
-
-.landing-search-input {
-  padding-left: calc(var(--space-md) * 2 + 18px);
-  padding-top: var(--space-md);
-  padding-bottom: var(--space-md);
-  font-size: 0.95rem;
-}
-
-.landing-hint {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-}
-
-.landing-ctas {
-  display: flex;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.landing-features {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-md);
-}
-
-.landing-feature {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  color: var(--color-text);
-}
-
-.landing-feature svg {
-  color: var(--color-accent);
-}
-
-.landing-feature h3 {
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.landing-feature p {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-}
-
-@media (max-width: 639px) {
   .landing {
-    padding-top: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+    max-width: 780px;
+    margin: 0 auto;
+    padding-top: clamp(var(--space-lg), 8vh, 5rem);
+  }
+
+  .landing-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-md);
+  }
+
+  .landing-logo {
+    color: var(--color-accent);
+  }
+
+  .landing-title {
+    font-size: 2.1rem;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.1;
+  }
+
+  .landing-tagline {
+    font-size: 1.05rem;
+    color: var(--color-text-secondary);
+    max-width: 460px;
   }
 
   .landing-search {
-    flex-direction: column;
+    display: flex;
+    gap: var(--space-sm);
+    width: 100%;
+    max-width: 560px;
+    margin-top: var(--space-sm);
   }
-}
 
+  .landing-search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .landing-search-icon {
+    position: absolute;
+    left: var(--space-md);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    pointer-events: none;
+  }
+
+  .landing-search-input {
+    padding-left: calc(var(--space-md) * 2 + 14px);
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
+    font-size: 0.95rem;
+    border-radius: var(--radius-md);
+  }
+
+  .landing-search-btn {
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
+  }
+
+  .landing-hint {
+    font-size: 0.84rem;
+    color: var(--color-text-secondary);
+  }
+
+  .landing-ctas {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .landing-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-xl);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .landing-feature {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+
+  .landing-feature-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    margin-bottom: var(--space-xs);
+  }
+
+  .landing-feature h3 {
+    font-size: 0.92rem;
+    font-weight: 600;
+  }
+
+  .landing-feature p {
+    font-size: 0.84rem;
+    color: var(--color-text-secondary);
+    line-height: 1.55;
+  }
+
+  @media (max-width: 639px) {
+    .landing {
+      padding-top: var(--space-lg);
+      gap: var(--space-xl);
+    }
+
+    .landing-search {
+      flex-direction: column;
+    }
+
+    .landing-features {
+      gap: var(--space-lg);
+    }
+  }
 }

@@ -17,6 +17,8 @@ interface PaperCardProps {
   showTopics?: boolean;
   /** Action buttons rendered at the bottom of the card. */
   actions?: ReactNode;
+  /** Extra content rendered between metadata and actions (e.g. version picker). */
+  children?: ReactNode;
   className?: string;
 }
 
@@ -33,6 +35,7 @@ export default function PaperCard({
   showAbstract = true,
   showTopics = false,
   actions,
+  children,
   className = "",
 }: PaperCardProps) {
   const { t } = useTranslation();
@@ -88,6 +91,8 @@ export default function PaperCard({
           ))}
         </div>
       )}
+
+      {children}
 
       {actions && <div className="paper-actions">{actions}</div>}
     </article>
