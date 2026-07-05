@@ -149,8 +149,6 @@
     "edit": "Edit collection",
     "save": "Save",
     "viewGraph": "View citation graph",
-    "exportBibtex": "Export BibTeX",
-    "exportFailed": "Export failed",
     "importDois": "Import DOIs",
     "importPlaceholder": "Paste DOIs, one per line…",
     "importButton_one": "Import {{count}} DOI",
@@ -250,6 +248,22 @@
     "featureGraphDesc": "Explore how papers cite each other, fluidly.",
     "featureLibraryTitle": "Personal library",
     "featureLibraryDesc": "Collections, notes, tags, and reading states."
+  },
+  "zotero": {
+    "title": "Zotero",
+    "description": "Connect your Zotero account to sync collections and papers — Zotero handles export, PDFs, and citations.",
+    "apiKeyLabel": "Zotero API key",
+    "apiKeyHint": "Create a private key with library write access at",
+    "connect": "Connect",
+    "connectedAs": "Connected to Zotero user {{id}}",
+    "disconnect": "Disconnect",
+    "invalidKey": "Invalid Zotero API key",
+    "sync": "Sync to Zotero",
+    "notConfigured": "Connect Zotero in Settings first",
+    "report": "Zotero: {{created}} created, {{updated}} updated, {{skipped}} unchanged",
+    "reportFailures_one": "{{count}} paper failed to sync",
+    "reportFailures_other": "{{count}} papers failed to sync",
+    "failed": "Zotero sync failed"
   },
   "settings": {
     "title": "Settings",

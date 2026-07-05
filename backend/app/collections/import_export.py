@@ -1,4 +1,7 @@
-"""Import/Export service — BibTeX export, DOI list import."""
+"""Import service — DOI / canonical-key list import.
+
+Export lives in the Zotero one-way sync (app/zotero) — the BibTeX export
+was removed in favour of the Zotero-first integration strategy."""
 
 from __future__ import annotations
 
@@ -8,35 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collections.models import CollectionPaper
-from app.collections.service import get_collection_or_404, _member_roles, _can_view, _can_edit
+from app.collections.service import get_collection_or_404, _member_roles, _can_edit
 from app.common.exceptions import ForbiddenError
-
-
-async def export_bibtex(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None
-) -> str:
-    """Export all papers in a collection as BibTeX entries."""
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_view(coll, user_id, roles):
-        raise ForbiddenError()
-
-    result = await db.execute(
-        select(CollectionPaper)
-        .where(CollectionPaper.collection_id == collection_id)
-        .order_by(CollectionPaper.position)
-    )
-    papers = result.scalars().all()
-
-    entries = []
-    for i, cp in enumerate(papers):
-        key = cp.paper_canonical_key
-        # Generate a citation key from canonical_key
-        cite_key = key.replace("doi:", "").replace("hash:", "h_").replace("/", "_").replace(".", "_")[:40]
-        entry = f"@article{{{cite_key},\n  note = {{{key}}},\n}}\n"
-        entries.append(entry)
-
-    return "\n".join(entries)
 
 
 async def import_doi_list(

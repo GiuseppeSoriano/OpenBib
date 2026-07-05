@@ -86,6 +86,26 @@ export interface PaperDetail extends PaperMetadata {
   versions: PaperMetadata[];
 }
 
+/* ── Zotero ─────────────────────────────────────────────── */
+export interface ZoteroStatus {
+  connected: boolean;
+  zotero_user_id: string | null;
+  api_key_masked: string | null;
+}
+
+export interface ZoteroSyncFailure {
+  paper_canonical_key: string;
+  message: string;
+}
+
+export interface ZoteroSyncReport {
+  zotero_collection_key: string;
+  items_created: number;
+  items_updated: number;
+  items_skipped: number;
+  failures: ZoteroSyncFailure[];
+}
+
 /* ── Collection ─────────────────────────────────────────── */
 export type Visibility = "private" | "shared" | "public";
 export type MemberRole = "owner" | "editor" | "viewer";

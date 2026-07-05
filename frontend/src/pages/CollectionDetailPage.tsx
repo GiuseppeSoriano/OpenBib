@@ -2,8 +2,9 @@ import { useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import api from "@/lib/api";
+import api, { zotero } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import type { ZoteroSyncReport } from "@/types";
 import type { Collection, CollectionPaper, Note } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import PaperCard from "@/components/paper/PaperCard";
@@ -16,13 +17,13 @@ import {
   Trash2,
   GitFork,
   BookMarked,
+  BookUp,
   StickyNote,
   Plus,
   ChevronDown,
   ChevronUp,
   Edit3,
   Save,
-  Download,
   Upload,
   FileText,
 } from "lucide-react";
@@ -152,22 +153,32 @@ export default function CollectionDetailPage() {
     },
   });
 
-  const handleExportBibtex = async () => {
-    try {
-      const response = await api.get(`/collections/${id}/export/bibtex`, {
-        responseType: "blob",
-      });
-      const blob = new Blob([response.data], { type: "application/x-bibtex" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `collection_${id}.bib`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast(t("collections.exportFailed"), "error");
-    }
-  };
+  const { data: zoteroStatus } = useQuery({
+    queryKey: ["zotero-status"],
+    queryFn: () => zotero.getStatus(),
+    enabled: !!user,
+  });
+
+  const zoteroSyncMutation = useMutation({
+    mutationFn: () => zotero.syncCollection(id!),
+    onSuccess: (report: ZoteroSyncReport) => {
+      toast(
+        t("zotero.report", {
+          created: report.items_created,
+          updated: report.items_updated,
+          skipped: report.items_skipped,
+        }),
+        report.failures.length > 0 ? "info" : "success",
+      );
+      if (report.failures.length > 0) {
+        toast(t("zotero.reportFailures", { count: report.failures.length }), "error");
+      }
+    },
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      toast(status === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
+    },
+  });
 
   const formatDate = (value: string) =>
     new Intl.DateTimeFormat(i18n.language).format(new Date(value));
@@ -236,9 +247,18 @@ export default function CollectionDetailPage() {
               <Link to={`/graph/collection/${id}`} className="btn btn-secondary">
                 <GitFork size={14} /> {t("collections.viewGraph")}
               </Link>
-              <button className="btn btn-secondary" onClick={handleExportBibtex}>
-                <Download size={14} /> {t("collections.exportBibtex")}
-              </button>
+              {user && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => zoteroSyncMutation.mutate()}
+                  disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
+                  title={
+                    zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")
+                  }
+                >
+                  <BookUp size={14} /> {t("zotero.sync")}
+                </button>
+              )}
               {user && (
                 <button className="btn btn-secondary" onClick={() => setShowImport((s) => !s)}>
                   <Upload size={14} /> {t("collections.importDois")}

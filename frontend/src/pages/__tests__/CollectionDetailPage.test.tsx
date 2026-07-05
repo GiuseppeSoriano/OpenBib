@@ -68,6 +68,11 @@ vi.mock("@/lib/api", () => {
     library: { listKeys: vi.fn(() => Promise.resolve([])) },
     notes: { listForPaperGroup: vi.fn(() => Promise.resolve([])) },
     graph: {},
+    zotero: {
+      getStatus: vi.fn(() =>
+        Promise.resolve({ connected: false, zotero_user_id: null, api_key_masked: null }),
+      ),
+    },
   };
 });
 

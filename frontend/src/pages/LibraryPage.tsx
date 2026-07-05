@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { library } from "@/lib/api";
+import { library, zotero } from "@/lib/api";
+import { useToast } from "@/components/ui/Toast";
+import type { ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -10,6 +12,7 @@ import PaperDetailsDrawer from "@/components/paper/PaperDetailsDrawer";
 import type { LibraryEntryListItem } from "@/types";
 import {
   BookMarked,
+  BookUp,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -34,6 +37,7 @@ function providerLabel(name: string | null | undefined): string {
 
 export default function LibraryPage() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const focusKey = searchParams.get("focus");
   const [expanded, setExpanded] = useState<string | null>(focusKey);
@@ -50,6 +54,32 @@ export default function LibraryPage() {
     queryFn: () => library.listEntries({ page: 1, size: 100 }),
   });
 
+  const { data: zoteroStatus } = useQuery({
+    queryKey: ["zotero-status"],
+    queryFn: () => zotero.getStatus(),
+  });
+
+  const zoteroSyncMutation = useMutation({
+    mutationFn: () => zotero.syncLibrary(),
+    onSuccess: (report: ZoteroSyncReport) => {
+      toast(
+        t("zotero.report", {
+          created: report.items_created,
+          updated: report.items_updated,
+          skipped: report.items_skipped,
+        }),
+        report.failures.length > 0 ? "info" : "success",
+      );
+      if (report.failures.length > 0) {
+        toast(t("zotero.reportFailures", { count: report.failures.length }), "error");
+      }
+    },
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      toast(status === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
+    },
+  });
+
   return (
     <div className="library-page">
       <header className="library-header">
@@ -61,6 +91,14 @@ export default function LibraryPage() {
           <Link to="/graph/library" className="btn btn-secondary">
             <GitFork size={14} /> {t("library.viewGraph")}
           </Link>
+          <button
+            className="btn btn-secondary"
+            onClick={() => zoteroSyncMutation.mutate()}
+            disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
+            title={zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")}
+          >
+            <BookUp size={14} /> {t("zotero.sync")}
+          </button>
         </div>
       </header>
 

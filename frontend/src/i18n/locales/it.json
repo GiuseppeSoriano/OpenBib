@@ -149,8 +149,6 @@
     "edit": "Modifica raccolta",
     "save": "Salva",
     "viewGraph": "Vedi grafo delle citazioni",
-    "exportBibtex": "Esporta BibTeX",
-    "exportFailed": "Esportazione non riuscita",
     "importDois": "Importa DOI",
     "importPlaceholder": "Incolla i DOI, uno per riga…",
     "importButton_one": "Importa {{count}} DOI",
@@ -250,6 +248,22 @@
     "featureGraphDesc": "Esplora in modo fluido come gli articoli si citano.",
     "featureLibraryTitle": "Libreria personale",
     "featureLibraryDesc": "Raccolte, note, tag e stati di lettura."
+  },
+  "zotero": {
+    "title": "Zotero",
+    "description": "Collega il tuo account Zotero per sincronizzare raccolte e articoli — Zotero gestisce esportazioni, PDF e citazioni.",
+    "apiKeyLabel": "Chiave API Zotero",
+    "apiKeyHint": "Crea una chiave privata con accesso in scrittura su",
+    "connect": "Collega",
+    "connectedAs": "Connesso all'utente Zotero {{id}}",
+    "disconnect": "Disconnetti",
+    "invalidKey": "Chiave API Zotero non valida",
+    "sync": "Sincronizza con Zotero",
+    "notConfigured": "Collega prima Zotero nelle Impostazioni",
+    "report": "Zotero: {{created}} creati, {{updated}} aggiornati, {{skipped}} invariati",
+    "reportFailures_one": "{{count}} articolo non sincronizzato",
+    "reportFailures_other": "{{count}} articoli non sincronizzati",
+    "failed": "Sincronizzazione Zotero non riuscita"
   },
   "settings": {
     "title": "Impostazioni",

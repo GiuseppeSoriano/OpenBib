@@ -21,6 +21,7 @@ from app.library import models as library_models  # noqa: F401
 from app.notes import models as note_models  # noqa: F401
 from app.papers import models as paper_models  # noqa: F401
 from app.users import models as user_models  # noqa: F401
+from app.zotero import models as zotero_models  # noqa: F401
 
 
 # Use in-memory SQLite by default, but allow Docker/Postgres override.

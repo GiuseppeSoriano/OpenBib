@@ -11,6 +11,8 @@ import type {
   PaperDetail,
   PaperState,
   ReadingState,
+  ZoteroStatus,
+  ZoteroSyncReport,
 } from "@/types";
 
 const api = axios.create({
@@ -168,6 +170,33 @@ export const library = {
     await api.delete(
       `/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`,
     );
+  },
+};
+
+/* ── Zotero namespace ──────────────────────────────────── */
+export const zotero = {
+  async getStatus() {
+    const { data } = await api.get<ZoteroStatus>("/zotero/credentials");
+    return data;
+  },
+  async setCredentials(apiKey: string) {
+    const { data } = await api.put<ZoteroStatus>("/zotero/credentials", {
+      api_key: apiKey,
+    });
+    return data;
+  },
+  async deleteCredentials() {
+    await api.delete("/zotero/credentials");
+  },
+  async syncCollection(collectionId: string) {
+    const { data } = await api.post<ZoteroSyncReport>(
+      `/zotero/sync/collection/${collectionId}`,
+    );
+    return data;
+  },
+  async syncLibrary() {
+    const { data } = await api.post<ZoteroSyncReport>("/zotero/sync/library");
+    return data;
   },
 };
 

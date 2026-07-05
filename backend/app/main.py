@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
     from app.papers.router import router as papers_router
     from app.recommendations.router import router as recommendations_router
     from app.users.router import router as users_router
+    from app.zotero.router import router as zotero_router
 
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(graph_router, prefix="/api/v1")
     app.include_router(recommendations_router, prefix="/api/v1")
     app.include_router(library_router, prefix="/api/v1")
+    app.include_router(zotero_router, prefix="/api/v1")
 
     # ------------------------------------------------------------------
     # Health check
