@@ -1,3 +1,4 @@
+@layer pages {
 .library-page {
   display: flex;
   flex-direction: column;
@@ -185,4 +186,6 @@
   border-radius: 999px;
   white-space: nowrap;
   text-transform: capitalize;
+}
+
 }

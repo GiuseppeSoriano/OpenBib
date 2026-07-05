@@ -47,6 +47,24 @@ services:
       cache:
         condition: service_healthy
 
+  # ── Frontend dev server (opt-in: --profile dev) ─────────
+  # Live-reload Vite server for in-browser preview/verification;
+  # /api is proxied to the api container.
+  web-dev:
+    image: node:20-alpine
+    profiles: ["dev"]
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    environment:
+      VITE_PROXY_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
   # ── Frontend test runner (opt-in: --profile test) ──────
   # Runs vitest and regenerates package-lock.json without
   # requiring node/npm on the host.

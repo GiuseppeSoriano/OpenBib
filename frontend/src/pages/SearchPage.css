@@ -1,3 +1,4 @@
+@layer pages {
 .search-page h1 {
   font-size: 1.4rem;
   font-weight: 600;
@@ -419,4 +420,6 @@
 }
 .dismiss-btn:hover {
   color: var(--color-text);
+}
+
 }

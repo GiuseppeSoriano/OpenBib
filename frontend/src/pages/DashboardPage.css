@@ -1,3 +1,4 @@
+@layer pages {
 .dashboard-header {
   margin-bottom: var(--space-xl);
 }
@@ -102,4 +103,6 @@
   font-size: 0.8rem;
   color: var(--color-warm-gray);
   margin-top: var(--space-sm);
+}
+
 }

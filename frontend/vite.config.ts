@@ -11,9 +11,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Polling keeps file watching reliable on Docker bind mounts (Windows).
+    watch: { usePolling: !!process.env.CHOKIDAR_USEPOLLING },
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        // Inside the web-dev container the API lives at http://api:8000.
+        target: process.env.VITE_PROXY_TARGET ?? "http://localhost:8000",
         changeOrigin: true,
       },
     },

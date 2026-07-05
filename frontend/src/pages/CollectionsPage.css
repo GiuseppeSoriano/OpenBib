@@ -1,3 +1,4 @@
+@layer pages {
 .collections-page .page-header {
   display: flex;
   align-items: center;
@@ -70,4 +71,6 @@
   color: var(--color-text-secondary);
   padding: var(--space-xl) 0;
   text-align: center;
+}
+
 }

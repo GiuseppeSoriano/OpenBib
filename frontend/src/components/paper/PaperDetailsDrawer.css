@@ -1,3 +1,4 @@
+@layer components {
 .pd {
   display: flex;
   flex-direction: column;
@@ -219,4 +220,6 @@
 
 .reading-state-select {
   max-width: 220px;
+}
+
 }

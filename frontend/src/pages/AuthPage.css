@@ -1,3 +1,4 @@
+@layer pages {
 .auth-page {
   display: flex;
   align-items: center;
@@ -71,4 +72,6 @@
   margin-top: var(--space-lg);
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+}
+
 }

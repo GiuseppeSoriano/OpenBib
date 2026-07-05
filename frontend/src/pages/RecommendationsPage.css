@@ -1,3 +1,4 @@
+@layer pages {
 .recommendations-page h1 {
   display: flex;
   align-items: center;
@@ -61,4 +62,6 @@
   display: flex;
   gap: var(--space-sm);
   margin-top: var(--space-xs);
+}
+
 }

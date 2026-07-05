@@ -1,3 +1,4 @@
+@layer components {
 .paper-card {
   display: flex;
   flex-direction: column;
@@ -108,4 +109,6 @@
 .paper-actions .btn {
   font-size: 0.8rem;
   padding: var(--space-xs) var(--space-md);
+}
+
 }

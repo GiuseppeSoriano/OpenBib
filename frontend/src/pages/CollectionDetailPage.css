@@ -1,3 +1,4 @@
+@layer pages {
 .collection-detail {
   max-width: 900px;
 }
@@ -195,4 +196,6 @@
   color: var(--color-text-secondary);
   padding: var(--space-xl) 0;
   text-align: center;
+}
+
 }

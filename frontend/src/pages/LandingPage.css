@@ -1,3 +1,4 @@
+@layer pages {
 .landing {
   display: flex;
   flex-direction: column;
@@ -106,4 +107,6 @@
   .landing-search {
     flex-direction: column;
   }
+}
+
 }
