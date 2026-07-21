@@ -1,6 +1,7 @@
 /*
- * OpenBib — Design tokens. Palette: "Ink & Teal".
- * Near-black ink on warm paper-white; deep petrol-teal accent.
+ * OpenBib — Design tokens. Palette: "Evergreen & Paper".
+ * Green-tinted ink on quiet paper-white; deep pine-green accent.
+ * Because the accent is green, "success/saved" semantics use blue.
  * Light theme on :root, dark theme via [data-theme="dark"] on <html>.
  */
 
@@ -8,37 +9,37 @@
   :root {
     color-scheme: light;
 
-    /* Surfaces — warm paper */
-    --color-bg: #faf9f6;
+    /* Surfaces — quiet paper */
+    --color-bg: #f9faf7;
     --color-surface: #ffffff;
-    --color-surface-hover: #f4f2ed;
+    --color-surface-hover: #f1f4ee;
 
-    /* Text — ink */
-    --color-text: #1b1917;
-    --color-text-secondary: #6d675f;
+    /* Text — green-tinted ink */
+    --color-text: #191d19;
+    --color-text-secondary: #646c64;
 
     /* Lines */
-    --color-border: #e8e5df;
+    --color-border: #e2e6de;
 
-    /* Accent — petrol teal */
-    --color-accent: #0f766e;
-    --color-accent-hover: #0d5f59;
-    --color-accent-soft: #e2f1ef;
+    /* Accent — deep pine green */
+    --color-accent: #2d6a4f;
+    --color-accent-hover: #24523e;
+    --color-accent-soft: #e5f0e9;
     --color-on-accent: #ffffff;
 
-    /* Status */
-    --color-success: #16a34a;
-    --color-success-soft: #e9f7ee;
+    /* Status — success is blue (green belongs to the accent) */
+    --color-success: #2563eb;
+    --color-success-soft: #e7eefc;
     --color-danger: #b91c1c;
     --color-danger-soft: #fdecea;
     --color-warning: #b45309;
     --color-warning-soft: #fcf3e3;
 
     /* Citation graph */
-    --graph-node: #a8a29e;
+    --graph-node: #a3a8a0;
     --graph-node-seed: var(--color-accent);
     --graph-node-saved: var(--color-success);
-    --graph-edge: #dad6cf;
+    --graph-edge: #d8dcd4;
 
     /* Typography */
     --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -58,10 +59,10 @@
     --radius-lg: 14px;
     --radius-full: 999px;
 
-    /* Shadows — warm ink */
-    --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.06);
-    --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.09);
-    --shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.16);
+    /* Shadows — green ink */
+    --shadow-sm: 0 1px 2px rgba(25, 29, 25, 0.06);
+    --shadow-md: 0 4px 12px rgba(25, 29, 25, 0.09);
+    --shadow-lg: 0 12px 32px rgba(25, 29, 25, 0.16);
 
     /* Focus */
     --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
@@ -74,29 +75,29 @@
   [data-theme="dark"] {
     color-scheme: dark;
 
-    --color-bg: #131211;
-    --color-surface: #1c1a18;
-    --color-surface-hover: #262320;
+    --color-bg: #111412;
+    --color-surface: #1a1f1b;
+    --color-surface-hover: #242a25;
 
-    --color-text: #f1efea;
-    --color-text-secondary: #a39d93;
+    --color-text: #ecf0ec;
+    --color-text-secondary: #9aa69c;
 
-    --color-border: #363330;
+    --color-border: #333b34;
 
-    --color-accent: #2dd4bf;
-    --color-accent-hover: #5eead4;
-    --color-accent-soft: #17322e;
-    --color-on-accent: #101413;
+    --color-accent: #86d3a7;
+    --color-accent-hover: #a2e0bc;
+    --color-accent-soft: #1e3227;
+    --color-on-accent: #0c1f15;
 
-    --color-success: #4ade80;
-    --color-success-soft: #12291b;
+    --color-success: #60a5fa;
+    --color-success-soft: #17233a;
     --color-danger: #f87171;
     --color-danger-soft: #331615;
     --color-warning: #fbbf24;
     --color-warning-soft: #2e2410;
 
-    --graph-node: #7c766d;
-    --graph-edge: #3b3835;
+    --graph-node: #767c74;
+    --graph-edge: #383d38;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);

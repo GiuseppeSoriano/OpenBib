@@ -239,18 +239,19 @@ Full interactive docs at `http://localhost:8000/api/docs` when the server is run
 
 ## Design
 
-The UI follows the **Ink & Teal** design system — near-black ink on warm
-paper-white with a petrol-teal accent; light and dark themes driven entirely
-by CSS custom properties on cascade layers (`@layer`), with the preference
-(light / dark / system) persisted per user:
+The UI follows the **Evergreen & Paper** design system — green-tinted ink on
+quiet paper-white with a deep pine-green accent (success/saved states use
+blue, since green belongs to the accent); light and dark themes driven
+entirely by CSS custom properties on cascade layers (`@layer`), with the
+preference (light / dark / system) persisted per user:
 
 | Role | Light | Dark |
 |------|-------|------|
-| Background | `#FAF9F6` | `#131211` |
-| Surface | `#FFFFFF` | `#1C1A18` |
-| Text | `#1B1917` | `#F1EFEA` |
-| Accent (teal) | `#0F766E` | `#2DD4BF` |
-| Success | `#16A34A` | `#4ADE80` |
+| Background | `#F9FAF7` | `#111412` |
+| Surface | `#FFFFFF` | `#1A1F1B` |
+| Text | `#191D19` | `#ECF0EC` |
+| Accent (green) | `#2D6A4F` | `#86D3A7` |
+| Success (blue) | `#2563EB` | `#60A5FA` |
 | Danger | `#B91C1C` | `#F87171` |
 
 Full token sheet in `frontend/src/styles/tokens.css`. Navigation is a slim
