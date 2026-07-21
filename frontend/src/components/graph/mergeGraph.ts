@@ -38,11 +38,9 @@ function linkKey(link: { source: string | ForceNode; target: string | ForceNode;
   return `${endpointId(link.source)}__${endpointId(link.target)}__${link.relation_type}`;
 }
 
-const SPAWN_JITTER = 30;
-
-function jitter(): number {
-  return (Math.random() - 0.5) * 2 * SPAWN_JITTER;
-}
+/** New nodes spawn on a ring at this distance from their partner. */
+const SPAWN_RADIUS_MIN = 50;
+const SPAWN_RADIUS_SPREAD = 30; // radius ∈ [50, 80]
 
 /**
  * Merge an expansion result into the current force-graph data.
@@ -50,9 +48,10 @@ function jitter(): number {
  * - Nodes are deduped by paper group id; existing node OBJECTS are reused so
  *   d3 keeps their positions (no whole-graph reshuffle).
  * - Links are deduped by (source, target, relation).
- * - Each new node spawns next to an already-positioned neighbour (its edge
- *   partner, or the focused anchor), so growth relaxes locally instead of
- *   flying in from the origin.
+ * - New nodes are distributed on a RING around their already-positioned
+ *   neighbour (edge partner, or the focused anchor): child i of n lands at
+ *   angle 2πi/n, radius 50–80px. Combined with the collision force this
+ *   fans expansions out immediately instead of heaping them on the seed.
  *
  * Returns a NEW top-level object with new arrays (so React re-renders) that
  * share the previous node/link objects.
@@ -86,8 +85,10 @@ export function mergeGraph(
     incomingLinks.push(link);
   }
 
-  // Position new nodes near an already-positioned neighbour.
+  // Group new nodes by their positioned partner, then distribute each
+  // group on a ring around it.
   const anchor = anchorId ? nodeById.get(anchorId) : undefined;
+  const spawnGroups = new Map<ForceNode, ForceNode[]>();
   for (const fresh of newNodes) {
     let near: ForceNode | undefined;
     for (const link of incomingLinks) {
@@ -95,17 +96,24 @@ export function mergeGraph(
       const targetId = endpointId(link.target);
       if (sourceId === fresh.id || targetId === fresh.id) {
         const partner = nodeById.get(sourceId === fresh.id ? targetId : sourceId);
-        if (partner && partner.x != null && partner.y != null) {
+        if (partner && partner !== fresh && partner.x != null && partner.y != null) {
           near = partner;
           break;
         }
       }
     }
     if (!near && anchor && anchor.x != null && anchor.y != null) near = anchor;
-    if (near) {
-      fresh.x = (near.x ?? 0) + jitter();
-      fresh.y = (near.y ?? 0) + jitter();
-    }
+    if (near) spawnGroups.set(near, [...(spawnGroups.get(near) ?? []), fresh]);
+  }
+
+  for (const [near, children] of spawnGroups) {
+    const phase = Math.random() * 2 * Math.PI;
+    children.forEach((child, index) => {
+      const angle = phase + (2 * Math.PI * index) / children.length;
+      const radius = SPAWN_RADIUS_MIN + Math.random() * SPAWN_RADIUS_SPREAD;
+      child.x = (near.x ?? 0) + radius * Math.cos(angle);
+      child.y = (near.y ?? 0) + radius * Math.sin(angle);
+    });
   }
 
   return { nodes: [...nodeById.values()], links: [...linkByKey.values()] };

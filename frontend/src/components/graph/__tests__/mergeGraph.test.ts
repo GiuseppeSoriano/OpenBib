@@ -98,7 +98,7 @@ describe("mergeGraph", () => {
     expect(second.links).toHaveLength(1);
   });
 
-  it("spawns new nodes next to their positioned edge partner", () => {
+  it("spawns new nodes on a ring (50–80px) around their positioned edge partner", () => {
     const first = mergeGraph(EMPTY_GRAPH, { nodes: [node("hub")], edges: [] });
     const hub = first.nodes[0]!;
     hub.x = 500;
@@ -111,10 +111,42 @@ describe("mergeGraph", () => {
     );
 
     const leaf = second.nodes.find((n) => n.id === "leaf")!;
-    expect(leaf.x).toBeGreaterThan(500 - 31);
-    expect(leaf.x).toBeLessThan(500 + 31);
-    expect(leaf.y).toBeGreaterThan(300 - 31);
-    expect(leaf.y).toBeLessThan(300 + 31);
+    const distance = Math.hypot((leaf.x ?? 0) - 500, (leaf.y ?? 0) - 300);
+    expect(distance).toBeGreaterThanOrEqual(50);
+    expect(distance).toBeLessThanOrEqual(80);
+  });
+
+  it("distributes multiple children angularly — no two land in the same spot", () => {
+    const first = mergeGraph(EMPTY_GRAPH, { nodes: [node("hub")], edges: [] });
+    first.nodes[0]!.x = 0;
+    first.nodes[0]!.y = 0;
+
+    const children = ["a", "b", "c"];
+    const second = mergeGraph(
+      first,
+      {
+        nodes: children.map((id) => node(id)),
+        edges: children.map((id) => edge(id, "hub")),
+      },
+      "hub",
+    );
+
+    const placed = children.map((id) => second.nodes.find((n) => n.id === id)!);
+    for (const child of placed) {
+      const distance = Math.hypot(child.x ?? 0, child.y ?? 0);
+      expect(distance).toBeGreaterThanOrEqual(50);
+      expect(distance).toBeLessThanOrEqual(80);
+    }
+    // Ring distribution: pairwise separation is far larger than a heap.
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const gap = Math.hypot(
+          (placed[i]!.x ?? 0) - (placed[j]!.x ?? 0),
+          (placed[i]!.y ?? 0) - (placed[j]!.y ?? 0),
+        );
+        expect(gap).toBeGreaterThan(40);
+      }
+    }
   });
 
   it("falls back to the anchor position for isolated new nodes", () => {
@@ -125,8 +157,9 @@ describe("mergeGraph", () => {
     const second = mergeGraph(first, { nodes: [node("floating")], edges: [] }, "anchor");
 
     const floating = second.nodes.find((n) => n.id === "floating")!;
-    expect(floating.x).toBeGreaterThan(-200 - 31);
-    expect(floating.x).toBeLessThan(-200 + 31);
+    const distance = Math.hypot((floating.x ?? 0) + 200, (floating.y ?? 0) - 80);
+    expect(distance).toBeGreaterThanOrEqual(50);
+    expect(distance).toBeLessThanOrEqual(80);
   });
 
   it("returns new array references so React detects the update", () => {

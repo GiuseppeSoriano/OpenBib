@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
+import { forceCollide } from "d3-force-3d";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
 
@@ -74,6 +75,31 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     return () => observer.disconnect();
   }, []);
 
+  // Physics: collision keeps nodes from heaping; a stronger (but
+  // range-limited) charge and short links spread expansions readably.
+  // Forces persist across data updates — force-graph re-initializes them
+  // with the new node array on every graphData change.
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    // Tuned live: 25-node expansions settle to a readable ~350px cluster
+    // with no overlaps instead of a heap on the seed.
+    fg.d3Force("collide", forceCollide((node: ForceNode) => nodeRadius(node) + 8).iterations(2));
+    const charge = fg.d3Force("charge");
+    if (charge) {
+      charge.strength(-160);
+      charge.distanceMax?.(420);
+    }
+    const link = fg.d3Force("link");
+    if (link) {
+      // Weak long links: d3's default link strength (1/min-degree) yanks
+      // leaf nodes onto a tiny ring around hubs; letting charge dominate
+      // spaces big expansions readably.
+      link.distance?.(90);
+      link.strength?.(0.25);
+    }
+  }, []);
+
   // Resolve theme colors once per theme switch; the canvas re-draws every
   // frame so nodes/edges restyle instantly.
   const colors = useMemo<ThemeColors>(() => {
@@ -100,6 +126,15 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     fit: () => fgRef.current?.zoomToFit(400, 60),
     reheat: () => fgRef.current?.d3ReheatSimulation(),
   }));
+
+  // Dev-only: expose live graph data for in-browser physics verification.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      const w = window as unknown as Record<string, unknown>;
+      w.__openbibGraph = data;
+      w.__openbibFg = fgRef.current;
+    }
+  }, [data]);
 
   const nodeColor = useCallback(
     (node: ForceNode): string => {
@@ -193,9 +228,9 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={1}
         linkCurvature={0}
-        d3AlphaDecay={0.03}
+        d3AlphaDecay={0.028}
         d3VelocityDecay={0.35}
-        cooldownTime={3000}
+        cooldownTime={5000}
         onNodeClick={handleNodeClick}
         onBackgroundClick={onBackgroundClick}
         onNodeDragEnd={(node: ForceNode) => {

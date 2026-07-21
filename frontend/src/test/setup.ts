@@ -18,6 +18,14 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+// jsdom does not implement ResizeObserver; CitationGraph needs it.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = window.ResizeObserver ?? (ResizeObserverStub as typeof ResizeObserver);
+
 afterEach(async () => {
   cleanup();
   localStorage.clear();
