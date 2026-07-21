@@ -38,9 +38,12 @@ function linkKey(link: { source: string | ForceNode; target: string | ForceNode;
   return `${endpointId(link.source)}__${endpointId(link.target)}__${link.relation_type}`;
 }
 
-/** New nodes spawn on a ring at this distance from their partner. */
+/** Ring-spawn geometry: the radius grows with sibling count so every
+ * child gets ~SPAWN_SPACING px of arc — readable even before (or without)
+ * any physics relaxation. */
 const SPAWN_RADIUS_MIN = 50;
-const SPAWN_RADIUS_SPREAD = 30; // radius ∈ [50, 80]
+const SPAWN_RADIUS_JITTER = 20;
+const SPAWN_SPACING = 26;
 
 /**
  * Merge an expansion result into the current force-graph data.
@@ -50,8 +53,8 @@ const SPAWN_RADIUS_SPREAD = 30; // radius ∈ [50, 80]
  * - Links are deduped by (source, target, relation).
  * - New nodes are distributed on a RING around their already-positioned
  *   neighbour (edge partner, or the focused anchor): child i of n lands at
- *   angle 2πi/n, radius 50–80px. Combined with the collision force this
- *   fans expansions out immediately instead of heaping them on the seed.
+ *   angle 2πi/n on a radius that scales with sibling count, so even large
+ *   expansions land readably spaced instead of heaping on the seed.
  *
  * Returns a NEW top-level object with new arrays (so React re-renders) that
  * share the previous node/link objects.
@@ -108,9 +111,13 @@ export function mergeGraph(
 
   for (const [near, children] of spawnGroups) {
     const phase = Math.random() * 2 * Math.PI;
+    const baseRadius = Math.max(
+      SPAWN_RADIUS_MIN,
+      (children.length * SPAWN_SPACING) / (2 * Math.PI),
+    );
     children.forEach((child, index) => {
       const angle = phase + (2 * Math.PI * index) / children.length;
-      const radius = SPAWN_RADIUS_MIN + Math.random() * SPAWN_RADIUS_SPREAD;
+      const radius = baseRadius + Math.random() * SPAWN_RADIUS_JITTER;
       child.x = (near.x ?? 0) + radius * Math.cos(angle);
       child.y = (near.y ?? 0) + radius * Math.sin(angle);
     });

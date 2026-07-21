@@ -40,14 +40,6 @@
     --graph-node-saved: var(--color-success);
     --graph-edge: #dad6cf;
 
-    /* Legacy palette aliases (older CSS still references these; removed
-       once every stylesheet is rebuilt) */
-    --color-charcoal: var(--color-text);
-    --color-warm-gray: var(--color-text-secondary);
-    --color-light-gray: var(--color-border);
-    --color-offwhite: var(--color-bg);
-    --color-rose: var(--color-accent);
-
     /* Typography */
     --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
@@ -77,9 +69,6 @@
     /* Layout */
     --nav-height: 56px;
     --bottomnav-height: 56px;
-    /* Legacy layout tokens (removed with the old shell) */
-    --sidebar-width: 240px;
-    --topbar-height: 56px;
   }
 
   [data-theme="dark"] {

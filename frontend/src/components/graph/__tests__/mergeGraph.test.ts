@@ -149,6 +149,37 @@ describe("mergeGraph", () => {
     }
   });
 
+  it("scales the ring radius with sibling count — 25 children never crowd", () => {
+    const first = mergeGraph(EMPTY_GRAPH, { nodes: [node("hub")], edges: [] });
+    first.nodes[0]!.x = 0;
+    first.nodes[0]!.y = 0;
+
+    const ids = Array.from({ length: 25 }, (_, i) => `c${i}`);
+    const second = mergeGraph(
+      first,
+      { nodes: ids.map((id) => node(id)), edges: ids.map((id) => edge(id, "hub")) },
+      "hub",
+    );
+
+    const placed = ids.map((id) => second.nodes.find((n) => n.id === id)!);
+    // Radius grows with count: 25·26/2π ≈ 103 → every child ≥ 100px out.
+    for (const child of placed) {
+      const distance = Math.hypot(child.x ?? 0, child.y ?? 0);
+      expect(distance).toBeGreaterThanOrEqual(100);
+      expect(distance).toBeLessThanOrEqual(130);
+    }
+    // Guaranteed elbow room without any physics relaxation.
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const gap = Math.hypot(
+          (placed[i]!.x ?? 0) - (placed[j]!.x ?? 0),
+          (placed[i]!.y ?? 0) - (placed[j]!.y ?? 0),
+        );
+        expect(gap).toBeGreaterThan(15);
+      }
+    }
+  });
+
   it("falls back to the anchor position for isolated new nodes", () => {
     const first = mergeGraph(EMPTY_GRAPH, { nodes: [node("anchor")], edges: [] });
     first.nodes[0]!.x = -200;

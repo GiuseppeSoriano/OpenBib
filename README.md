@@ -239,23 +239,26 @@ Full interactive docs at `http://localhost:8000/api/docs` when the server is run
 
 ## Design
 
-The UI follows the **Scholar Slate + Indigo** design system — light and dark
-themes driven entirely by CSS custom properties (`[data-theme]`), with the
-preference (light / dark / system) persisted per user:
+The UI follows the **Ink & Teal** design system — near-black ink on warm
+paper-white with a petrol-teal accent; light and dark themes driven entirely
+by CSS custom properties on cascade layers (`@layer`), with the preference
+(light / dark / system) persisted per user:
 
 | Role | Light | Dark |
 |------|-------|------|
-| Background | `#F6F7F9` | `#0B1220` |
-| Surface | `#FFFFFF` | `#151E2E` |
-| Text | `#0F172A` | `#E5E9F0` |
-| Accent (indigo) | `#4F46E5` | `#818CF8` |
-| Success | `#059669` | `#34D399` |
-| Danger | `#DC2626` | `#F87171` |
+| Background | `#FAF9F6` | `#131211` |
+| Surface | `#FFFFFF` | `#1C1A18` |
+| Text | `#1B1917` | `#F1EFEA` |
+| Accent (teal) | `#0F766E` | `#2DD4BF` |
+| Success | `#16A34A` | `#4ADE80` |
+| Danger | `#B91C1C` | `#F87171` |
 
-Full token sheet in `frontend/src/styles/tokens.css`. The interface is
-available in **English and Italian** (auto-detected, switchable in Settings)
-and is responsive from desktop down to 375 px phones (collapsible sidebar,
-bottom navigation, bottom-sheet dialogs).
+Full token sheet in `frontend/src/styles/tokens.css`. Navigation is a slim
+top navbar (plus a bottom tab bar on phones) — no sidebars or drawers. The
+interface is available in **English and Italian** (auto-detected, switchable
+from the navbar or Settings), never exposes low-level identifiers (papers are
+always shown by title/venue/year with human version labels), and is
+responsive from desktop down to 375 px phones.
 
 ---
 
