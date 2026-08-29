@@ -29,13 +29,15 @@ interface CitationGraphProps {
   onBackgroundClick: () => void;
 }
 
-interface ThemeColors {
+interface ThemeStyle {
   node: string;
   seed: string;
   saved: string;
   edge: string;
   label: string;
   halo: string;
+  /** Canvas has no var() support, so the label stack is resolved up front. */
+  labelFont: string;
 }
 
 function cssVar(name: string): string {
@@ -101,16 +103,18 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   }, []);
 
   // Resolve theme colors once per theme switch; the canvas re-draws every
-  // frame so nodes/edges restyle instantly.
-  const colors = useMemo<ThemeColors>(() => {
+  // frame so nodes/edges restyle instantly. Fallbacks are the light-theme
+  // Verdigris values, used only where the custom properties fail to resolve.
+  const colors = useMemo<ThemeStyle>(() => {
     void resolved;
     return {
-      node: cssVar("--graph-node") || "#94a3b8",
-      seed: cssVar("--graph-node-seed") || cssVar("--color-accent") || "#4f46e5",
-      saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#059669",
-      edge: cssVar("--graph-edge") || "#cbd5e1",
-      label: cssVar("--color-text-secondary") || "#64748b",
-      halo: cssVar("--color-accent") || "#4f46e5",
+      node: cssVar("--graph-node") || "#a0a8a4",
+      seed: cssVar("--graph-node-seed") || cssVar("--color-accent") || "#33695f",
+      saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
+      edge: cssVar("--graph-edge") || "#d6dcd8",
+      label: cssVar("--color-text-secondary") || "#5f6b67",
+      halo: cssVar("--color-accent") || "#33695f",
+      labelFont: cssVar("--font-sans") || "system-ui, sans-serif",
     };
   }, [resolved]);
 
@@ -180,7 +184,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       if (globalScale > 1.3) {
         const title = node.node.selected_version.title || node.id;
         const label = title.length > 40 ? `${title.slice(0, 40)}…` : title;
-        ctx.font = `${Math.max(10 / globalScale, 2.6)}px Inter, sans-serif`;
+        ctx.font = `${Math.max(10 / globalScale, 2.6)}px ${colors.labelFont}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = colors.label;
