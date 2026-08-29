@@ -38,6 +38,3 @@ data/
 
 # ── Docker ────────────────────────────────────────────────
 docker-compose.override.yml
-
-# ── Design scratch (temporary — removed once integrated) ──
-OpenBib Color and Type Exploration/
