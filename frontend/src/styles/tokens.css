@@ -1,7 +1,8 @@
 /*
- * OpenBib — Design tokens. Palette: "Evergreen & Paper".
- * Green-tinted ink on quiet paper-white; deep pine-green accent.
- * Because the accent is green, "success/saved" semantics use blue.
+ * OpenBib — Design tokens. Palette: "Verdigris".
+ * The patina of aged bronze: a desaturated teal-green accent on
+ * warm-neutral paper. Because the accent is green-family,
+ * "success/saved" semantics stay blue (now calmer, matched in tone).
  * Light theme on :root, dark theme via [data-theme="dark"] on <html>.
  */
 
@@ -10,39 +11,48 @@
     color-scheme: light;
 
     /* Surfaces — quiet paper */
-    --color-bg: #f9faf7;
+    --color-bg: #f8faf9;
     --color-surface: #ffffff;
-    --color-surface-hover: #f1f4ee;
+    --color-surface-hover: #f0f4f2;
 
     /* Text — green-tinted ink */
-    --color-text: #191d19;
-    --color-text-secondary: #646c64;
+    --color-text: #1a1e1d;
+    --color-text-secondary: #5f6b67;
 
     /* Lines */
-    --color-border: #e2e6de;
+    --color-border: #e0e6e3;
 
-    /* Accent — deep pine green */
-    --color-accent: #2d6a4f;
-    --color-accent-hover: #24523e;
-    --color-accent-soft: #e5f0e9;
+    /* Accent — verdigris (patinated bronze) */
+    --color-accent: #33695f;
+    --color-accent-hover: #2a574f;
+    --color-accent-soft: #e4efec;
     --color-on-accent: #ffffff;
 
     /* Status — success is blue (green belongs to the accent) */
-    --color-success: #2563eb;
-    --color-success-soft: #e7eefc;
-    --color-danger: #b91c1c;
-    --color-danger-soft: #fdecea;
-    --color-warning: #b45309;
-    --color-warning-soft: #fcf3e3;
+    --color-success: #46689b;
+    --color-success-soft: #e8eef7;
+    --color-danger: #b03a3a;
+    --color-danger-soft: #f9eaea;
+    --color-warning: #9a6317;
+    --color-warning-soft: #f7efdf;
+
+    /* Foreground on a filled danger surface — never hardcode #fff:
+       the dark-theme danger is light, so white would fail contrast. */
+    --color-on-danger: #ffffff;
+
+    /* Scrim behind modals and side panels — tinted to the green ink */
+    --color-overlay: rgba(18, 26, 23, 0.5);
 
     /* Citation graph */
-    --graph-node: #a3a8a0;
+    --graph-node: #a0a8a4;
     --graph-node-seed: var(--color-accent);
     --graph-node-saved: var(--color-success);
-    --graph-edge: #d8dcd4;
+    --graph-edge: #d6dcd8;
 
-    /* Typography */
-    --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Typography — Fontsource registers the variable family under the
+       "<Name> Variable" alias, so it must come first in the stack. */
+    --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Source Serif Pro", Georgia, serif;
+    --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 
     /* Spacing */
@@ -60,9 +70,9 @@
     --radius-full: 999px;
 
     /* Shadows — green ink */
-    --shadow-sm: 0 1px 2px rgba(25, 29, 25, 0.06);
-    --shadow-md: 0 4px 12px rgba(25, 29, 25, 0.09);
-    --shadow-lg: 0 12px 32px rgba(25, 29, 25, 0.16);
+    --shadow-sm: 0 1px 2px rgba(18, 26, 23, 0.06);
+    --shadow-md: 0 4px 12px rgba(18, 26, 23, 0.09);
+    --shadow-lg: 0 12px 32px rgba(18, 26, 23, 0.16);
 
     /* Focus */
     --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
@@ -75,29 +85,33 @@
   [data-theme="dark"] {
     color-scheme: dark;
 
-    --color-bg: #111412;
-    --color-surface: #1a1f1b;
-    --color-surface-hover: #242a25;
+    --color-bg: #101413;
+    --color-surface: #171f1d;
+    --color-surface-hover: #212b28;
 
-    --color-text: #ecf0ec;
-    --color-text-secondary: #9aa69c;
+    --color-text: #e9efec;
+    --color-text-secondary: #96a49e;
 
-    --color-border: #333b34;
+    --color-border: #2f3b37;
 
-    --color-accent: #86d3a7;
-    --color-accent-hover: #a2e0bc;
-    --color-accent-soft: #1e3227;
-    --color-on-accent: #0c1f15;
+    --color-accent: #86b8ab;
+    --color-accent-hover: #9fc9be;
+    --color-accent-soft: #1d312c;
+    --color-on-accent: #0c1f1a;
 
-    --color-success: #60a5fa;
-    --color-success-soft: #17233a;
-    --color-danger: #f87171;
-    --color-danger-soft: #331615;
-    --color-warning: #fbbf24;
-    --color-warning-soft: #2e2410;
+    --color-success: #8aa8cf;
+    --color-success-soft: #1b2735;
+    --color-danger: #dd9b9b;
+    --color-danger-soft: #331919;
+    --color-warning: #d8b26c;
+    --color-warning-soft: #2e2510;
 
-    --graph-node: #767c74;
-    --graph-edge: #383d38;
+    --color-on-danger: #2a1414;
+
+    --color-overlay: rgba(4, 8, 7, 0.62);
+
+    --graph-node: #71807a;
+    --graph-edge: #35413c;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
