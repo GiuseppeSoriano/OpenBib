@@ -239,20 +239,25 @@ Full interactive docs at `http://localhost:8000/api/docs` when the server is run
 
 ## Design
 
-The UI follows the **Evergreen & Paper** design system — green-tinted ink on
-quiet paper-white with a deep pine-green accent (success/saved states use
+The UI follows the **Verdigris** design system — the patina of aged bronze: a
+desaturated teal-green accent on warm-neutral paper (success/saved states use
 blue, since green belongs to the accent); light and dark themes driven
 entirely by CSS custom properties on cascade layers (`@layer`), with the
 preference (light / dark / system) persisted per user:
 
 | Role | Light | Dark |
 |------|-------|------|
-| Background | `#F9FAF7` | `#111412` |
-| Surface | `#FFFFFF` | `#1A1F1B` |
-| Text | `#191D19` | `#ECF0EC` |
-| Accent (green) | `#2D6A4F` | `#86D3A7` |
-| Success (blue) | `#2563EB` | `#60A5FA` |
-| Danger | `#B91C1C` | `#F87171` |
+| Background | `#F8FAF9` | `#101413` |
+| Surface | `#FFFFFF` | `#171F1D` |
+| Text | `#1A1E1D` | `#E9EFEC` |
+| Accent (verdigris) | `#33695F` | `#86B8AB` |
+| Success (blue) | `#46689B` | `#8AA8CF` |
+| Danger | `#B03A3A` | `#DD9B9B` |
+
+Type pairs **Source Serif 4** with **IBM Plex Sans** on a simple rule: the
+serif marks identity — the wordmark, page headings, paper titles — and the
+sans does all the work. Both are self-hosted (no font CDN), so the app renders
+the same offline as online.
 
 Full token sheet in `frontend/src/styles/tokens.css`. Navigation is a slim
 top navbar (plus a bottom tab bar on phones) — no sidebars or drawers. The
