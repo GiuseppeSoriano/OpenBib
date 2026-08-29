@@ -7,9 +7,10 @@
   }
 
   .settings h1 {
+    font-family: var(--font-serif);
     font-size: 1.35rem;
     font-weight: 650;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
     margin-bottom: var(--space-xs);
   }
 

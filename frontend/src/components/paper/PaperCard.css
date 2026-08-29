@@ -19,19 +19,23 @@
   }
 
   .paper-title {
+    font-family: var(--font-serif);
     font-size: 0.98rem;
     font-weight: 600;
     color: var(--color-text);
     line-height: 1.4;
   }
 
+  /* Both classes sit on the same element when the title is clickable, so a
+     `font-family: inherit` here would out-order .paper-title and leave
+     clickable titles sans. The base-layer `button` reset it guarded against
+     is a lower layer, so dropping it is safe. */
   .paper-title-btn {
     background: transparent;
     border: none;
     padding: 0;
     text-align: left;
     cursor: pointer;
-    font-family: inherit;
   }
   .paper-title-btn:hover {
     color: var(--color-accent);

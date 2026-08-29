@@ -6,6 +6,7 @@
   }
 
   .pd-title {
+    font-family: var(--font-serif);
     font-size: 1.12rem;
     font-weight: 650;
     line-height: 1.35;

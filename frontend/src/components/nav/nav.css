@@ -29,9 +29,10 @@
   }
 
   .topnav-wordmark {
+    font-family: var(--font-serif);
     font-size: 1.02rem;
     font-weight: 650;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
   }
 
   .topnav-links {

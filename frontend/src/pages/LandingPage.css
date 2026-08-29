@@ -21,9 +21,10 @@
   }
 
   .landing-title {
+    font-family: var(--font-serif);
     font-size: 2.1rem;
     font-weight: 700;
-    letter-spacing: -0.035em;
+    letter-spacing: -0.015em;
     line-height: 1.1;
   }
 

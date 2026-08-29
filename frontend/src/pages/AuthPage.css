@@ -26,9 +26,10 @@
   }
 
   .auth-header h1 {
+    font-family: var(--font-serif);
     font-size: 1.25rem;
     font-weight: 650;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
     color: var(--color-text);
   }
 
