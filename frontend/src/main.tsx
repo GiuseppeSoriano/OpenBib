@@ -1,5 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+// Self-hosted webfonts, ahead of every stylesheet: these are bare @font-face
+// rules (no cascade layer), so they must not land after the layered CSS.
+// Source Serif 4 is the variable face — one file covers weights 600-700.
+import "@fontsource-variable/source-serif-4";
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-sans/700.css";
 // Global styles first: base/component layers must bundle before any
 // component or page CSS so within-layer cascade order stays correct.
 import "@/styles/index.css";
