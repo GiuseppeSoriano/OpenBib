@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     app_public_url: str = "http://localhost:3000"
     legal_config_path: str = ""
     log_directory: str = "/var/log/openbib"
+    # Preserve protection for existing instances; new operators may explicitly opt out.
+    backups_enabled: bool = True
+    deletion_journal_enabled: bool | None = None
     deletion_journal_bucket: str = ""
     s3_endpoint_url: str = ""
     aws_region: str = "us-east-1"
@@ -90,6 +93,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def load_secret_files_and_validate(self):
+        if self.deletion_journal_enabled is None:
+            self.deletion_journal_enabled = self.backups_enabled
+        if self.backups_enabled and not self.deletion_journal_enabled:
+            raise ValueError("Backups require the off-site deletion journal")
         for field in (
             "database_url",
             "redis_url",
@@ -100,6 +107,8 @@ class Settings(BaseSettings):
             "aws_access_key_id",
             "aws_secret_access_key",
         ):
+            if field.startswith("aws_") and not self.deletion_journal_enabled:
+                continue
             file_path = getattr(self, f"{field}_file", "")
             if file_path:
                 setattr(self, field, self._read_file(file_path, field))
@@ -127,16 +136,22 @@ class Settings(BaseSettings):
                 "aws_access_key_id",
                 "aws_secret_access_key",
             ):
+                if field.startswith("aws_") and not self.deletion_journal_enabled:
+                    continue
                 if any(
                     marker in getattr(self, field).lower()
                     for marker in ("replace-me", "change-me", "test-only", "example")
                 ):
                     failures.append(f"{field} contains a placeholder")
-            if self.s3_endpoint_url and not self.s3_endpoint_url.startswith("https://"):
+            if (
+                self.deletion_journal_enabled
+                and self.s3_endpoint_url
+                and not self.s3_endpoint_url.startswith("https://")
+            ):
                 failures.append("S3_ENDPOINT_URL must use HTTPS")
             if self.cors_origins != [self.app_public_url.rstrip("/")]:
                 failures.append("Production CORS must contain only APP_PUBLIC_URL")
-            if (
+            if self.deletion_journal_enabled and (
                 not self.deletion_journal_bucket
                 or not self.aws_access_key_id
                 or not self.aws_secret_access_key

@@ -68,7 +68,7 @@ Compliance target: **OWASP Top 10** (2021 edition).
 | **No silent data loss** | User data (notes, tags, states, collections) is never lost due to provider failures, merges, or cache evictions. |
 | **Retry with backoff** | Failed provider calls are retried up to 2 times with exponential backoff (1 s, 3 s). |
 | **Idempotency** | All write operations are idempotent where possible (e.g., adding a paper that already exists returns success without duplication). |
-| **Database backups** | PostgreSQL: automated daily backups with 7-day retention (via Docker volume or managed service). |
+| **Database backups** | Optional per instance. When enabled: encrypted off-site snapshots and deletion replay, with a maximum 30-day retention. When disabled: no guaranteed database recovery; disclose this in the privacy notice. |
 | **Health check** | `GET /health` endpoint returns system status (DB connectivity, Redis connectivity, provider reachability). |
 
 ---

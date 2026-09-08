@@ -45,6 +45,8 @@ _COOKIE_MUTATION_PATHS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_legal_config()
+    if settings.environment == "production" and not settings.backups_enabled:
+        logger.warning("Backups are disabled; database loss may be irreversible")
     pool = app.state.redis
     logger.info("Redis pool initialized")
     yield
