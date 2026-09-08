@@ -6,8 +6,9 @@ import json
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, StrictBool, model_validator
 
 from app.config import settings
 
@@ -32,7 +33,7 @@ class ThirdPartyConfig(BaseModel):
 class RetentionConfig(BaseModel):
     access_logs_days: int = Field(14, ge=14, le=14)
     security_events_days: int = Field(90, ge=90, le=90)
-    backups_days: int = Field(30, ge=30, le=30)
+    backups_days: Literal[0, 30] = 30
 
 
 class LegalConfig(BaseModel):
@@ -43,10 +44,22 @@ class LegalConfig(BaseModel):
     privacy_version: str
     terms_version: str
     minimum_age: int = Field(16, ge=13, le=18)
+    backups_enabled: StrictBool = True
+    deletion_journal_enabled: StrictBool | None = None
     operator: OperatorConfig
     data_location: str
     third_parties: list[ThirdPartyConfig]
     retention: RetentionConfig = RetentionConfig()
+
+    @model_validator(mode="after")
+    def validate_backup_policy(self):
+        if self.deletion_journal_enabled is None:
+            self.deletion_journal_enabled = self.backups_enabled
+        if self.backups_enabled and not self.deletion_journal_enabled:
+            raise ValueError("Backups require the deletion journal")
+        if self.retention.backups_days != (30 if self.backups_enabled else 0):
+            raise ValueError("Backup retention must be 30 days when enabled, otherwise 0")
+        return self
 
 
 def _development_config() -> LegalConfig:
@@ -57,6 +70,9 @@ def _development_config() -> LegalConfig:
             "effective_date": "2026-09-02",
             "privacy_version": "dev-1",
             "terms_version": "dev-1",
+            "backups_enabled": False,
+            "deletion_journal_enabled": False,
+            "retention": {"backups_days": 0},
             "operator": {
                 "name": "Local operator",
                 "address": "Local development only",
@@ -83,6 +99,11 @@ def get_legal_config() -> LegalConfig:
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError("Invalid legal configuration") from exc
     if settings.environment == "production":
+        if (
+            config.backups_enabled != settings.backups_enabled
+            or config.deletion_journal_enabled != settings.deletion_journal_enabled
+        ):
+            raise RuntimeError("Legal backup policy does not match runtime configuration")
         try:
             date.fromisoformat(config.effective_date)
         except ValueError:

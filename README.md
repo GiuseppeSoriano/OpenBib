@@ -157,7 +157,7 @@ npm test
 npm run build
 ```
 
-Application runtime images exclude test/development packages. CI runs PostgreSQL + Redis tests, clean/previous-head migrations, frontend checks, dependency audits, full-history Gitleaks, CodeQL, application image scans and SBOM generation. The maintainers separately verify the official service's infrastructure, encrypted backups and restore procedure.
+Application runtime images exclude test/development packages. CI runs PostgreSQL + Redis tests, clean/previous-head migrations, frontend checks, dependency audits, full-history Gitleaks, CodeQL, application image scans and SBOM generation. Operators separately verify their infrastructure and, when backups are enabled, encrypted backups and the restore procedure.
 
 ## Repository map
 
@@ -180,7 +180,7 @@ Application runtime images exclude test/development packages. CI runs PostgreSQL
 
 Registration requires email verification. Access tokens stay in browser memory; opaque refresh sessions rotate in an HttpOnly cookie. Account settings provide verified email changes, password changes, session revocation, password-protected JSON export and account deletion. Zotero credentials and pending emails are encrypted with versioned application keys.
 
-Every production operator supplies their own legal configuration, authenticated SMTP and off-site encrypted backups. The application includes bilingual privacy/terms pages and only technical storage for sessions, theme and language: no analytics, trackers or consent banner are bundled. Legal texts still require human review for the actual operator and jurisdiction.
+Every production operator supplies their own legal configuration and authenticated SMTP. Off-site encrypted backups are optional; without them database loss may be irreversible and the privacy notice must accurately disclose this. The application includes bilingual privacy/terms pages and only technical storage for sessions, theme and language: no analytics, trackers or consent banner are bundled. Legal texts still require human review for the actual operator and jurisdiction.
 
 See [Security architecture](docs/Security.md) and [Privacy operations](docs/Privacy.md) for the application safeguards and data lifecycle.
 

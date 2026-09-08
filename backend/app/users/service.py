@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import AccountDeletionTombstone, EmailOutbox
 from app.auth.service import lock_user, utcnow
 from app.collections.models import Collection, CollectionMember, CollectionPaper
-from app.legal import get_legal_config
+from app.common.deletion_journal import RETENTION_DAYS
+from app.config import settings
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
 from app.papers.models import (
@@ -172,9 +173,11 @@ async def delete_user_account(db: AsyncSession, user: User, *, record_receipt: b
         successor = members[0]
         collection.owner_id = successor.user_id
         successor.role = "owner"
-    retention = get_legal_config().retention.backups_days
-    await db.merge(
-        AccountDeletionTombstone(user_id=user.id, expires_at=utcnow() + timedelta(days=retention))
-    )
+    if settings.deletion_journal_enabled:
+        await db.merge(
+            AccountDeletionTombstone(
+                user_id=user.id, expires_at=utcnow() + timedelta(days=RETENTION_DAYS)
+            )
+        )
     await db.execute(delete(EmailOutbox).where(EmailOutbox.user_id == user.id))
     await db.delete(user)

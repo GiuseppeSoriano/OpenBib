@@ -14,9 +14,12 @@ from app.common.crypto import EncryptedValue, keyring
 from app.config import settings
 
 PREFIX = "openbib-deletions/v1/"
+RETENTION_DAYS = 30
 
 
 def client():
+    if not settings.deletion_journal_enabled:
+        raise RuntimeError("Deletion journal is disabled; safe backup replay is unavailable")
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url or None,
@@ -28,14 +31,14 @@ def client():
 
 
 async def record_deletion(user_id: uuid.UUID) -> None:
-    if settings.environment != "production":
+    if settings.environment != "production" or not settings.deletion_journal_enabled:
         return
     encrypted = keyring.encrypt(
         json.dumps(
             {
                 "user_id": str(user_id),
                 "requested_at": utcnow().isoformat(),
-                "expires_at": (utcnow() + timedelta(days=30)).isoformat(),
+                "expires_at": (utcnow() + timedelta(days=RETENTION_DAYS)).isoformat(),
             }
         ),
         purpose="deletion",
@@ -58,6 +61,8 @@ async def record_deletion(user_id: uuid.UUID) -> None:
 
 
 def read_receipts() -> list[dict]:
+    if not settings.deletion_journal_enabled:
+        raise RuntimeError("Deletion journal is disabled; safe backup replay is unavailable")
     s3 = client()
     receipts = []
     for page in s3.get_paginator("list_objects_v2").paginate(
