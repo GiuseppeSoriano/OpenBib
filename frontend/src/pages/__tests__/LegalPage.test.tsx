@@ -51,3 +51,19 @@ it("preserves the disclosure for older legal files", () => {
   show();
   expect(screen.getByText(/creates encrypted backups/)).toHaveTextContent("30");
 });
+
+describe.each(["privacy", "terms"] as const)("optional postal address (%s)", (kind) => {
+  it.each(["", "   ", undefined])("omits a missing postal address without stray commas", (address) => {
+    config.operator.address = address;
+    render(<MemoryRouter><LegalPage kind={kind} /></MemoryRouter>);
+    const identity = screen.getByText((_, node) => node?.tagName === "P" && !!node.textContent?.startsWith(config.operator.name));
+    expect(identity).toHaveTextContent(`${config.operator.name}, ${config.operator.country}.`);
+    expect(identity.textContent).not.toMatch(/,\s*,/);
+  });
+
+  it("still displays a supplied postal address", () => {
+    config.operator.address = "A valid postal address";
+    render(<MemoryRouter><LegalPage kind={kind} /></MemoryRouter>);
+    expect(screen.getByText(new RegExp(config.operator.name + ", A valid postal address"))).toBeInTheDocument();
+  });
+});
