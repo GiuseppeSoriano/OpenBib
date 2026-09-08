@@ -1,0 +1,15 @@
+# Privacy operations
+
+Each operator is responsible for their actual service, suppliers, purposes, legal bases, transfers and retention. The official service's legal configuration is maintained separately and mounted read-only in API and frontend. The public frontend contains development-only legal configuration. The bilingual pages at /privacy and /terms describe the product but do not certify legal compliance. Obtain human review before publishing an instance.
+
+Account email/name, password hashes, library/collection content, notes, tags, reading states, preferences and Zotero mappings are required for the selected account features. Search queries and filters go server-side to the selected bibliographic providers; do not submit confidential information in search fields. Connecting Zotero sends the API key to Zotero for validation and user-initiated synchronization sends the selected bibliographic content. SMTP receives recipient addresses and transactional message content.
+
+There are no bundled analytics, advertising tags, heatmaps or external error trackers. The refresh cookie is technical and HttpOnly; browser localStorage is used for theme/language only. No CMP or consent banner is bundled. Adding optional tracking requires a separate privacy assessment and implementation that blocks it until any required consent; do not merely add a banner after loading a tracker.
+
+The account export requires the current password and contains versioned JSON for profile, collection memberships/content, library versions, notes, tags, states, preferences, dismissed items, cached references and Zotero mappings. It excludes password hashes, Zotero secrets, sessions, tokens and security records. BibTeX export is outside this release: reference export remains Zotero-first.
+
+Account deletion requires the password and the text DELETE. Shared collections transfer to the earliest editor, then earliest viewer, with UUID as tie-breaker; collections without another member are deleted. Personal notes and dependent account rows are deleted and surviving collection additions lose their added_by attribution. Already-synchronized Zotero items are not deleted by OpenBib.
+
+Access logs have a 14-day retention, pseudonymized security events 90 days, and encrypted database snapshots/deletion receipts at most 30 days under the configured cleanup policy. Backup restoration must reapply off-site deletion receipts before reopening the service. Do not enable S3 versioning or retention rules that silently retain expired personal-data copies.
+
+Maintain an internal record of provider contracts, subprocessors, international-transfer safeguards, access permissions and data-rights requests. Review contact details and document versions whenever these change. Users can contact the configured controller for access, correction, restriction, objection, portability and erasure; evaluate requests and any legal exceptions individually rather than promising that a generic template covers every jurisdiction.

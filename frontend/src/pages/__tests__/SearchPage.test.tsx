@@ -1,3 +1,4 @@
+import { mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import SearchPage from "@/pages/SearchPage";
@@ -69,6 +70,9 @@ const searchResponse = {
 };
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
       if (url === "/papers/search") return Promise.resolve({ data: searchResponse });

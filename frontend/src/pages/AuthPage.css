@@ -77,4 +77,8 @@
     font-size: 0.84rem;
     color: var(--color-text-secondary);
   }
+  .auth-help, .auth-message, .auth-forgot { font-size: 0.8rem; color: var(--color-text-secondary); font-weight: 400; }
+  .auth-check { flex-direction: row !important; align-items: flex-start; }
+  .auth-check input { margin-top: 0.25rem; }
+  .auth-forgot { align-self: center; }
 }

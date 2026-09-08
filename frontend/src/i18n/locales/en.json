@@ -16,6 +16,7 @@
     "logout": "Logout"
   },
   "auth": {
+    "logoutFailed": "Logout could not be completed. Your session is still active; please try again.",
     "welcomeBack": "Welcome back",
     "signInSubtitle": "Sign in to your OpenBib account",
     "email": "Email",
@@ -29,7 +30,30 @@
     "noAccount": "Don't have an account?",
     "haveAccount": "Already have an account?",
     "loginError": "Invalid email or password",
-    "registerError": "Registration failed — email may already be in use"
+    "registerError": "Registration failed. Check the fields and try again.",
+    "passwordHelp": "Use at least 15 characters.",
+    "acceptLegal": "I accept the",
+    "terms": "Terms",
+    "privacy": "Privacy notice",
+    "acknowledgePrivacy": "and acknowledge the",
+    "forgotPassword": "Forgot password?",
+    "sendReset": "Send reset link",
+    "resetPassword": "Reset password",
+    "newPassword": "New password",
+    "checkEmail": "Check your email",
+    "checkEmailMessage": "If the request is valid, you will receive an email with the next step.",
+    "backToLogin": "Back to sign in",
+    "invalidLink": "This link is invalid or has expired.",
+    "verifying": "Verifying email",
+    "pleaseWait": "Please wait…",
+    "confirmEmail": "Confirm email",
+    "emailChanged": "Email changed. Sign in again to continue.",
+    "legalReview": "Updated legal documents",
+    "legalChanged": "Review and accept the current Terms and Privacy notice to continue.",
+    "accountAccessWithoutAcceptance": "You can export your data, delete your account or sign out without accepting the updated documents.",
+    "acceptAndContinue": "Accept and continue",
+    "verifyPasswordHelp": "Confirm or choose your final password to activate your account.",
+    "resendVerification": "Resend verification email"
   },
   "dashboard": {
     "welcome": "Welcome",
@@ -232,6 +256,10 @@
     "reportFailures_other": "{{count}} papers failed to sync",
     "failed": "Zotero sync failed"
   },
+  "legal": {
+    "privacy": "Privacy",
+    "terms": "Terms"
+  },
   "settings": {
     "title": "Settings",
     "email": "Email",
@@ -244,6 +272,20 @@
     "appearance": "Appearance",
     "language": "Language",
     "profile": "Profile",
+    "security": "Security",
+    "newEmail": "New email",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "changeEmail": "Send email-change link",
+    "emailSent": "Check the new email address to confirm the change.",
+    "changePassword": "Change password",
+    "logoutAll": "Sign out every session",
+    "yourData": "Your data",
+    "passwordToConfirm": "Password to confirm",
+    "exportData": "Export my data",
+    "deleteAccountHelp": "Owned collections with collaborators are transferred; other personal data is deleted.",
+    "typeDelete": "Type DELETE to confirm",
+    "actionFailed": "The action failed. Check your password and try again.",
     "themeLight": "Light",
     "themeDark": "Dark",
     "themeSystem": "System"

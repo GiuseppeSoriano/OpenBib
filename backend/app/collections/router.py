@@ -10,6 +10,8 @@ from app.collections.schemas import (
     CollectionPaperRead,
     CollectionRead,
     CollectionUpdate,
+    IdentifierImport,
+    KeyImport,
     MemberAdd,
     PaperAdd,
 )
@@ -32,7 +34,12 @@ async def paper_memberships(user: CurrentUser, db: DB):
 @router.post("", response_model=CollectionRead, status_code=201)
 async def create_collection(body: CollectionCreate, user: CurrentUser, db: DB):
     coll = await service.create_collection(db, user.id, body)
-    return {**coll.__dict__, "paper_count": 0}
+    return {
+        **coll.__dict__,
+        "paper_count": 0,
+        "is_owner": coll.owner_id == user.id,
+        "can_edit": True,
+    }
 
 
 @router.get("/public", response_model=list[CollectionRead])
@@ -43,6 +50,7 @@ async def list_public_collections(
     size: int = Query(25, ge=1, le=100),
 ):
     from sqlalchemy import func, select
+
     from app.collections.models import Collection, CollectionPaper
 
     stmt = (
@@ -60,7 +68,12 @@ async def list_public_collections(
     result = await db.execute(stmt)
     rows = result.all()
     return [
-        {**row.Collection.__dict__, "paper_count": row.paper_count}
+        {
+            **row.Collection.__dict__,
+            "paper_count": row.paper_count,
+            "is_owner": False,
+            "can_edit": False,
+        }
         for row in rows
     ]
 
@@ -72,9 +85,16 @@ async def get_collection(collection_id: uuid.UUID, user: OptionalUser, db: DB):
 
 
 @router.patch("/{collection_id}", response_model=CollectionRead)
-async def update_collection(collection_id: uuid.UUID, body: CollectionUpdate, user: CurrentUser, db: DB):
+async def update_collection(
+    collection_id: uuid.UUID, body: CollectionUpdate, user: CurrentUser, db: DB
+):
     coll = await service.update_collection(db, collection_id, user.id, body)
-    return {**coll.__dict__, "paper_count": 0}
+    return {
+        **coll.__dict__,
+        "paper_count": 0,
+        "is_owner": coll.owner_id == user.id,
+        "can_edit": True,
+    }
 
 
 @router.delete("/{collection_id}", status_code=204)
@@ -83,6 +103,7 @@ async def delete_collection(collection_id: uuid.UUID, user: CurrentUser, db: DB)
 
 
 # --- Papers in collection ---
+
 
 @router.get("/{collection_id}/papers", response_model=list[CollectionPaperRead])
 async def list_collection_papers(collection_id: uuid.UUID, user: OptionalUser, db: DB):
@@ -102,6 +123,7 @@ async def remove_paper(collection_id: uuid.UUID, paper_key: str, user: CurrentUs
 
 # --- Members ---
 
+
 @router.post("/{collection_id}/members", status_code=201)
 async def add_member(collection_id: uuid.UUID, body: MemberAdd, user: CurrentUser, db: DB):
     await service.add_member(db, collection_id, user.id, body.user_id, body.role.value)
@@ -115,25 +137,18 @@ async def remove_member(collection_id: uuid.UUID, member_id: uuid.UUID, user: Cu
 
 # --- Import (export is handled by the Zotero sync in app/zotero) ---
 
+
 @router.post("/{collection_id}/import/dois")
-async def import_dois(collection_id: uuid.UUID, body: dict, user: CurrentUser, db: DB):
+async def import_dois(collection_id: uuid.UUID, body: IdentifierImport, user: CurrentUser, db: DB):
     from app.collections.import_export import import_doi_list
 
-    dois = body.get("dois", [])
-    if not isinstance(dois, list):
-        from fastapi import HTTPException, status
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'dois' must be a list of strings")
-    result = await import_doi_list(db, collection_id, user.id, dois)
+    result = await import_doi_list(db, collection_id, user.id, body.dois)
     return result
 
 
 @router.post("/{collection_id}/import/keys")
-async def import_keys(collection_id: uuid.UUID, body: dict, user: CurrentUser, db: DB):
+async def import_keys(collection_id: uuid.UUID, body: KeyImport, user: CurrentUser, db: DB):
     from app.collections.import_export import import_canonical_keys
 
-    keys = body.get("keys", [])
-    if not isinstance(keys, list):
-        from fastapi import HTTPException, status
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'keys' must be a list of strings")
-    result = await import_canonical_keys(db, collection_id, user.id, keys)
+    result = await import_canonical_keys(db, collection_id, user.id, body.keys)
     return result

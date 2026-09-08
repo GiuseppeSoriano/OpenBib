@@ -1,0 +1,48 @@
+name: Question or support request
+description: Ask for help using or self-hosting OpenBib
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read SUPPORT.md and search existing issues before asking. Never include secrets, tokens, or personal data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I read the README and SUPPORT.md.
+          required: true
+        - label: I searched existing issues for an answer.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Explain what you are trying to accomplish and where you are blocked.
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include relevant commands, documentation, and sanitized output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - OpenBib revision:
+        - OS:
+        - Docker/Python/Node version:
+      render: markdown

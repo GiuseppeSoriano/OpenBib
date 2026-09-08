@@ -16,16 +16,16 @@ the user-perceived order important > read > reading > to_read > saved > seen
 column itself, so reading state becomes Library-global per version.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "f5c8d9e0a1b3"
-down_revision: Union[str, None] = "e4b6c8f9a0b2"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e4b6c8f9a0b2"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # Order is "most progressed first": when collapsing duplicate rows, the
@@ -173,9 +173,7 @@ def upgrade() -> None:
     with op.batch_alter_table("user_paper_states") as batch:
         batch.drop_constraint("user_paper_states_pkey", type_="primary")
         batch.drop_column("collection_id")
-        batch.create_primary_key(
-            "user_paper_states_pkey", ["user_id", "paper_canonical_key"]
-        )
+        batch.create_primary_key("user_paper_states_pkey", ["user_id", "paper_canonical_key"])
 
     if survivors:
         bind.execute(

@@ -57,7 +57,9 @@ async def lookup_by_doi(doi: str) -> PaperMetadata | None:
             if result:
                 return result
         except Exception:
-            logger.warning("Provider %s failed DOI lookup for %s", provider.name, doi, exc_info=True)
+            logger.warning(
+                "Provider %s failed DOI lookup for %s", provider.name, doi, exc_info=True
+            )
     return None
 
 
@@ -68,7 +70,9 @@ async def lookup_by_arxiv_id(arxiv_id: str) -> PaperMetadata | None:
             if result:
                 return result
         except Exception:
-            logger.warning("Provider %s failed arXiv lookup for %s", provider.name, arxiv_id, exc_info=True)
+            logger.warning(
+                "Provider %s failed arXiv lookup for %s", provider.name, arxiv_id, exc_info=True
+            )
     return None
 
 
@@ -79,7 +83,9 @@ async def lookup_by_pmid(pmid: str) -> PaperMetadata | None:
             if result:
                 return result
         except Exception:
-            logger.warning("Provider %s failed PMID lookup for %s", provider.name, pmid, exc_info=True)
+            logger.warning(
+                "Provider %s failed PMID lookup for %s", provider.name, pmid, exc_info=True
+            )
     return None
 
 
@@ -139,13 +145,10 @@ async def search_all(
     )
 
     results: list[SearchResult] = []
-    for provider, outcome in zip(selected, raw_results):
+    for _provider, outcome in zip(selected, raw_results, strict=True):
         if isinstance(outcome, Exception):
             logger.warning(
-                "Provider %s failed search for q=%r: %s",
-                provider.name,
-                query,
-                outcome,
+                "Provider search failed",
             )
             continue
         results.append(outcome)
@@ -161,7 +164,9 @@ async def get_references(paper_id: str) -> list[PaperReference]:
             if result:
                 return result
         except Exception:
-            logger.warning("Provider %s failed references for %s", provider.name, paper_id, exc_info=True)
+            logger.warning(
+                "Provider %s failed references for %s", provider.name, paper_id, exc_info=True
+            )
     return []
 
 
@@ -174,7 +179,9 @@ async def get_citations(paper_id: str) -> list[PaperReference]:
             if result:
                 return result
         except Exception:
-            logger.warning("Provider %s failed citations for %s", provider.name, paper_id, exc_info=True)
+            logger.warning(
+                "Provider %s failed citations for %s", provider.name, paper_id, exc_info=True
+            )
     return []
 
 
@@ -208,9 +215,7 @@ async def list_citing_papers(
     try:
         return await _openalex.list_citing_papers(openalex_id, sort=sort, per_page=limit)
     except Exception:
-        logger.warning(
-            "OpenAlex failed citing-papers for %s", openalex_id, exc_info=True
-        )
+        logger.warning("OpenAlex failed citing-papers for %s", openalex_id, exc_info=True)
         return []
 
 
@@ -229,9 +234,7 @@ async def list_referenced_papers(
     try:
         return await _openalex.list_referenced_papers(openalex_id, sort=sort, per_page=limit)
     except Exception:
-        logger.warning(
-            "OpenAlex failed referenced-papers for %s", openalex_id, exc_info=True
-        )
+        logger.warning("OpenAlex failed referenced-papers for %s", openalex_id, exc_info=True)
         return []
 
 

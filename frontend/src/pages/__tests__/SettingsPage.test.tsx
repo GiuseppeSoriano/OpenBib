@@ -1,3 +1,4 @@
+import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import SettingsPage from "@/pages/SettingsPage";
@@ -9,6 +10,9 @@ const zoteroState: { status: ZoteroStatus } = {
 };
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
       if (url === "/users/me")
@@ -39,7 +43,7 @@ beforeEach(() => {
 
 describe("SettingsPage — appearance", () => {
   it("theme segmented control sets and persists the preference", async () => {
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<SettingsPage />);
 
     const segment = await screen.findByTestId("theme-segment");
@@ -54,7 +58,7 @@ describe("SettingsPage — appearance", () => {
   });
 
   it("language segmented control switches and persists the language", async () => {
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<SettingsPage />);
 
     const segment = await screen.findByTestId("language-segment");
@@ -71,7 +75,7 @@ describe("SettingsPage — appearance", () => {
 
 describe("SettingsPage — Zotero", () => {
   it("shows the connect form when Zotero is not configured", async () => {
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<SettingsPage />);
 
     const section = await screen.findByTestId("zotero-section");
@@ -90,7 +94,7 @@ describe("SettingsPage — Zotero", () => {
       zotero_user_id: "777",
       api_key_masked: "********efgh",
     };
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<SettingsPage />);
 
     expect(await screen.findByText("Connected to Zotero user 777")).toBeInTheDocument();

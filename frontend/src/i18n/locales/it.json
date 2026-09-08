@@ -16,6 +16,7 @@
     "logout": "Esci"
   },
   "auth": {
+    "logoutFailed": "Disconnessione non completata. La sessione è ancora attiva: riprova.",
     "welcomeBack": "Bentornato",
     "signInSubtitle": "Accedi al tuo account OpenBib",
     "email": "Email",
@@ -29,7 +30,30 @@
     "noAccount": "Non hai un account?",
     "haveAccount": "Hai già un account?",
     "loginError": "Email o password non validi",
-    "registerError": "Registrazione non riuscita — l'email potrebbe essere già in uso"
+    "registerError": "Registrazione non riuscita. Controlla i campi e riprova.",
+    "passwordHelp": "Usa almeno 15 caratteri.",
+    "acceptLegal": "Accetto i",
+    "terms": "Termini",
+    "privacy": "Informativa privacy",
+    "acknowledgePrivacy": "e dichiaro di aver letto l’",
+    "forgotPassword": "Password dimenticata?",
+    "sendReset": "Invia link di ripristino",
+    "resetPassword": "Reimposta password",
+    "newPassword": "Nuova password",
+    "checkEmail": "Controlla la tua email",
+    "checkEmailMessage": "Se la richiesta è valida, riceverai un'email con il passaggio successivo.",
+    "backToLogin": "Torna all'accesso",
+    "invalidLink": "Questo link non è valido o è scaduto.",
+    "verifying": "Verifica email",
+    "pleaseWait": "Attendi…",
+    "confirmEmail": "Conferma email",
+    "emailChanged": "Email modificata. Accedi di nuovo per continuare.",
+    "legalReview": "Documenti legali aggiornati",
+    "legalChanged": "Consulta e accetta i Termini e l'Informativa privacy correnti per continuare.",
+    "accountAccessWithoutAcceptance": "Puoi esportare i tuoi dati, eliminare l’account o uscire senza accettare i documenti aggiornati.",
+    "acceptAndContinue": "Accetta e continua",
+    "verifyPasswordHelp": "Conferma o scegli la password definitiva per attivare il tuo account.",
+    "resendVerification": "Reinvia verifica email"
   },
   "dashboard": {
     "welcome": "Benvenuto",
@@ -232,6 +256,10 @@
     "reportFailures_other": "{{count}} articoli non sincronizzati",
     "failed": "Sincronizzazione Zotero non riuscita"
   },
+  "legal": {
+    "privacy": "Privacy",
+    "terms": "Termini"
+  },
   "settings": {
     "title": "Impostazioni",
     "email": "Email",
@@ -244,6 +272,20 @@
     "appearance": "Aspetto",
     "language": "Lingua",
     "profile": "Profilo",
+    "security": "Sicurezza",
+    "newEmail": "Nuova email",
+    "currentPassword": "Password attuale",
+    "newPassword": "Nuova password",
+    "changeEmail": "Invia link di modifica email",
+    "emailSent": "Controlla il nuovo indirizzo email per confermare la modifica.",
+    "changePassword": "Cambia password",
+    "logoutAll": "Disconnetti tutte le sessioni",
+    "yourData": "I tuoi dati",
+    "passwordToConfirm": "Password di conferma",
+    "exportData": "Esporta i miei dati",
+    "deleteAccountHelp": "Le raccolte con collaboratori vengono trasferite; gli altri dati personali vengono eliminati.",
+    "typeDelete": "Scrivi DELETE per confermare",
+    "actionFailed": "Operazione non riuscita. Controlla la password e riprova.",
     "themeLight": "Chiaro",
     "themeDark": "Scuro",
     "themeSystem": "Sistema"

@@ -1,0 +1,92 @@
+name: Bug report
+description: Report a reproducible problem in OpenBib
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OpenBib. Search existing issues first and remove secrets or personal data from everything you share.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched the existing issues for this problem.
+          required: true
+        - label: This is not a security vulnerability (those must follow SECURITY.md).
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected instead.
+      placeholder: A clear and concise description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start OpenBib with ...
+        2. Navigate to ...
+        3. Select ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Frontend / user interface
+        - Backend / API
+        - Search provider integration
+        - Database / migrations
+        - Docker / deployment
+        - Documentation
+        - Unsure
+    validations:
+      required: true
+
+  - type: input
+    id: revision
+    attributes:
+      label: OpenBib revision
+      description: Commit SHA, tag, or the date you last pulled `main`.
+      placeholder: e.g. a3c797a
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the details relevant to your setup.
+      value: |
+        - OS:
+        - Browser:
+        - Docker version:
+        - Python version (if running locally):
+        - Node version (if running locally):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove secrets, tokens, private URLs, and personal data. This field is formatted as shell output.
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add screenshots or any other context that may help.

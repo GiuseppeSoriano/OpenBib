@@ -79,8 +79,7 @@ Notes:
 - The search cache stores the final merged/grouped response under a single
   key per full query signature (query, providers, filters, page, size) —
   one key, maximum hit rate. Total provider failure is never cached.
-- Redis being down degrades gracefully everywhere: the cache is bypassed
-  and providers are called directly.
+- Redis failure closes authentication, search, graph and Zotero routes; normal authenticated CRUD can temporarily continue with a sanitized warning. Provider-cache failure alone does not bypass the rate-limit boundary.
 - Nothing in Redis is authoritative; `docker compose down` without `-v`
   keeps Postgres and loses nothing meaningful.
 
@@ -92,9 +91,8 @@ still upserts `cached_paper_metadata` rows and may persist
 scoping, so this is by design: anonymous traffic warms the snapshot for
 everyone without touching any user's data.
 
-## Future hardening
+## Security and further work
 
-- Encrypt `zotero_credentials.api_key` at rest (currently plaintext in a
-  dev-grade database; never returned by the API).
+- Zotero credentials now use versioned AES-256-GCM ciphertext. The encryption migration removes plaintext transactionally; see [Security](../Security.md).
 - Periodic refresh policy for stale `cached_paper_metadata` rows
   (citation counts age; a lightweight re-fetch on read after N days).

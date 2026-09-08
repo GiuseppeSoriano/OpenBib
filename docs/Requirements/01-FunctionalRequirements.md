@@ -216,8 +216,8 @@ Explicit feedback states on papers: unseen, seen, saved, to-read, reading, read,
 | FR-081 | The system shall provide an import preview showing matched, unmatched, and duplicate records. |
 | FR-082 | The system shall deduplicate during import. |
 | FR-083 | The system shall continue importing even if some records fail, and produce a summary report (successes, duplicates, failures). |
-| FR-084 | The system shall support exporting a collection's metadata in BibTeX format. |
-| FR-085 | The system shall support exporting user data (collections, notes, tags, states) for personal backup. |
+| FR-084 | BibTeX export is deferred beyond the public-release patch; OpenBib currently exports references through Zotero. |
+| FR-085 | The public-release gate includes password-protected, versioned JSON export of profile, collections/memberships, library versions, notes, tags, states, preferences, dismissed items, metadata and Zotero mappings, excluding credentials and security internals. |
 
 **Edge cases**: malformed file; wrong encoding; duplicates within the same import file; very large import; interrupted import.
 

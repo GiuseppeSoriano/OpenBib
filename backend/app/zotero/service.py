@@ -11,6 +11,7 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.crypto import EncryptedValue, keyring
 from app.common.exceptions import ConflictError, NotFoundError
 from app.papers.models import CachedPaperMetadata
 from app.papers.service import get_cached_papers_by_keys
@@ -41,6 +42,7 @@ def _mask_key(api_key: str) -> str:
 
 # ── Credentials ──────────────────────────────────────────────
 
+
 async def get_credentials(db: AsyncSession, user_id: uuid.UUID) -> ZoteroCredentials | None:
     return await db.get(ZoteroCredentials, user_id)
 
@@ -52,7 +54,15 @@ async def credentials_status(db: AsyncSession, user_id: uuid.UUID) -> ZoteroCred
     return ZoteroCredentialsStatus(
         connected=True,
         zotero_user_id=creds.zotero_user_id,
-        api_key_masked=_mask_key(creds.api_key),
+        api_key_masked=f"****{creds.api_key_last_four}",
+    )
+
+
+def _decrypt_key(creds: ZoteroCredentials) -> str:
+    return keyring.decrypt(
+        EncryptedValue(creds.api_key_ciphertext, creds.api_key_nonce, creds.api_key_version),
+        purpose="zotero",
+        aad=f"zotero:{creds.user_id}",
     )
 
 
@@ -66,14 +76,23 @@ async def set_credentials(
     if not zotero_user_id:
         raise ZoteroError("Zotero key verification returned no userID")
 
+    encrypted = keyring.encrypt(api_key, purpose="zotero", aad=f"zotero:{user_id}")
     creds = await get_credentials(db, user_id)
     if creds is None:
         creds = ZoteroCredentials(
-            user_id=user_id, api_key=api_key, zotero_user_id=zotero_user_id
+            user_id=user_id,
+            api_key_ciphertext=encrypted.ciphertext,
+            api_key_nonce=encrypted.nonce,
+            api_key_version=encrypted.key_version,
+            api_key_last_four=api_key[-4:],
+            zotero_user_id=zotero_user_id,
         )
         db.add(creds)
     else:
-        creds.api_key = api_key
+        creds.api_key_ciphertext = encrypted.ciphertext
+        creds.api_key_nonce = encrypted.nonce
+        creds.api_key_version = encrypted.key_version
+        creds.api_key_last_four = api_key[-4:]
         creds.zotero_user_id = zotero_user_id
     await db.flush()
     return ZoteroCredentialsStatus(
@@ -89,6 +108,7 @@ async def delete_credentials(db: AsyncSession, user_id: uuid.UUID) -> None:
 
 
 # ── Item mapping ─────────────────────────────────────────────
+
 
 def _creators(authors_json: list | None) -> list[dict]:
     creators = []
@@ -140,6 +160,7 @@ def item_from_cached(row: CachedPaperMetadata, collection_key: str) -> dict:
 
 # ── Sync ─────────────────────────────────────────────────────
 
+
 async def _get_link(
     db: AsyncSession, user_id: uuid.UUID, local_type: str, local_key: str
 ) -> ZoteroLink | None:
@@ -186,7 +207,7 @@ async def sync_papers(
     if creds is None:
         raise ConflictError("Zotero is not configured. Add your API key in Settings first.")
 
-    client = ZoteroClient(creds.api_key)
+    client = ZoteroClient(_decrypt_key(creds))
     report = ZoteroSyncReport(zotero_collection_key="")
     report.zotero_collection_key = await _ensure_zotero_collection(
         db, client, creds, local_collection_key, collection_name
@@ -202,9 +223,9 @@ async def sync_papers(
                 outcome = await client.add_item_to_collection(
                     creds.zotero_user_id, link.zotero_key, report.zotero_collection_key
                 )
-            except ZoteroError as exc:
+            except ZoteroError:
                 report.failures.append(
-                    ZoteroSyncFailure(paper_canonical_key=key, message=str(exc))
+                    ZoteroSyncFailure(paper_canonical_key=key, message="Zotero request failed")
                 )
                 continue
             if outcome == "updated":
@@ -227,18 +248,13 @@ async def sync_papers(
     for start in range(0, len(to_create), MAX_BATCH):
         batch = to_create[start : start + MAX_BATCH]
         try:
-            result = await client.create_items(
-                creds.zotero_user_id, [item for _, item in batch]
-            )
+            result = await client.create_items(creds.zotero_user_id, [item for _, item in batch])
         except ZoteroError as exc:
             for key, _ in batch:
-                report.failures.append(
-                    ZoteroSyncFailure(paper_canonical_key=key, message=str(exc))
-                )
+                report.failures.append(ZoteroSyncFailure(paper_canonical_key=key, message=str(exc)))
             continue
 
         success: dict = result.get("success", {})
-        failed: dict = result.get("failed", {})
         for index, (key, _) in enumerate(batch):
             idx = str(index)
             if idx in success:
@@ -252,10 +268,8 @@ async def sync_papers(
                 )
                 report.items_created += 1
             else:
-                message = (failed.get(idx) or {}).get("message", "Rejected by Zotero")
-                report.failures.append(
-                    ZoteroSyncFailure(paper_canonical_key=key, message=message)
-                )
+                message = "Rejected by Zotero"
+                report.failures.append(ZoteroSyncFailure(paper_canonical_key=key, message=message))
         await db.flush()
 
     return report
@@ -281,9 +295,7 @@ async def sync_library(db: AsyncSession, user_id: uuid.UUID) -> ZoteroSyncReport
     from app.library.models import UserLibraryEntry
 
     result = await db.execute(
-        select(UserLibraryEntry.primary_canonical_key).where(
-            UserLibraryEntry.user_id == user_id
-        )
+        select(UserLibraryEntry.primary_canonical_key).where(UserLibraryEntry.user_id == user_id)
     )
     keys = [row[0] for row in result.all()]
     if not keys:

@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -23,24 +24,25 @@ class Role(str, Enum):
 
 class CollectionCreate(BaseModel):
     name: str = Field(max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=5000)
     visibility: Visibility = Visibility.private
 
 
 class CollectionUpdate(BaseModel):
     name: str | None = Field(None, max_length=200)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=5000)
     visibility: Visibility | None = None
 
 
 class CollectionRead(BaseModel):
     id: uuid.UUID
-    owner_id: uuid.UUID
     name: str
     description: str | None
     visibility: str
     created_at: datetime
     paper_count: int = 0
+    is_owner: bool = False
+    can_edit: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -52,6 +54,18 @@ class MemberAdd(BaseModel):
 
 class PaperAdd(BaseModel):
     paper_canonical_key: str = Field(max_length=512)
+
+
+class IdentifierImport(BaseModel):
+    dois: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=500
+    )
+
+
+class KeyImport(BaseModel):
+    keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=500
+    )
 
 
 class CollectionPaperRead(BaseModel):

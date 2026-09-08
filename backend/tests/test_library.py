@@ -8,15 +8,15 @@ from datetime import date
 import pytest
 from fastapi import HTTPException
 
-from app.collections.models import Collection, CollectionPaper
+from app.collections.models import Collection
 from app.collections.service import add_paper as add_paper_to_collection
 from app.collections.service import get_user_stats
 from app.common.exceptions import ConflictError, NotFoundError
 from app.library import service as library_service
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
-from app.papers.models import CachedPaperMetadata, UserPaperState, UserPaperTag
 from app.papers import service as paper_service
+from app.papers.models import CachedPaperMetadata, UserPaperState, UserPaperTag
 from app.users.models import User
 
 pytestmark = pytest.mark.asyncio
@@ -107,9 +107,7 @@ async def test_delete_entry_cascades_when_no_collections(db):
     user = await _make_user(db)
     await _cache_paper(db, "doi:10.1/q", "group:q")
 
-    await library_service.ensure_entry_and_version(
-        db, user.id, "group:q", "doi:10.1/q", "openalex"
-    )
+    await library_service.ensure_entry_and_version(db, user.id, "group:q", "doi:10.1/q", "openalex")
     db.add(
         UserPaperTag(
             user_id=user.id,
@@ -153,9 +151,7 @@ async def test_delete_entry_cascades_when_no_collections(db):
     assert tag_rows == []
     note_rows = (
         await db.execute(
-            select(Note).where(
-                Note.user_id == user.id, Note.paper_group_key == "group:q"
-            )
+            select(Note).where(Note.user_id == user.id, Note.paper_group_key == "group:q")
         )
     ).all()
     assert note_rows == []
@@ -168,9 +164,7 @@ async def test_remove_version_blocked_when_in_collection(db):
     await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/v1")
 
     with pytest.raises(ConflictError):
-        await library_service.remove_version(
-            db, user.id, "group:multi", "doi:10.1/v1"
-        )
+        await library_service.remove_version(db, user.id, "group:multi", "doi:10.1/v1")
 
 
 async def test_pin_extra_version_under_existing_entry(db):
@@ -181,15 +175,11 @@ async def test_pin_extra_version_under_existing_entry(db):
     await library_service.ensure_entry_and_version(
         db, user.id, "group:multi", "doi:10.1/v1", "openalex"
     )
-    pin = await library_service.add_version(
-        db, user.id, "group:multi", "doi:10.1/v2", "crossref"
-    )
+    pin = await library_service.add_version(db, user.id, "group:multi", "doi:10.1/v2", "crossref")
     assert pin.paper_canonical_key == "doi:10.1/v2"
 
     # Idempotent — second add returns the existing pin, no duplicate row.
-    pin2 = await library_service.add_version(
-        db, user.id, "group:multi", "doi:10.1/v2", "crossref"
-    )
+    pin2 = await library_service.add_version(db, user.id, "group:multi", "doi:10.1/v2", "crossref")
     assert pin2.paper_canonical_key == "doi:10.1/v2"
 
 
@@ -201,9 +191,7 @@ async def test_repin_primary_requires_existing_pin(db):
         db, user.id, "group:multi", "doi:10.1/v1", "openalex"
     )
     with pytest.raises(ConflictError):
-        await library_service.repin_primary(
-            db, user.id, "group:multi", "doi:10.1/never-pinned"
-        )
+        await library_service.repin_primary(db, user.id, "group:multi", "doi:10.1/never-pinned")
 
 
 async def test_repin_primary_succeeds_for_pinned_version(db):
@@ -214,12 +202,8 @@ async def test_repin_primary_succeeds_for_pinned_version(db):
     await library_service.ensure_entry_and_version(
         db, user.id, "group:multi", "doi:10.1/v1", "openalex"
     )
-    await library_service.add_version(
-        db, user.id, "group:multi", "doi:10.1/v2", "crossref"
-    )
-    entry = await library_service.repin_primary(
-        db, user.id, "group:multi", "doi:10.1/v2"
-    )
+    await library_service.add_version(db, user.id, "group:multi", "doi:10.1/v2", "crossref")
+    entry = await library_service.repin_primary(db, user.id, "group:multi", "doi:10.1/v2")
     assert entry.primary_canonical_key == "doi:10.1/v2"
 
 

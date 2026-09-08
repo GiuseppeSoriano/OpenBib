@@ -35,9 +35,7 @@ class ZoteroClient:
         self._timeout = timeout
 
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=BASE_URL, headers=self._headers, timeout=self._timeout
-        )
+        return httpx.AsyncClient(base_url=BASE_URL, headers=self._headers, timeout=self._timeout)
 
     async def verify_key(self) -> dict:
         """Return the key metadata ({"userID": ..., "access": {...}})."""
@@ -60,8 +58,7 @@ class ZoteroClient:
         payload = response.json()
         success: dict = payload.get("success", {})
         if "0" not in success:
-            failed = payload.get("failed", {})
-            raise ZoteroError(f"Zotero collection creation rejected: {failed}")
+            raise ZoteroError("Zotero collection creation rejected")
         return success["0"]
 
     async def create_items(self, zotero_user_id: str, items: list[dict]) -> dict:

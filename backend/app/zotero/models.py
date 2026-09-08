@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, func
+from sqlalchemy import ForeignKey, Index, Integer, LargeBinary, SmallInteger, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,9 +13,8 @@ from app.database import Base
 class ZoteroCredentials(Base):
     """Per-user Zotero Web API credentials.
 
-    The API key is stored as provided (dev-grade DB); it is never echoed
-    back through the API — responses only carry a masked form. At-rest
-    encryption is flagged as future hardening.
+    AES-GCM ciphertext is bound to the user and key version. Only the last
+    four characters are exposed as a connection hint.
     """
 
     __tablename__ = "zotero_credentials"
@@ -23,7 +22,10 @@ class ZoteroCredentials(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    api_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    api_key_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    api_key_nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
+    api_key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    api_key_last_four: Mapped[str] = mapped_column(String(4), nullable=False)
     zotero_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

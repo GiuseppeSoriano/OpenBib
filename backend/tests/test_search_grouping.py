@@ -4,8 +4,8 @@ from datetime import date
 
 import pytest
 
-from app.providers.base import Author, PaperMetadata, SearchResult
 from app.papers import service
+from app.providers.base import Author, PaperMetadata, SearchResult
 
 
 def make_paper(
@@ -111,9 +111,7 @@ def test_build_search_response_unions_provider_sources_at_group_level():
     p_v2.provider_sources = ["crossref", "openalex"]
 
     payload = service.build_search_response(
-        SearchResult(
-            papers=[p_v1, p_v2], total_count=2, page=1, page_size=20, provider="merged"
-        )
+        SearchResult(papers=[p_v1, p_v2], total_count=2, page=1, page_size=20, provider="merged")
     )
 
     group = payload["items"][0]

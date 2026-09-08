@@ -1,25 +1,52 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: openbib, POSTGRES_PASSWORD: ci-only-password, POSTGRES_DB: openbib_test }
+        ports: ["5432:5432"]
+        options: --health-cmd="pg_isready -U openbib" --health-interval=5s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=10
+    env:
+      TEST_DB_URL: postgresql+asyncpg://openbib:ci-only-password@localhost:5432/openbib_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+      MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://openbib:ci-only-password@localhost:5432/openbib_migration_test
+      PGPASSWORD: ci-only-password
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@v6
         with:
+          version: "0.12.9"
           python-version: "3.12"
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-      - name: Run tests
-        run: pytest -q
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run --frozen ruff check app tests scripts alembic
+      - run: uv run --frozen ruff format --check app tests scripts alembic
+      - run: uv run --frozen pytest -q
+      - name: Verify migrations from empty and previous head
+        run: |
+          createdb -h localhost -U openbib openbib_migration_test
+          uv run --frozen python -m scripts.check_migrations
+      - name: Audit locked runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project --output-file /tmp/openbib-requirements.txt
+          uvx pip-audit==2.10.1 -r /tmp/openbib-requirements.txt --disable-pip --no-deps
 
   frontend:
     runs-on: ubuntu-latest
@@ -28,16 +55,14 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
-      - name: Build
-        run: npm run build
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --audit-level=moderate

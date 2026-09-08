@@ -20,7 +20,9 @@ def make_cached_paper(
         canonical_key=canonical_key,
         paper_group_key=paper_group_key,
         title=title,
-        authors_json=[{"name": "Alice Smith", "affiliations": [], "openalex_id": None, "orcid": None}],
+        authors_json=[
+            {"name": "Alice Smith", "affiliations": [], "openalex_id": None, "orcid": None}
+        ],
         publication_date=publication_date,
         topics_json=[],
         keywords_json=[],

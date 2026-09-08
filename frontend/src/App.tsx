@@ -12,17 +12,28 @@ import CollectionDetailPage from "@/pages/CollectionDetailPage";
 import LibraryPage from "@/pages/LibraryPage";
 import GraphPage from "@/pages/GraphPage";
 import SettingsPage from "@/pages/SettingsPage";
+import LegalPage from "@/pages/LegalPage";
+import { CheckEmailPage, ConfirmEmailPage, ForgotPasswordPage, LegalReviewPage, ResetPasswordPage, VerifyEmailPage } from "@/pages/AccountLifecyclePages";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
-  if (isLoading) return <div className="container" style={{ paddingTop: "2rem" }} />;
+  if (isLoading) return <div className="container auth-loading" />;
+  if (!user) return <Navigate to="/login" />;
+  if (user.legal_acceptance_required) return <Navigate to="/legal-review" />;
+  return <>{children}</>;
+}
+
+function RequireBasicAuth({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+  if (isLoading) return <div className="container auth-loading" />;
   return user ? <>{children}</> : <Navigate to="/login" />;
 }
 
 /** Authenticated users land on the dashboard; visitors get the search-first landing. */
 function HomeRoute() {
   const { user, isLoading } = useAuth();
-  if (isLoading) return <div className="container" style={{ paddingTop: "2rem" }} />;
+  if (isLoading) return <div className="container auth-loading" />;
+  if (user?.legal_acceptance_required) return <Navigate to="/legal-review" />;
   return user ? <DashboardPage /> : <LandingPage />;
 }
 
@@ -31,6 +42,12 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/check-email" element={<CheckEmailPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+      <Route path="/legal-review" element={<RequireBasicAuth><LegalReviewPage /></RequireBasicAuth>} />
       <Route element={<Layout />}>
         {/* Public: search, paper details, graph exploration, public collections */}
         <Route path="/" element={<HomeRoute />} />
@@ -42,6 +59,8 @@ export default function App() {
           element={<GraphPage mode="collection" />}
         />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
 
         {/* Account-scoped */}
         <Route
@@ -71,9 +90,9 @@ export default function App() {
         <Route
           path="/settings"
           element={
-            <RequireAuth>
+            <RequireBasicAuth>
               <SettingsPage />
-            </RequireAuth>
+            </RequireBasicAuth>
           }
         />
       </Route>

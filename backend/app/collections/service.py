@@ -2,14 +2,14 @@
 
 import uuid
 
+from fastapi import HTTPException
+from fastapi import status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.schemas import CollectionCreate, CollectionUpdate
 from app.common.exceptions import ForbiddenError, NotFoundError
-
-from fastapi import HTTPException, status as http_status
 
 
 async def get_collection_or_404(db: AsyncSession, collection_id: uuid.UUID) -> Collection:
@@ -58,7 +58,12 @@ async def list_collections(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
     result = await db.execute(stmt)
     rows = result.all()
     return [
-        {**row.Collection.__dict__, "paper_count": row.paper_count}
+        {
+            **row.Collection.__dict__,
+            "paper_count": row.paper_count,
+            "is_owner": True,
+            "can_edit": True,
+        }
         for row in rows
     ]
 
@@ -66,7 +71,12 @@ async def list_collections(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
 async def create_collection(
     db: AsyncSession, user_id: uuid.UUID, data: CollectionCreate
 ) -> Collection:
-    coll = Collection(owner_id=user_id, name=data.name, description=data.description, visibility=data.visibility.value)
+    coll = Collection(
+        owner_id=user_id,
+        name=data.name,
+        description=data.description,
+        visibility=data.visibility.value,
+    )
     db.add(coll)
     await db.flush()
     # Add owner as member
@@ -88,7 +98,12 @@ async def get_collection_detail(
     )
     paper_count = paper_count_result.scalar() or 0
 
-    return {**coll.__dict__, "paper_count": paper_count}
+    return {
+        **coll.__dict__,
+        "paper_count": paper_count,
+        "is_owner": coll.owner_id == user_id,
+        "can_edit": user_id is not None and _can_edit(coll, user_id, roles),
+    }
 
 
 async def update_collection(
@@ -110,9 +125,7 @@ async def update_collection(
     return coll
 
 
-async def delete_collection(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID
-) -> None:
+async def delete_collection(db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID) -> None:
     coll = await get_collection_or_404(db, collection_id)
     if coll.owner_id != user_id:
         raise ForbiddenError("Only the owner can delete a collection")
@@ -167,9 +180,7 @@ async def add_paper(
         paper_group_key = f"group:{digest}"
         source_provider = None
 
-    await ensure_entry_and_version(
-        db, user_id, paper_group_key, paper_key, source_provider
-    )
+    await ensure_entry_and_version(db, user_id, paper_group_key, paper_key, source_provider)
 
     cp = CollectionPaper(
         collection_id=collection_id,
@@ -269,9 +280,7 @@ async def remove_member(
     await db.delete(member)
 
 
-async def get_paper_memberships(
-    db: AsyncSession, user_id: uuid.UUID
-) -> dict[str, list[str]]:
+async def get_paper_memberships(db: AsyncSession, user_id: uuid.UUID) -> dict[str, list[str]]:
     """Return {paper_canonical_key: [collection_id, ...]} for all user's collections."""
     stmt = (
         select(CollectionPaper.paper_canonical_key, CollectionPaper.collection_id)
@@ -287,16 +296,12 @@ async def get_paper_memberships(
     return memberships
 
 
-async def get_user_stats(
-    db: AsyncSession, user_id: uuid.UUID
-) -> dict[str, int]:
+async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]:
     """Return collection, paper, and library counts for a user."""
     from app.library.service import count_entries
 
     # Total collections
-    coll_count_result = await db.execute(
-        select(func.count()).where(Collection.owner_id == user_id)
-    )
+    coll_count_result = await db.execute(select(func.count()).where(Collection.owner_id == user_id))
     total_collections = coll_count_result.scalar() or 0
 
     # Total papers (with duplicates across collections)

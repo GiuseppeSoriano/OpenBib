@@ -31,18 +31,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # even when running outside the FastAPI app entrypoint.
 from app.auth import models as _auth_models  # noqa: F401
 from app.collections import models as _collection_models  # noqa: F401
-from app.graph import models as _graph_models  # noqa: F401
-from app.library import models as _library_models  # noqa: F401
-from app.notes import models as _note_models  # noqa: F401
-from app.papers import models as _paper_models  # noqa: F401
-from app.users import models as _user_models  # noqa: F401
-
 from app.collections.models import CollectionPaper
 from app.database import async_session_factory
+from app.graph import models as _graph_models  # noqa: F401
+from app.library import models as _library_models  # noqa: F401
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.library.service import ensure_entry_and_version
+from app.notes import models as _note_models  # noqa: F401
 from app.notes.models import Note
+from app.papers import models as _paper_models  # noqa: F401
 from app.papers.models import CachedPaperMetadata, UserPaperTag
+from app.users import models as _user_models  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("backfill_library")
@@ -62,16 +61,17 @@ async def _ensure_for_collection_papers(db: AsyncSession) -> tuple[int, int, int
 
     # Pair every collection_paper with the collection's owner — that is the
     # user whose library should hold the entry.
-    q = (
-        select(
-            Collection.owner_id,
-            CollectionPaper.paper_canonical_key,
-        )
-        .join(Collection, Collection.id == CollectionPaper.collection_id)
-    )
+    q = select(
+        Collection.owner_id,
+        CollectionPaper.paper_canonical_key,
+    ).join(Collection, Collection.id == CollectionPaper.collection_id)
     rows = (await db.execute(q)).all()
 
-    cache_q = select(CachedPaperMetadata.canonical_key, CachedPaperMetadata.paper_group_key, CachedPaperMetadata.provider_source)
+    cache_q = select(
+        CachedPaperMetadata.canonical_key,
+        CachedPaperMetadata.paper_group_key,
+        CachedPaperMetadata.provider_source,
+    )
     cache_rows = (await db.execute(cache_q)).all()
     cache_by_key = {r[0]: (r[1], r[2]) for r in cache_rows}
 
@@ -95,9 +95,7 @@ async def _ensure_for_collection_papers(db: AsyncSession) -> tuple[int, int, int
         had_entry_before = (owner_id, paper_group_key) in pre_existing_entries
         had_pin_before = (owner_id, canonical_key) in pre_existing_pins
 
-        await ensure_entry_and_version(
-            db, owner_id, paper_group_key, canonical_key, provider
-        )
+        await ensure_entry_and_version(db, owner_id, paper_group_key, canonical_key, provider)
 
         if not had_entry_before:
             inserted_entries += 1
@@ -115,17 +113,12 @@ async def _anchor_tags(db: AsyncSession) -> int:
         update(UserPaperTag)
         .where(
             UserPaperTag.paper_group_key.is_(None),
-            UserPaperTag.paper_canonical_key.in_(
-                select(CachedPaperMetadata.canonical_key)
-            ),
+            UserPaperTag.paper_canonical_key.in_(select(CachedPaperMetadata.canonical_key)),
         )
         .values(
             paper_group_key=(
                 select(CachedPaperMetadata.paper_group_key)
-                .where(
-                    CachedPaperMetadata.canonical_key
-                    == UserPaperTag.paper_canonical_key
-                )
+                .where(CachedPaperMetadata.canonical_key == UserPaperTag.paper_canonical_key)
                 .scalar_subquery()
             )
         )

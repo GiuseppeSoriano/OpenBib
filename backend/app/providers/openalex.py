@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import ClassVar
 
 import httpx
 
@@ -119,7 +120,7 @@ def _map_work(raw: dict) -> PaperMetadata:
 
 class OpenAlexProvider(BaseProvider):
     name = "openalex"
-    capabilities = {
+    capabilities: ClassVar[set[ProviderCapability]] = {
         ProviderCapability.LOOKUP_DOI,
         ProviderCapability.LOOKUP_ID,
         ProviderCapability.SEARCH,
@@ -165,13 +166,9 @@ class OpenAlexProvider(BaseProvider):
         if filters.year_to:
             filter_parts.append(f"publication_year:<{filters.year_to + 1}")
         if filters.author:
-            filter_parts.append(
-                f"authorships.author.display_name.search:{filters.author}"
-            )
+            filter_parts.append(f"authorships.author.display_name.search:{filters.author}")
         if filters.venue:
-            filter_parts.append(
-                f"primary_location.source.display_name.search:{filters.venue}"
-            )
+            filter_parts.append(f"primary_location.source.display_name.search:{filters.venue}")
         if filters.open_access_only:
             filter_parts.append("open_access.is_oa:true")
         if filters.paper_type:
@@ -254,9 +251,7 @@ class OpenAlexProvider(BaseProvider):
         self, paper_id: str, *, sort: str = "cited_by_count:desc", per_page: int = 25
     ) -> list[PaperMetadata]:
         """Papers that cite ``paper_id`` (``filter=cites:{id}``)."""
-        return await self._related_works(
-            paper_id, filter_key="cites", sort=sort, per_page=per_page
-        )
+        return await self._related_works(paper_id, filter_key="cites", sort=sort, per_page=per_page)
 
     async def list_referenced_papers(
         self, paper_id: str, *, sort: str = "cited_by_count:desc", per_page: int = 25

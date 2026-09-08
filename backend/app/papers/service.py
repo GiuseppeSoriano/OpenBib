@@ -8,7 +8,8 @@ from dataclasses import asdict
 from datetime import date
 from itertools import zip_longest
 
-from sqlalchemy import delete, or_, select
+from fastapi import HTTPException, status
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import NotFoundError
@@ -20,9 +21,8 @@ from app.papers.models import (
     UserPaperTag,
 )
 from app.papers.schemas import PaperMetadataRead
-from app.providers.base import PaperMetadata, SearchResult as ProviderSearchResult
-
-from fastapi import HTTPException, status
+from app.providers.base import PaperMetadata
+from app.providers.base import SearchResult as ProviderSearchResult
 
 
 def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, str]:
@@ -47,9 +47,7 @@ def _provider_sources_for(paper: PaperMetadata) -> list[str]:
 
 
 def cached_paper_to_read(row: CachedPaperMetadata) -> PaperMetadataRead:
-    sources = row.provider_sources_json or (
-        [row.provider_source] if row.provider_source else []
-    )
+    sources = row.provider_sources_json or ([row.provider_source] if row.provider_source else [])
     return PaperMetadataRead.model_validate(
         {
             "canonical_key": row.canonical_key,
@@ -294,9 +292,7 @@ def build_search_response(result: ProviderSearchResult) -> dict:
             }
         )
 
-    providers_list = result.providers or (
-        [result.provider] if result.provider else []
-    )
+    providers_list = result.providers or ([result.provider] if result.provider else [])
 
     return {
         "items": items,
@@ -352,9 +348,7 @@ async def get_paper_states(
     return list(result.scalars().all())
 
 
-async def add_tag(
-    db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str
-) -> UserPaperTag:
+async def add_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> UserPaperTag:
     paper_group_key, group_keys = await _tag_scope(db, paper_key)
     if paper_group_key:
         existing = await db.execute(
@@ -399,9 +393,7 @@ async def _tag_scope(db: AsyncSession, paper_key: str) -> tuple[str | None, set[
     return cached.paper_group_key, group_keys
 
 
-async def remove_tag(
-    db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str
-) -> None:
+async def remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> None:
     paper_group_key, group_keys = await _tag_scope(db, paper_key)
     if paper_group_key:
         result = await db.execute(
@@ -434,9 +426,7 @@ async def remove_tag(
     await db.delete(upt)
 
 
-async def get_tags(
-    db: AsyncSession, user_id: uuid.UUID, paper_key: str
-) -> list[UserPaperTag]:
+async def get_tags(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> list[UserPaperTag]:
     paper_group_key, group_keys = await _tag_scope(db, paper_key)
     if paper_group_key:
         result = await db.execute(
@@ -470,20 +460,15 @@ async def get_tags(
 
 # ── Dismiss ─────────────────────────────────────────────────
 
-async def get_dismissed_keys(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[str]:
+
+async def get_dismissed_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     result = await db.execute(
-        select(UserDismissedPaper.paper_canonical_key).where(
-            UserDismissedPaper.user_id == user_id
-        )
+        select(UserDismissedPaper.paper_canonical_key).where(UserDismissedPaper.user_id == user_id)
     )
     return list(result.scalars().all())
 
 
-async def dismiss_paper(
-    db: AsyncSession, user_id: uuid.UUID, paper_key: str
-) -> UserDismissedPaper:
+async def dismiss_paper(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> UserDismissedPaper:
     existing = await db.execute(
         select(UserDismissedPaper).where(
             UserDismissedPaper.user_id == user_id,
@@ -499,9 +484,7 @@ async def dismiss_paper(
     return dp
 
 
-async def undismiss_paper(
-    db: AsyncSession, user_id: uuid.UUID, paper_key: str
-) -> None:
+async def undismiss_paper(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> None:
     result = await db.execute(
         select(UserDismissedPaper).where(
             UserDismissedPaper.user_id == user_id,

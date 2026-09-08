@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.papers.schemas import PaperMetadataRead, StateRead, TagRead
+from app.papers.schemas import PaperMetadataRead, StateRead
 
 
 class LibraryVersionPin(BaseModel):

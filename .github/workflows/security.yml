@@ -1,0 +1,65 @@
+name: Security
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "18 5 * * 1"
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 tools/install_security_tools.py gitleaks --directory /tmp/openbib-scanners
+      - run: /tmp/openbib-scanners/gitleaks git --redact --no-banner .
+
+  codeql:
+    # CodeQL is available for public repositories; private mirrors need a license.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, context: backend }
+          - { name: web, context: frontend }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - run: docker build -t openbib-${{ matrix.name }}:ci ${{ matrix.context }}
+      - name: Install checksum-pinned scanner
+        run: python3 tools/install_security_tools.py trivy --directory /tmp/openbib-scanners
+      - name: Image vulnerability gate
+        run: /tmp/openbib-scanners/trivy image --scanners vuln --severity MEDIUM,HIGH,CRITICAL --exit-code 1 openbib-${{ matrix.name }}:ci
+      - name: Generate SBOM
+        if: always()
+        run: /tmp/openbib-scanners/trivy image --format cyclonedx --output sbom-${{ matrix.name }}.json openbib-${{ matrix.name }}:ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.name }}
+          path: sbom-${{ matrix.name }}.json
+          retention-days: 14

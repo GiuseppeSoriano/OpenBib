@@ -4,12 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.graph.models import PaperGraphEdge
-from app.papers.schemas import PaperMetadataRead
 
 
-async def get_similar(
-    db: AsyncSession, paper_key: str, limit: int = 10
-) -> list[dict]:
+async def get_similar(db: AsyncSession, paper_key: str, limit: int = 10) -> list[dict]:
     """Find papers that share the most citations/references with the given paper."""
     # Get all papers connected to the seed paper
     refs = await db.execute(
@@ -41,10 +38,12 @@ async def get_similar(
 
     results = []
     for row in co_cited.all():
-        results.append({
-            "canonical_key": row.source_key,
-            "title": row.source_key,  # Would be enriched from cache in production
-            "score": row.overlap,
-            "reason": f"Shares {row.overlap} citation(s) with the seed paper",
-        })
+        results.append(
+            {
+                "canonical_key": row.source_key,
+                "title": row.source_key,  # Would be enriched from cache in production
+                "score": row.overlap,
+                "reason": f"Shares {row.overlap} citation(s) with the seed paper",
+            }
+        )
     return results

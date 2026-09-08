@@ -55,12 +55,13 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              maxLength={128}
             />
           </label>
           <button type="submit" className="btn btn-primary auth-submit">
             {t("auth.signIn")}
           </button>
+          <Link className="auth-forgot" to="/forgot-password">{t("auth.forgotPassword")}</Link>
         </form>
 
         <p className="auth-alt">

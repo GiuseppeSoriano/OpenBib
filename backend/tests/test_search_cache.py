@@ -18,6 +18,9 @@ class FakeRedis:
         self.store: dict[str, str] = {}
         self.ttls: dict[str, int | None] = {}
 
+    async def eval(self, *args):
+        return [1, 99, 0]  # Cache-specific stand-in; token buckets have separate tests.
+
     async def get(self, key: str):
         return self.store.get(key)
 
@@ -107,9 +110,7 @@ async def test_different_query_or_filters_bypass_cache(db, monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         await client.get("/api/v1/papers/search", params={"q": "transformers"})
         await client.get("/api/v1/papers/search", params={"q": "transformers", "page": 2})
-        await client.get(
-            "/api/v1/papers/search", params={"q": "transformers", "year_from": 2020}
-        )
+        await client.get("/api/v1/papers/search", params={"q": "transformers", "year_from": 2020})
 
     assert calls["count"] == 3, "changed page/filters must produce distinct cache keys"
 

@@ -60,7 +60,11 @@ async def get_neighborhood(
         if canonical_key in canonical_cache:
             return canonical_cache[canonical_key]
         row = await paper_service.get_cached_paper(db, canonical_key)
-        paper = paper_service.cached_paper_to_read(row) if row is not None else _fallback_paper(canonical_key)
+        paper = (
+            paper_service.cached_paper_to_read(row)
+            if row is not None
+            else _fallback_paper(canonical_key)
+        )
         canonical_cache[canonical_key] = paper
         return paper
 
@@ -193,9 +197,7 @@ async def get_neighborhood(
     )
 
 
-async def store_edges(
-    db: AsyncSession, edges: list[dict]
-) -> None:
+async def store_edges(db: AsyncSession, edges: list[dict]) -> None:
     for edge_data in edges:
         existing = await db.execute(
             select(PaperGraphEdge).where(
@@ -328,9 +330,7 @@ async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]
 
     keys: set[str] = set()
     lib = await db.execute(
-        select(UserLibraryVersion.paper_canonical_key).where(
-            UserLibraryVersion.user_id == user_id
-        )
+        select(UserLibraryVersion.paper_canonical_key).where(UserLibraryVersion.user_id == user_id)
     )
     keys.update(row[0] for row in lib.all())
     coll = await db.execute(
@@ -347,9 +347,7 @@ async def library_seed_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     from app.library.models import UserLibraryEntry
 
     q = await db.execute(
-        select(UserLibraryEntry.primary_canonical_key).where(
-            UserLibraryEntry.user_id == user_id
-        )
+        select(UserLibraryEntry.primary_canonical_key).where(UserLibraryEntry.user_id == user_id)
     )
     return [row[0] for row in q.all()]
 

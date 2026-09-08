@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: openbib
       POSTGRES_DB: openbib
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,6 +30,18 @@ services:
       retries: 5
 
   # ── Backend API ─────────────────────────────────────────
+  migrate:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://openbib:openbib@db:5432/openbib
+      REDIS_URL: redis://cache:6379/0
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: ./backend
@@ -39,19 +51,45 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://openbib:openbib@db:5432/openbib
       REDIS_URL: redis://cache:6379/0
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       cache:
         condition: service_healthy
+
+  mail-worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://openbib:openbib@db:5432/openbib
+      REDIS_URL: redis://cache:6379/0
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+    command: ["python", "-m", "app.auth.email_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
 
   # ── Frontend dev server (opt-in: --profile dev) ─────────
   # Live-reload Vite server for in-browser preview/verification;
   # /api is proxied to the api container.
   web-dev:
-    image: node:20-alpine
+    image: node:24-alpine
     profiles: ["dev"]
     working_dir: /app
     volumes:
@@ -60,21 +98,21 @@ services:
       VITE_PROXY_TARGET: http://api:8000
       CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       - api
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
 
   # ── Frontend test runner (opt-in: --profile test) ──────
-  # Runs vitest and regenerates package-lock.json without
+  # Runs vitest using the committed package-lock.json without
   # requiring node/npm on the host.
   web-test:
-    image: node:20-alpine
+    image: node:24-alpine
     profiles: ["test"]
     working_dir: /app
     volumes:
       - ./frontend:/app
-    command: sh -c "npm install && npm run test"
+    command: sh -c "npm ci && npm run test"
 
   # ── Frontend ────────────────────────────────────────────
   web:
@@ -83,7 +121,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:8080"
     depends_on:
       - api
 

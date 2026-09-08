@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LogOut, Settings } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/components/ui/Toast";
 import Menu from "@/components/ui/Menu";
 
 /** Avatar button opening the account menu (settings, logout). */
@@ -9,6 +10,7 @@ export default function UserMenu() {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   if (!user) return null;
 
@@ -43,10 +45,9 @@ export default function UserMenu() {
             type="button"
             role="menuitem"
             className="menu-item menu-item--danger"
-            onClick={() => {
+            onClick={async () => {
               close();
-              logout();
-              navigate("/");
+              try { await logout(); navigate("/"); } catch { toast(t("auth.logoutFailed"), "error"); }
             }}
           >
             <LogOut size={15} />

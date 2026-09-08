@@ -101,12 +101,9 @@ async def list_entries(
     )
     counts_by_group = {row[0]: row[1] for row in (await db.execute(counts_q)).all()}
 
-    tags_q = (
-        select(UserPaperTag.paper_group_key, UserPaperTag.tag)
-        .where(
-            UserPaperTag.user_id == user_id,
-            UserPaperTag.paper_group_key.in_(group_keys),
-        )
+    tags_q = select(UserPaperTag.paper_group_key, UserPaperTag.tag).where(
+        UserPaperTag.user_id == user_id,
+        UserPaperTag.paper_group_key.in_(group_keys),
     )
     tags_by_group: dict[str, list[str]] = {}
     for row in (await db.execute(tags_q)).all():
@@ -116,9 +113,7 @@ async def list_entries(
     for entry in entries:
         primary_cached = cached_by_key.get(entry.primary_canonical_key)
         primary_view = (
-            cached_paper_to_read(primary_cached).model_dump(mode="json")
-            if primary_cached
-            else None
+            cached_paper_to_read(primary_cached).model_dump(mode="json") if primary_cached else None
         )
         items.append(
             {
@@ -133,9 +128,7 @@ async def list_entries(
     return items
 
 
-async def get_entry(
-    db: AsyncSession, user_id: uuid.UUID, paper_group_key: str
-) -> dict:
+async def get_entry(db: AsyncSession, user_id: uuid.UUID, paper_group_key: str) -> dict:
     entry = await db.get(UserLibraryEntry, (user_id, paper_group_key))
     if entry is None:
         raise NotFoundError("Library entry not found")
@@ -152,9 +145,7 @@ async def get_entry(
 
     primary_cached = await db.get(CachedPaperMetadata, entry.primary_canonical_key)
     primary_view = (
-        cached_paper_to_read(primary_cached).model_dump(mode="json")
-        if primary_cached
-        else None
+        cached_paper_to_read(primary_cached).model_dump(mode="json") if primary_cached else None
     )
 
     notes_count_q = select(func.count()).where(
@@ -208,9 +199,7 @@ async def repin_primary(
         )
     )
     if pin_q.scalar_one_or_none() is None:
-        raise ConflictError(
-            "Cannot re-pin to a version that is not pinned under this entry"
-        )
+        raise ConflictError("Cannot re-pin to a version that is not pinned under this entry")
     entry.primary_canonical_key = new_primary
     db.add(entry)
     await db.flush()
@@ -295,9 +284,7 @@ async def remove_version(
     await db.flush()
 
 
-async def delete_entry(
-    db: AsyncSession, user_id: uuid.UUID, paper_group_key: str
-) -> None:
+async def delete_entry(db: AsyncSession, user_id: uuid.UUID, paper_group_key: str) -> None:
     entry = await db.get(UserLibraryEntry, (user_id, paper_group_key))
     if entry is None:
         raise NotFoundError("Library entry not found")
@@ -350,9 +337,7 @@ async def delete_entry(
     await db.flush()
 
 
-async def list_group_keys(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[str]:
+async def list_group_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     q = (
         select(UserLibraryEntry.paper_group_key)
         .where(UserLibraryEntry.user_id == user_id)

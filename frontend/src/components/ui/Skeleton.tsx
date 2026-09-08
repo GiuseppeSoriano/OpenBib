@@ -14,7 +14,7 @@ export default function Skeleton({ width, height = "1rem", className, lines = 1 
           <div
             key={i}
             className={`skeleton ${className ?? ""}`}
-            style={{ width: i === lines - 1 ? "60%" : (width ?? "100%"), height }}
+            data-width={i === lines - 1 ? "60%" : (width ?? "100%")} data-height={height}
           />
         ))}
       </div>
@@ -23,7 +23,7 @@ export default function Skeleton({ width, height = "1rem", className, lines = 1 
   return (
     <div
       className={`skeleton ${className ?? ""}`}
-      style={{ width: width ?? "100%", height }}
+      data-width={width ?? "100%"} data-height={height}
       aria-hidden="true"
     />
   );

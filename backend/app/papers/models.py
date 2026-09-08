@@ -3,14 +3,34 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 READING_STATES = (
-    "unseen", "seen", "saved", "to_read", "reading", "read", "important", "ignored", "excluded"
+    "unseen",
+    "seen",
+    "saved",
+    "to_read",
+    "reading",
+    "read",
+    "important",
+    "ignored",
+    "excluded",
 )
 
 
@@ -38,9 +58,7 @@ class UserPaperTag(Base):
     paper_group_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
-    __table_args__ = (
-        Index("ix_user_paper_tags_user_group", "user_id", "paper_group_key"),
-    )
+    __table_args__ = (Index("ix_user_paper_tags_user_group", "user_id", "paper_group_key"),)
 
 
 class UserDismissedPaper(Base):
@@ -60,7 +78,9 @@ class UserPreference(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value_json: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
+    value_json: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False
+    )
 
 
 class CachedPaperMetadata(Base):

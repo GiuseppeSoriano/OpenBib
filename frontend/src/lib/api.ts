@@ -1,231 +1,112 @@
-import axios from "axios";
-import type {
-  CitingOrder,
-  ExpandRequest,
-  ExpandResponse,
-  GraphResponse,
-  LibraryEntry,
-  LibraryEntryListItem,
-  LibraryVersionPin,
-  Note,
-  PaperDetail,
-  PaperState,
-  ReadingState,
-  ZoteroStatus,
-  ZoteroSyncReport,
-} from "@/types";
+import axios, { type InternalAxiosRequestConfig } from "axios";
+import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
+import type { CitingOrder, ExpandRequest, ExpandResponse, GraphResponse, LibraryEntry, LibraryEntryListItem, LibraryVersionPin, Note, PaperDetail, PaperState, ReadingState, TokenResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
-const api = axios.create({
-  baseURL: "/api/v1",
-  headers: { "Content-Type": "application/json" },
-});
+let accessToken: string | null = null;
+let refreshPromise: Promise<string> | null = null;
+let authFailureHandler: (() => void) | null = null;
 
-// Attach JWT token to every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+  invalidateSession();
+}
+
+export function setAuthFailureHandler(handler: (() => void) | null) {
+  authFailureHandler = handler;
+}
+
+export async function refreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    const epoch = sessionGeneration();
+    const request = async () => {
+      assertSession(epoch);
+      const { data } = await axios.post<TokenResponse>("/api/v1/auth/refresh", undefined, { withCredentials: true, headers: { "Content-Type": "application/json" } });
+      assertSession(epoch);
+      accessToken = data.access_token;
+      return data.access_token;
+    };
+    refreshPromise = withSessionLock(request).finally(() => {
+      refreshPromise = null;
+    });
   }
+  return refreshPromise;
+}
+
+const api = axios.create({ baseURL: "/api/v1", withCredentials: true, headers: { "Content-Type": "application/json" } });
+type SessionRequest = InternalAxiosRequestConfig & { _retry?: boolean; _sessionGeneration?: number };
+
+api.interceptors.request.use((config) => {
+  const request = config as SessionRequest;
+  if (request._sessionGeneration !== undefined) assertSession(request._sessionGeneration);
+  request._sessionGeneration = sessionGeneration();
+  if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
   return config;
 });
 
-// Handle 401 → attempt refresh
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      const refresh = localStorage.getItem("refresh_token");
-      if (refresh) {
-        try {
-          const res = await axios.post("/api/v1/auth/refresh", {
-            refresh_token: refresh,
-          });
-          const { access_token, refresh_token } = res.data;
-          localStorage.setItem("access_token", access_token);
-          localStorage.setItem("refresh_token", refresh_token);
-          original.headers.Authorization = `Bearer ${access_token}`;
-          return api(original);
-        } catch {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-          window.location.href = "/login";
-        }
-      }
+api.interceptors.response.use((response) => {
+  const expected = (response.config as SessionRequest)._sessionGeneration;
+  if (expected !== undefined) assertSession(expected);
+  return response;
+}, async (error) => {
+  const original = error.config as SessionRequest | undefined;
+  if (original?._sessionGeneration !== undefined) assertSession(original._sessionGeneration);
+  const isAuthRoute = original?.url?.includes("/auth/");
+  if (error.response?.status === 401 && original?.headers.Authorization && !original._retry && !isAuthRoute) {
+    original._retry = true;
+    try {
+      const sentToken = original.headers.Authorization;
+      const token = accessToken && sentToken !== `Bearer ${accessToken}` ? accessToken : await refreshAccessToken();
+      original.headers.Authorization = `Bearer ${token}`;
+      return api(original);
+    } catch (refreshError) {
+      if (refreshError instanceof SessionChangedError) return Promise.reject(refreshError);
+      if (original._sessionGeneration !== undefined) assertSession(original._sessionGeneration);
+      setAccessToken(null);
+      authFailureHandler?.();
     }
-    return Promise.reject(error);
-  },
-);
+  }
+  return Promise.reject(error);
+});
 
-/* ── Papers namespace ──────────────────────────────────── */
 export const papers = {
-  async getDetail(canonicalKey: string) {
-    const { data } = await api.get<PaperDetail>(
-      `/papers/${encodeURIComponent(canonicalKey)}`,
-    );
-    return data;
-  },
-  async getStates(canonicalKey: string) {
-    const { data } = await api.get<PaperState[]>(
-      `/papers/${encodeURIComponent(canonicalKey)}/states`,
-    );
-    return data;
-  },
-  async setState(canonicalKey: string, state: ReadingState) {
-    const { data } = await api.put<PaperState>(
-      `/papers/${encodeURIComponent(canonicalKey)}/state`,
-      { state },
-    );
-    return data;
-  },
-  async getTags(canonicalKey: string) {
-    const { data } = await api.get<{ tag: string }[]>(
-      `/papers/${encodeURIComponent(canonicalKey)}/tags`,
-    );
-    return data;
-  },
-  async addTag(canonicalKey: string, tag: string) {
-    const { data } = await api.post(
-      `/papers/${encodeURIComponent(canonicalKey)}/tags`,
-      { tag },
-    );
-    return data;
-  },
-  async removeTag(canonicalKey: string, tag: string) {
-    await api.delete(
-      `/papers/${encodeURIComponent(canonicalKey)}/tags/${encodeURIComponent(tag)}`,
-    );
-  },
+  async getDetail(canonicalKey: string) { return (await api.get<PaperDetail>(`/papers/${encodeURIComponent(canonicalKey)}`)).data; },
+  async getStates(canonicalKey: string) { return (await api.get<PaperState[]>(`/papers/${encodeURIComponent(canonicalKey)}/states`)).data; },
+  async setState(canonicalKey: string, state: ReadingState) { return (await api.put<PaperState>(`/papers/${encodeURIComponent(canonicalKey)}/state`, { state })).data; },
+  async getTags(canonicalKey: string) { return (await api.get<{ tag: string }[]>(`/papers/${encodeURIComponent(canonicalKey)}/tags`)).data; },
+  async addTag(canonicalKey: string, tag: string) { return (await api.post(`/papers/${encodeURIComponent(canonicalKey)}/tags`, { tag })).data; },
+  async removeTag(canonicalKey: string, tag: string) { await api.delete(`/papers/${encodeURIComponent(canonicalKey)}/tags/${encodeURIComponent(tag)}`); },
 };
 
-/* ── Notes namespace ───────────────────────────────────── */
 export const notes = {
-  async listForPaperGroup(paperGroupKey: string) {
-    const { data } = await api.get<Note[]>("/notes", {
-      params: { paper_group_key: paperGroupKey },
-    });
-    return data;
-  },
-  async createForPaper(paperCanonicalKey: string, content: string) {
-    const { data } = await api.post<Note>("/notes", {
-      target_type: "paper",
-      target_key: paperCanonicalKey,
-      content,
-    });
-    return data;
-  },
-  async remove(noteId: string) {
-    await api.delete(`/notes/${noteId}`);
-  },
+  async listForPaperGroup(paperGroupKey: string) { return (await api.get<Note[]>("/notes", { params: { paper_group_key: paperGroupKey } })).data; },
+  async createForPaper(paperCanonicalKey: string, content: string) { return (await api.post<Note>("/notes", { target_type: "paper", target_key: paperCanonicalKey, content })).data; },
+  async remove(noteId: string) { await api.delete(`/notes/${noteId}`); },
 };
 
-/* ── Library namespace ─────────────────────────────────── */
 export const library = {
-  async listEntries(params: { page?: number; size?: number } = {}) {
-    const { data } = await api.get<LibraryEntryListItem[]>("/library/entries", {
-      params: { page: params.page ?? 1, size: params.size ?? 25 },
-    });
-    return data;
-  },
-  async listKeys() {
-    const { data } = await api.get<string[]>("/library/keys");
-    return data;
-  },
-  async getEntry(groupKey: string) {
-    const { data } = await api.get<LibraryEntry>(
-      `/library/entries/${encodeURIComponent(groupKey)}`,
-    );
-    return data;
-  },
-  async ensureEntry(body: {
-    paper_group_key: string;
-    paper_canonical_key: string;
-    source_provider?: string | null;
-  }) {
-    const { data } = await api.post<LibraryEntry>("/library/entries", body);
-    return data;
-  },
-  async repinPrimary(groupKey: string, primaryCanonicalKey: string) {
-    const { data } = await api.patch<LibraryEntry>(
-      `/library/entries/${encodeURIComponent(groupKey)}`,
-      { primary_canonical_key: primaryCanonicalKey },
-    );
-    return data;
-  },
-  async deleteEntry(groupKey: string) {
-    await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`);
-  },
-  async addVersion(
-    groupKey: string,
-    body: { paper_canonical_key: string; source_provider?: string | null },
-  ) {
-    const { data } = await api.post<LibraryVersionPin>(
-      `/library/entries/${encodeURIComponent(groupKey)}/versions`,
-      body,
-    );
-    return data;
-  },
-  async removeVersion(groupKey: string, canonicalKey: string) {
-    await api.delete(
-      `/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`,
-    );
-  },
+  async listEntries(params: { page?: number; size?: number } = {}) { return (await api.get<LibraryEntryListItem[]>("/library/entries", { params: { page: params.page ?? 1, size: params.size ?? 25 } })).data; },
+  async listKeys() { return (await api.get<string[]>("/library/keys")).data; },
+  async getEntry(groupKey: string) { return (await api.get<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`)).data; },
+  async ensureEntry(body: { paper_group_key: string; paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryEntry>("/library/entries", body)).data; },
+  async repinPrimary(groupKey: string, primaryCanonicalKey: string) { return (await api.patch<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`, { primary_canonical_key: primaryCanonicalKey })).data; },
+  async deleteEntry(groupKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`); },
+  async addVersion(groupKey: string, body: { paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryVersionPin>(`/library/entries/${encodeURIComponent(groupKey)}/versions`, body)).data; },
+  async removeVersion(groupKey: string, canonicalKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`); },
 };
 
-/* ── Zotero namespace ──────────────────────────────────── */
 export const zotero = {
-  async getStatus() {
-    const { data } = await api.get<ZoteroStatus>("/zotero/credentials");
-    return data;
-  },
-  async setCredentials(apiKey: string) {
-    const { data } = await api.put<ZoteroStatus>("/zotero/credentials", {
-      api_key: apiKey,
-    });
-    return data;
-  },
-  async deleteCredentials() {
-    await api.delete("/zotero/credentials");
-  },
-  async syncCollection(collectionId: string) {
-    const { data } = await api.post<ZoteroSyncReport>(
-      `/zotero/sync/collection/${collectionId}`,
-    );
-    return data;
-  },
-  async syncLibrary() {
-    const { data } = await api.post<ZoteroSyncReport>("/zotero/sync/library");
-    return data;
-  },
+  async getStatus() { return (await api.get<ZoteroStatus>("/zotero/credentials")).data; },
+  async setCredentials(apiKey: string) { return (await api.put<ZoteroStatus>("/zotero/credentials", { api_key: apiKey })).data; },
+  async deleteCredentials() { await api.delete("/zotero/credentials"); },
+  async syncCollection(collectionId: string) { return (await api.post<ZoteroSyncReport>(`/zotero/sync/collection/${collectionId}`)).data; },
+  async syncLibrary() { return (await api.post<ZoteroSyncReport>("/zotero/sync/library")).data; },
 };
 
-/* ── Graph namespace ───────────────────────────────────── */
 export const graph = {
-  async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") {
-    const { data } = await api.get<GraphResponse>(
-      `/graph/paper/${encodeURIComponent(paperKey)}`,
-      { params: { order } },
-    );
-    return data;
-  },
-  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") {
-    const { data } = await api.get<GraphResponse>(
-      `/graph/collection/${encodeURIComponent(collectionId)}`,
-      { params: { order } },
-    );
-    return data;
-  },
-  async buildLibrary(order: CitingOrder = "cited_by_count") {
-    const { data } = await api.get<GraphResponse>("/graph/library", {
-      params: { order },
-    });
-    return data;
-  },
-  async expand(body: ExpandRequest) {
-    const { data } = await api.post<ExpandResponse>("/graph/expand", body);
-    return data;
-  },
+  async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`, { params: { order } })).data; },
+  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order } })).data; },
+  async buildLibrary(order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>("/graph/library", { params: { order } })).data; },
+  async expand(body: ExpandRequest) { return (await api.post<ExpandResponse>("/graph/expand", body)).data; },
 };
 
 export default api;

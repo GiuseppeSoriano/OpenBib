@@ -23,7 +23,7 @@ export default function ThemeSegment() {
           aria-pressed={preference === value}
           onClick={() => setPreference(value)}
         >
-          <Icon size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
+          <Icon size={13} className="theme-segment-icon" />
           {t(labelKey)}
         </button>
       ))}

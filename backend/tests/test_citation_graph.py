@@ -14,7 +14,9 @@ from app.providers import base as provider_base
 from app.providers import registry
 
 
-def _cached(key: str, group: str, title: str, openalex_id: str | None = None) -> CachedPaperMetadata:
+def _cached(
+    key: str, group: str, title: str, openalex_id: str | None = None
+) -> CachedPaperMetadata:
     return CachedPaperMetadata(
         canonical_key=key,
         paper_group_key=group,
@@ -150,7 +152,9 @@ async def test_expand_cites_direction_orients_edges_seed_to_reference(db, monkey
     db.add(_cached("doi:seed", "group:seed", "Seed", openalex_id="https://openalex.org/W1"))
     await db.flush()
 
-    refs = [_meta("doi:r1", "group:r1", "Reference One", "https://openalex.org/W9", cited_by_count=99)]
+    refs = [
+        _meta("doi:r1", "group:r1", "Reference One", "https://openalex.org/W9", cited_by_count=99)
+    ]
 
     async def fake_refs(openalex_id, *, order="cited_by_count", limit=25):
         return refs

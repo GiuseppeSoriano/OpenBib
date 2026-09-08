@@ -1,3 +1,4 @@
+import { mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import LibraryPage from "@/pages/LibraryPage";
@@ -55,6 +56,9 @@ const entries = [
 ];
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: { get: vi.fn(() => Promise.resolve({ data: [] })), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   library: {
     listEntries: vi.fn(() => Promise.resolve(entries)),

@@ -1,273 +1,212 @@
-# OpenBib — Academic Reference Manager
+<p align="center"><img src="frontend/public/favicon.svg" width="104" height="104" alt="OpenBib logo"></p>
 
-A full-stack application for searching, organizing, and exploring academic papers across multiple providers (OpenAlex, arXiv, Crossref, Europe PMC).
+<h1 align="center">OpenBib</h1>
 
-**Search, paper details, and citation-graph exploration are free to use without an account** — sign up to build collections, a persistent library, notes, tags, and reading states, and to sync everything to Zotero.
+<p align="center">Discover, organize, and explore academic literature in one open workspace.</p>
 
-## Highlights
+<p align="center"><a href="https://github.com/GiuseppeSoriano/OpenBib/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/GiuseppeSoriano/OpenBib/actions/workflows/ci.yml/badge.svg"></a> <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-33695F.svg"></a> <a href="CONTRIBUTING.md"><img alt="Contributions welcome" src="https://img.shields.io/badge/contributions-welcome-33695F.svg"></a> <img alt="Project status: alpha" src="https://img.shields.io/badge/status-alpha-8A6D3B.svg"></p>
 
-- 🔍 Parallel multi-provider search (OpenAlex, arXiv, Crossref, Europe PMC) with cross-provider dedup, version grouping, and Redis-cached results
-- 🕸️ Fluid, Obsidian-style citation graph (continuous force simulation — nodes stay where you left them as the graph grows)
-- 📚 Personal library with version pins, collections with sharing roles, notes, tags, and reading states
-- 🔄 One-way Zotero sync (collections and library) — Zotero handles export, PDFs, and citations
-- 🌗 Dark & light themes, 🇬🇧 English + 🇮🇹 Italian, fully responsive down to mobile
+OpenBib is an open-source academic reference manager for searching across public bibliographic providers, building a personal research library, and exploring the citation graph around a paper or collection. This repository contains the source of official releases and everything needed to run and develop the application locally.
+
+Search, paper details, public collections, and citation graphs work without an account. Signing in unlocks persistent collections, notes, tags, reading states, version pins, and one-way Zotero sync.
+
+> [!IMPORTANT]
+> OpenBib is currently an **alpha project**. The core workflows are usable, but APIs, data migrations, and user-facing behavior may change before the first stable release. Please back up important data.
+
+## Why OpenBib?
+
+Academic discovery is spread across search engines, reference managers, and graph tools. OpenBib brings those workflows together in an application you can inspect, run locally and contribute to:
+
+- **Search four providers at once** — OpenAlex, arXiv, Crossref, and Europe PMC are queried in parallel, then deduplicated and grouped by paper version.
+- **Explore citation networks visually** — expand citers or references, preserve node positions, and move directly from discovery to a paper's details.
+- **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and public or collaborative collections.
+- **Keep Zotero in the workflow** — push a collection or the whole library to Zotero with an idempotent one-way sync.
+- **Use it comfortably anywhere** — responsive UI, light and dark themes, and bundled English and Italian translations.
+- **Stay useful during provider outages** — Redis caching and graceful provider degradation keep the application responsive when an upstream API is slow.
 
 ## Architecture
 
-| Layer | Stack |
-|-------|-------|
-| **Frontend** | React 18 · TypeScript 5 · Vite · TanStack Query · react-force-graph · react-i18next |
-| **Backend** | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · Pydantic v2 |
-| **Database** | PostgreSQL 16 · Redis 7 (see [docs/Architecture/Persistence.md](docs/Architecture/Persistence.md)) |
-| **Deploy** | Docker Compose (4 services) · GitHub Actions CI |
+```mermaid
+flowchart LR
+    Browser[React + TypeScript SPA] -->|REST /api| API[FastAPI]
+    API --> Postgres[(PostgreSQL)]
+    API --> Redis[(Redis cache)]
+    API --> Providers[OpenAlex · arXiv<br/>Crossref · Europe PMC]
+    API --> Zotero[Zotero Web API]
+```
 
-## Prerequisites
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 18, TypeScript, Vite, TanStack Query, react-force-graph, i18next |
+| Backend | Python 3.12, FastAPI, Pydantic v2, async SQLAlchemy 2, Alembic |
+| Persistence | PostgreSQL 16 for user data and metadata snapshots; Redis 7 for short-lived provider caches |
+| Delivery | Docker Compose, nginx, GitHub Actions |
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) v2+
-- **OR** for local development:
-  - Python 3.12+
-  - Node.js 20+
-  - PostgreSQL 16+
-  - Redis 7+
+The frontend and API are separate applications. PostgreSQL is the system of record; Redis is disposable and is never the sole home of user data. See [Persistence architecture](docs/Architecture/Persistence.md) for the full data ownership model.
 
----
+## Quick start with Docker
 
-## Quick Start (Docker Compose)
+### Requirements
+
+- [Docker Engine](https://docs.docker.com/engine/install/) with Docker Compose v2
+- Git
+
+### Run OpenBib
 
 ```bash
-# 1. Clone and enter the repository
-git clone <repo-url>
-cd ReferenceManager
+git clone https://github.com/GiuseppeSoriano/OpenBib.git
+cd OpenBib
 
-# 2. Create your environment file
 cp .env.example .env
-# Edit .env and set at least:
-#   JWT_SECRET_KEY=<random-secret-string>
-#   OPENALEX_EMAIL=<your-email>
-#   CROSSREF_MAILTO=<your-email>
+# Replace JWT_SECRET_KEY in .env with a strong, random secret.
+# OPENALEX_EMAIL and CROSSREF_MAILTO should identify your API requests.
 
-# 3. Start all services
 docker compose up --build -d
-
-# 4. Run database migrations
-docker compose exec api alembic upgrade head
-
-# 5. Open the application
-#    Frontend:  http://localhost:3000
-#    API docs:  http://localhost:8000/api/docs
-#    Health:    http://localhost:8000/api/health
 ```
 
-### Stopping
+> [!WARNING]
+> The included Compose file is a local development setup. It binds services to localhost and uses development credentials; keep these ports private. Deployment of the official service is managed separately by the maintainers and is not required to use this repository.
+
+Once the containers are healthy:
+
+| Service | URL |
+| --- | --- |
+| Web application | <http://localhost:3000> |
+| Interactive API docs | <http://localhost:3000/api/docs> |
+| Local email inbox | <http://localhost:8025> |
+| Health check | <http://localhost:8000/api/health> |
+
+Inspect the stack with `docker compose ps` and follow API logs with `docker compose logs -f api`.
 
 ```bash
-docker compose down          # stop containers
-docker compose down -v       # stop and delete data volumes
-```
+# Stop the application while preserving database data
+docker compose down
 
-### ⚠️ Upgrading from the RefMan prototype
-
-The database credentials were renamed from `refman` to `openbib`. **Existing dev
-volumes were initialized with the old credentials and will fail to start.** Reset
-them once (this deletes local dev data):
-
-```bash
+# Delete the containers and the local PostgreSQL volume
 docker compose down -v
-docker compose up --build -d
-docker compose exec api alembic upgrade head
 ```
 
----
+> [!CAUTION]
+> `docker compose down -v` permanently removes the local development database.
 
-## Local Development
+## Configuration
+
+Copy [`.env.example`](.env.example) to `.env` before starting the Compose stack. These are the settings most installations need to review:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `DATABASE_URL` | Async PostgreSQL connection URL | Local `openbib` database |
+| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
+| `JWT_SECRET_KEY` | Signs short-lived access tokens | Insecure development placeholder |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `10` |
+| `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime | `7` |
+| `OPENALEX_API_KEY` | Optional OpenAlex API key | Empty |
+| `OPENALEX_EMAIL` | Contact email for OpenAlex requests | Example address |
+| `CROSSREF_MAILTO` | Contact email for Crossref polite-pool requests | Example address |
+| `CORS_ORIGINS` | JSON list of allowed browser origins | Local web ports |
+| `CACHE_TTL_*` | Provider-cache lifetimes in seconds | See `.env.example` |
+
+Never commit `.env`, API keys, JWT secrets, database dumps, or Zotero credentials. The repository's `.gitignore` excludes the usual local secret files, but deployment secrets remain the operator's responsibility.
+
+## Local development
+
+For host-based development you need Python 3.12+, Node.js 24 LTS, PostgreSQL 16+, and Redis 7+. You can run only the data services in Docker:
+
+```bash
+docker compose up -d db cache mailpit
+```
 
 ### Backend
 
 ```bash
+cp .env.example backend/.env
 cd backend
 
-# Create a virtual environment
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
-# Install dependencies
-pip install -e ".[dev]"
-
-# Make sure PostgreSQL and Redis are running, then:
-cp ../.env.example ../.env
-# Edit ../.env with your local connection strings
-
-# Run migrations
-alembic upgrade head
-
-# Start the API server (auto-reload)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv sync --frozen --extra dev --python 3.12
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000`.
-Interactive docs at `http://localhost:8000/api/docs`.
+On Windows PowerShell, activate the virtual environment with `.venv\Scripts\Activate.ps1`.
 
 ### Frontend
 
 ```bash
 cd frontend
-
-# Install dependencies
-npm install
-
-# Start dev server (proxies /api to backend)
+npm ci
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`.
+Vite serves the application at <http://localhost:5173> and proxies `/api` to the backend at port `8000`.
 
-### Running Tests
+## Tests and quality checks
+
+Run the same checks used by CI before opening a pull request:
 
 ```bash
-# Backend (inside the api container — no host installs needed)
-docker compose exec api pytest -q
+# Backend
+cd backend
+uv run ruff check app tests scripts alembic
+uv run ruff format --check app tests scripts alembic
+uv run pytest -q
 
-# Frontend (one-off node container, also maintains package-lock.json)
-docker compose run --rm web-test
-
-# Or locally:
-cd backend && pytest --cov=app --cov-report=term-missing
-cd frontend && npm test
+# Frontend
+cd frontend
+npm run lint
+npm test
+npm run build
 ```
 
----
+Application runtime images exclude test/development packages. CI runs PostgreSQL + Redis tests, clean/previous-head migrations, frontend checks, dependency audits, full-history Gitleaks, CodeQL, application image scans and SBOM generation. The maintainers separately verify the official service's infrastructure, encrypted backups and restore procedure.
 
-## Environment Variables
+## Repository map
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://openbib:openbib@localhost:5432/openbib` |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
-| `JWT_SECRET_KEY` | Secret for JWT signing (CHANGE IN PRODUCTION) | `change-me-...` |
-| `JWT_ACCESS_EXPIRE_MINUTES` | Access token lifetime | `30` |
-| `JWT_REFRESH_EXPIRE_MINUTES` | Refresh token lifetime | `10080` (7 days) |
-| `OPENALEX_API_KEY` | OpenAlex API key (optional) | — |
-| `OPENALEX_EMAIL` | Email for OpenAlex polite pool | — |
-| `CROSSREF_MAILTO` | Email for Crossref polite pool | — |
-| `CORS_ORIGINS` | Allowed CORS origins (JSON array) | `["http://localhost:3000","http://localhost:5173"]` |
-
-See [.env.example](.env.example) for the complete list.
-
----
-
-## Project Structure
-
-```
-ReferenceManager/
-├── backend/
-│   ├── app/
-│   │   ├── auth/           # JWT authentication
-│   │   ├── collections/    # Collection CRUD with RBAC
-│   │   ├── common/         # Shared utilities
-│   │   ├── graph/          # Citation graph + BFS traversal
-│   │   ├── notes/          # Polymorphic notes
-│   │   ├── papers/         # Paper states, tags, search
-│   │   ├── providers/      # OpenAlex, arXiv, Crossref, Europe PMC
-│   │   ├── recommendations/ # Co-citation similarity
-│   │   ├── users/          # User profile management
-│   │   ├── config.py       # Pydantic settings
-│   │   ├── database.py     # Async SQLAlchemy engine
-│   │   ├── dependencies.py # FastAPI dependency injection
-│   │   └── main.py         # App factory + middleware
-│   ├── alembic/            # Database migrations
-│   ├── tests/              # pytest test suite
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── frontend/
-│   ├── src/
-│   │   ├── components/     # Layout, shared UI
-│   │   ├── contexts/       # Auth context
-│   │   ├── lib/            # Axios API client
-│   │   ├── pages/          # Route pages
-│   │   ├── styles/         # Global CSS + design tokens
-│   │   └── types/          # TypeScript interfaces
-│   ├── Dockerfile
-│   └── package.json
-├── docs/
-│   └── Requirements/       # Vision, FR, NFR, Architecture, API docs
-├── docker-compose.yml
-├── .env.example
-├── CLAUDE.md               # AI assistant context file
-└── README.md
+```text
+.
+├── backend/                 FastAPI application, migrations, and pytest suite
+├── frontend/                React application and Vitest suite
+├── docs/                    Architecture, requirements, and future work
+├── .github/                 CI, issue forms, and pull-request template
+├── docker-compose.yml       Local development stack with Mailpit
+├── tools/                   Checksum-verified CI scanners
+├── .env.example             Safe configuration template
+├── CONTRIBUTING.md          Development and contribution workflow
+├── CODE_OF_CONDUCT.md       Community standards
+├── SECURITY.md              Private vulnerability-reporting policy
+└── LICENSE                  MIT license
 ```
 
----
+## Production and privacy
 
-## API Routes
+Registration requires email verification. Access tokens stay in browser memory; opaque refresh sessions rotate in an HttpOnly cookie. Account settings provide verified email changes, password changes, session revocation, password-protected JSON export and account deletion. Zotero credentials and pending emails are encrypted with versioned application keys.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/auth/register` | Create account |
-| `POST` | `/api/v1/auth/login` | Sign in |
-| `POST` | `/api/v1/auth/refresh` | Refresh JWT |
-| `GET` | `/api/v1/users/me` | Current user profile |
-| `PATCH` | `/api/v1/users/me` | Update profile |
-| `GET` | `/api/v1/collections` | List collections |
-| `POST` | `/api/v1/collections` | Create collection |
-| `GET` | `/api/v1/collections/{id}` | Collection detail (public collections work anonymously) |
-| `GET` | `/api/v1/papers/search` | Search papers across providers (public, Redis-cached) |
-| `GET` | `/api/v1/papers/{key}` | Full paper details + sibling versions (public) |
-| `GET/PUT` | `/api/v1/papers/{key}/states` | Reading state |
-| `GET/POST/DELETE` | `/api/v1/papers/{key}/tags` | Paper tags |
-| `GET/POST/DELETE` | `/api/v1/collections/{id}/papers` | Papers in a collection (hydrated with metadata) |
-| `POST` | `/api/v1/collections/{id}/import/dois` | Import papers by DOI list |
-| `POST` | `/api/v1/collections/{id}/import/keys` | Import papers by canonical key list |
-| `GET/POST/DELETE` | `/api/v1/collections/{id}/members` | Collaboration members |
-| `GET/POST/PATCH/DELETE` | `/api/v1/notes` | Notes on papers / collections |
-| `GET` | `/api/v1/library/entries` | Persistent library (entries + version pins) |
-| `GET` | `/api/v1/graph/paper/{key}` | Single-paper citation graph (public) |
-| `GET` | `/api/v1/graph/collection/{id}` | Collection citation graph |
-| `GET` | `/api/v1/graph/library` | Library citation graph |
-| `POST` | `/api/v1/graph/expand` | Expand citers/references one level (public) |
-| `PUT/GET/DELETE` | `/api/v1/zotero/credentials` | Connect / inspect / disconnect Zotero |
-| `POST` | `/api/v1/zotero/sync/collection/{id}` | One-way sync a collection to Zotero |
-| `POST` | `/api/v1/zotero/sync/library` | One-way sync the library to Zotero |
-| `GET` | `/api/v1/recommendations/{paper_key}` | Co-citation recommendations |
-| `GET` | `/api/health` | Health check |
+Every production operator supplies their own legal configuration, authenticated SMTP and off-site encrypted backups. The application includes bilingual privacy/terms pages and only technical storage for sessions, theme and language: no analytics, trackers or consent banner are bundled. Legal texts still require human review for the actual operator and jurisdiction.
 
-Full interactive docs at `http://localhost:8000/api/docs` when the server is running.
+See [Security architecture](docs/Security.md) and [Privacy operations](docs/Privacy.md) for the application safeguards and data lifecycle.
 
----
+This public repository contains reviewed official source snapshots with a separate release history. The maintainers keep development history, VM deployment scripts, instance configuration and operational procedures in their private repository. Cloning OpenBib gives you a local development environment; it does not require access to the official infrastructure.
 
-## Design
+## Documentation
 
-The UI follows the **Verdigris** design system — the patina of aged bronze: a
-desaturated teal-green accent on warm-neutral paper (success/saved states use
-blue, since green belongs to the accent); light and dark themes driven
-entirely by CSS custom properties on cascade layers (`@layer`), with the
-preference (light / dark / system) persisted per user:
+- [Product vision](docs/Requirements/00-Vision.md)
+- [Functional requirements](docs/Requirements/01-FunctionalRequirements.md)
+- [Non-functional requirements](docs/Requirements/02-NonFunctionalRequirements.md)
+- [System architecture](docs/Requirements/03-SystemArchitecture.md)
+- [Provider integrations](docs/Requirements/04-APIIntegration.md)
+- [Persistence architecture](docs/Architecture/Persistence.md)
+- [Future work](docs/FutureWorks.md)
+- OpenAPI documentation at `/api/docs` on a running instance
 
-| Role | Light | Dark |
-|------|-------|------|
-| Background | `#F8FAF9` | `#101413` |
-| Surface | `#FFFFFF` | `#171F1D` |
-| Text | `#1A1E1D` | `#E9EFEC` |
-| Accent (verdigris) | `#33695F` | `#86B8AB` |
-| Success (blue) | `#46689B` | `#8AA8CF` |
-| Danger | `#B03A3A` | `#DD9B9B` |
+## Contributing
 
-Type pairs **Source Serif 4** with **IBM Plex Sans** on a simple rule: the
-serif marks identity — the wordmark, page headings, paper titles — and the
-sans does all the work. Both are self-hosted (no font CDN), so the app renders
-the same offline as online.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), search the existing issues, and use the issue forms for reproducible bug reports or focused feature proposals. By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Full token sheet in `frontend/src/styles/tokens.css`. Navigation is a slim
-top navbar (plus a bottom tab bar on phones) — no sidebars or drawers. The
-interface is available in **English and Italian** (auto-detected, switchable
-from the navbar or Settings), never exposes low-level identifiers (papers are
-always shown by title/venue/year with human version labels), and is
-responsive from desktop down to 375 px phones.
-
----
+Please do not use public issues for vulnerabilities. Follow the private process in [SECURITY.md](SECURITY.md) instead.
 
 ## License
 
-This project is for personal/academic use.
+OpenBib is available under the [MIT License](LICENSE). By contributing, you agree that your contributions will be licensed under the same terms.
+
+## Acknowledgements
+
+OpenBib builds on bibliographic data and APIs provided by [OpenAlex](https://openalex.org/), [arXiv](https://arxiv.org/), [Crossref](https://www.crossref.org/), and [Europe PMC](https://europepmc.org/), with optional export to [Zotero](https://www.zotero.org/).

@@ -1,3 +1,4 @@
+import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
@@ -43,6 +44,9 @@ const repinPrimary = vi.fn(() => Promise.resolve({}));
 const removeVersion = vi.fn(() => Promise.resolve());
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
       if (url === "/users/me")
@@ -139,7 +143,7 @@ describe("PaperDetailsPanel — managed library versions", () => {
       tags: [],
       states: [],
     };
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     repinPrimary.mockClear();
     removeVersion.mockClear();
   }

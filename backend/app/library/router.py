@@ -57,9 +57,7 @@ async def repin_primary(
     user: CurrentUser,
     db: DB,
 ):
-    await service.repin_primary(
-        db, user.id, paper_group_key, body.primary_canonical_key
-    )
+    await service.repin_primary(db, user.id, paper_group_key, body.primary_canonical_key)
     return await service.get_entry(db, user.id, paper_group_key)
 
 
@@ -98,6 +96,4 @@ async def remove_version(
     user: CurrentUser,
     db: DB,
 ):
-    await service.remove_version(
-        db, user.id, paper_group_key, paper_canonical_key
-    )
+    await service.remove_version(db, user.id, paper_group_key, paper_canonical_key)

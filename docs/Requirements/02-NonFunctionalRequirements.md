@@ -48,14 +48,14 @@ Compliance target: **OWASP Top 10** (2021 edition).
 
 | Area | Requirement |
 |------|-------------|
-| **Authentication** | JWT-based (short-lived access token + longer-lived refresh token). Tokens stored in HTTP-only, Secure, SameSite cookies. |
+| **Authentication** | 10-minute access JWT in frontend memory, validated against a revocable database session; rotating opaque refresh token in an HttpOnly, Secure, SameSite=Strict cookie with absolute 7-day expiry. |
 | **Password storage** | Argon2id with recommended parameters (memory: 64 MB, iterations: 3, parallelism: 4). |
 | **Transport** | HTTPS required in production. HSTS header enabled. |
 | **Input validation** | All inputs validated and sanitized server-side via Pydantic models. No raw SQL — all queries through ORM. |
 | **Rate limiting** | Global rate limit per IP (100 req/min default). Auth endpoints more restrictive (10 req/min). Configurable. |
 | **CORS** | Restricted to known frontend origins. |
 | **Dependency security** | Automated vulnerability scanning in CI (e.g., `pip-audit`, `npm audit`). |
-| **Secrets management** | All secrets (DB credentials, API keys, JWT signing key) in environment variables, never in code or version control. |
+| **Secrets management** | Production secrets are supplied through read-only Docker secret files; versioned application keys encrypt Zotero credentials, pending email and deletion receipts. Never commit instance secrets. |
 | **Authorization** | Role-based access on collections (owner/editor/viewer). Every mutating endpoint checks ownership or role before proceeding. |
 
 ---
@@ -86,7 +86,7 @@ The MVP targets < 100 users, but the architecture enables future scaling:
 | Graph queries | PostgreSQL adjacency-list with BFS | Neo4j or Apache AGE (PostgreSQL extension) |
 | File storage | Local filesystem (imports/exports) | S3-compatible object store |
 
-- Backend is **stateless** (no server-side session state beyond JWT). Any instance can serve any request.
+- API processes share server-side authentication sessions in PostgreSQL and atomic rate-limit buckets in Redis.
 - Database connections use a pool (SQLAlchemy async pool, default: 5 connections, max: 20).
 
 ---
@@ -126,9 +126,9 @@ The MVP targets < 100 users, but the architecture enables future scaling:
 |-------------|--------|
 | **Data isolation** | All user data is scoped to the authenticated user. No cross-user data leakage. |
 | **Minimal data collection** | Only data required for functionality is collected. No analytics tracking beyond basic server logs. |
-| **Data export** | Users can export all their data (FR-085) in a structured format (JSON + BibTeX). |
+| **Data export** | Users can export all their data (FR-085) in a versioned JSON format; BibTeX export is deferred (Zotero-first release). |
 | **Account deletion** | Users can delete their account. All personal data (collections, notes, tags, states, preferences) is permanently removed. Shared collections are transferred to the next owner or deleted. |
-| **Cookie policy** | Only functional cookies (JWT session). No third-party tracking cookies. |
+| **Cookie policy** | Only the opaque refresh-session cookie and localStorage theme/language preferences. No analytics, trackers or optional-consent banner. |
 | **Provider data** | Cached provider data contains only publicly available paper metadata. No personal data from providers is stored. |
 
 ---
@@ -139,7 +139,7 @@ The MVP targets < 100 users, but the architecture enables future scaling:
 |-------------|--------|
 | **API standard** | RESTful JSON API with OpenAPI 3.1 specification. |
 | **Import formats** | BibTeX (`.bib`), DOI lists (plain text, one per line). |
-| **Export formats** | BibTeX (`.bib`), JSON (full user data backup). |
+| **Export formats** | JSON (full user account export); Zotero sync for references. BibTeX is deferred. |
 | **External identifiers** | DOI, arXiv ID, PMID, PMCID, OpenAlex ID — all preserved and queryable. |
 | **Future extensions** | RIS import/export, CSL-JSON, Zotero RDF — documented as post-MVP. |
 

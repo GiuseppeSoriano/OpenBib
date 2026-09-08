@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from app.common.canonical import build_canonical_key, build_paper_group_key
+from app.common.canonical import build_canonical_key as build_canonical_key
+from app.common.canonical import build_paper_group_key as build_paper_group_key
 
 
 class ProviderCapability(Enum):

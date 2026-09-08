@@ -219,7 +219,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         backgroundColor="rgba(0,0,0,0)"
         nodeId="id"
         nodeVal={(node: ForceNode) => nodeRadius(node) ** 2 / 4}
-        nodeLabel={(node: ForceNode) => node.node.selected_version.title || node.id}
+        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = node.node.selected_version.title || node.id; return label.outerHTML; }}
         nodeCanvasObject={drawNode}
         nodePointerAreaPaint={(node: ForceNode, color, ctx) => {
           ctx.beginPath();

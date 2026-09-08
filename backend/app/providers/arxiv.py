@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from contextlib import suppress
 from datetime import date
+from typing import ClassVar
 
 import httpx
 
@@ -66,10 +68,8 @@ def _parse_entry(entry: ET.Element) -> PaperMetadata:
     pub_date_str = _text(entry.find("atom:published", _NS))
     pub_date = None
     if pub_date_str:
-        try:
+        with suppress(ValueError):
             pub_date = date.fromisoformat(pub_date_str[:10])
-        except ValueError:
-            pass
 
     doi_el = entry.find("arxiv:doi", _NS)
     doi = _text(doi_el)
@@ -126,7 +126,7 @@ def _parse_entry(entry: ET.Element) -> PaperMetadata:
 
 class ArxivProvider(BaseProvider):
     name = "arxiv"
-    capabilities = {
+    capabilities: ClassVar[set[ProviderCapability]] = {
         ProviderCapability.LOOKUP_ID,
         ProviderCapability.SEARCH,
         ProviderCapability.VERSION_TRACKING,
@@ -182,9 +182,17 @@ class ArxivProvider(BaseProvider):
 
         # Filter by year client-side (arXiv doesn't support year filter in API)
         if filters.year_from:
-            papers = [p for p in papers if p.publication_date and p.publication_date.year >= filters.year_from]
+            papers = [
+                p
+                for p in papers
+                if p.publication_date and p.publication_date.year >= filters.year_from
+            ]
         if filters.year_to:
-            papers = [p for p in papers if p.publication_date and p.publication_date.year <= filters.year_to]
+            papers = [
+                p
+                for p in papers
+                if p.publication_date and p.publication_date.year <= filters.year_to
+            ]
 
         return SearchResult(
             papers=papers,

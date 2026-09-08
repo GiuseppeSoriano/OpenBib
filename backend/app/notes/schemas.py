@@ -16,11 +16,11 @@ class TargetType(str, Enum):
 class NoteCreate(BaseModel):
     target_type: TargetType
     target_key: str = Field(max_length=512)
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=50000)
 
 
 class NoteUpdate(BaseModel):
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=50000)
 
 
 class NoteRead(BaseModel):

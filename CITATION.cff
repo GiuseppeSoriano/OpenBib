@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use OpenBib in your research, please cite the software using this metadata."
+title: "OpenBib"
+abstract: "A self-hostable platform for discovering, organizing, and exploring academic literature."
+type: software
+authors:
+  - family-names: "Soriano"
+    given-names: "Giuseppe"
+repository-code: "https://github.com/GiuseppeSoriano/OpenBib"
+url: "https://github.com/GiuseppeSoriano/OpenBib"
+license: MIT
+version: 0.1.0

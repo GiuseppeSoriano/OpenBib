@@ -1,12 +1,14 @@
-FROM node:20-alpine AS build
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:alpine@sha256:d9083fe47768377ef55dedafd67d4da7c2f2bc2bece7554954f29359deb0dce9
+USER root
+RUN apk upgrade --no-cache
+USER nginx
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080

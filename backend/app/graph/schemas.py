@@ -1,6 +1,6 @@
 """Graph Pydantic schemas."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -55,12 +55,16 @@ class ExpandRequest(BaseModel):
     groups already on screen, so only genuinely new nodes are returned.
     """
 
-    from_keys: list[str] = Field(default_factory=list)
-    focus_key: str | None = None
-    existing_group_keys: list[str] = Field(default_factory=list)
+    from_keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=20
+    )
+    focus_key: str | None = Field(None, min_length=1, max_length=512)
+    existing_group_keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=200
+    )
     direction: RelationDirection = "cited_by"
     order: CitingOrder = "cited_by_count"
-    limit_per_node: int = Field(25, ge=1, le=100)
+    limit_per_node: int = Field(25, ge=1, le=50)
 
 
 class ExpandResponse(BaseModel):

@@ -1,11 +1,16 @@
+import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import api from "@/lib/api";
 import Layout from "@/components/Layout";
 import LanguageMenu from "@/components/nav/LanguageMenu";
 import { renderWithProviders } from "@/test/utils";
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
       if (url === "/users/me")
@@ -27,8 +32,28 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("UserMenu", () => {
+  it("waits for server logout and reports failures without pretending revocation succeeded", async () => {
+    testAuth.authenticated = true;
+    vi.mocked(api.post).mockRejectedValueOnce(new Error("offline"));
+    renderWithProviders(<Layout />);
+    fireEvent.click(await screen.findByTestId("user-menu"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Logout/ }));
+    expect(await screen.findByText(/session is still active/i)).toBeInTheDocument();
+    expect(screen.getByTestId("user-menu")).toBeInTheDocument();
+  });
+
+  it("removes the account menu only after successful server revocation", async () => {
+    testAuth.authenticated = true;
+    vi.mocked(api.post).mockResolvedValueOnce({ data: undefined });
+    renderWithProviders(<Layout />);
+    fireEvent.click(await screen.findByTestId("user-menu"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Logout/ }));
+    expect(await screen.findByRole("link", { name: /Sign in/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("user-menu")).toBeNull();
+  });
+
   it("opens the account menu with settings and logout when authenticated", async () => {
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<Layout />);
 
     const trigger = await screen.findByTestId("user-menu");
@@ -40,7 +65,7 @@ describe("UserMenu", () => {
   });
 
   it("closes on Escape", async () => {
-    localStorage.setItem("access_token", "test-token");
+    testAuth.authenticated = true;
     renderWithProviders(<Layout />);
 
     fireEvent.click(await screen.findByTestId("user-menu"));

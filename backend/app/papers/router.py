@@ -2,15 +2,15 @@
 
 import json
 import logging
+from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 
+from app.common.rate_limit import client_ip, enforce_rate_limit
 from app.dependencies import DB, CurrentUser, Redis
 from app.papers import service
 from app.papers.schemas import (
     PaperDetailRead,
-    PaperMetadataRead,
-    SearchQuery,
     SearchResultRead,
     StateRead,
     StateUpdate,
@@ -26,19 +26,33 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 @router.get("/search", response_model=SearchResultRead)
 async def search_papers(
     q: str = Query(min_length=1, max_length=500),
-    providers: list[str] | None = Query(None),
+    providers: list[Literal["openalex", "crossref", "arxiv", "europepmc"]] | None = Query(
+        None, max_length=4
+    ),
     year_from: int | None = None,
     year_to: int | None = None,
-    author: str | None = None,
+    author: str | None = Query(None, max_length=200),
     open_access_only: bool = False,
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
+    request: Request = None,
+    response: Response = None,
     db: DB = None,
     redis: Redis = None,
 ):
-    from app.providers.registry import search_all
+    await enforce_rate_limit(
+        redis,
+        request,
+        response,
+        scope="search",
+        identity=client_ip(request),
+        limit=30,
+        window_seconds=60,
+        fail_closed=True,
+    )
     from app.providers.base import SearchFilters
     from app.providers.cache import cache_get, cache_set
+    from app.providers.registry import search_all
 
     # One cache entry per full fan-out query: repeat searches within
     # cache_ttl_search are served from Redis without touching providers.
@@ -76,7 +90,7 @@ async def search_papers(
         providers=providers,
     )
     if not results:
-        logger.warning("All search providers failed or returned nothing for q=%r", q)
+        logger.warning("All search providers failed or returned nothing")
 
     merged = service.round_robin_dedupe(results)
     await service.cache_papers(db, merged.papers)
@@ -93,6 +107,7 @@ async def search_papers(
 
 
 # ── Dismiss (must be before {paper_key:path} routes) ────────
+
 
 @router.get("/dismissed")
 async def get_dismissed(user: CurrentUser, db: DB):
@@ -140,6 +155,7 @@ async def undismiss_paper(paper_key: str, user: CurrentUser, db: DB):
 # MUST stay the last route in this router: the greedy {paper_key:path}
 # with no suffix would otherwise swallow /search, /dismissed, and the
 # /{key}/states|tags|dismiss sub-routes above.
+
 
 @router.get("/{paper_key:path}", response_model=PaperDetailRead)
 async def get_paper(paper_key: str, db: DB):

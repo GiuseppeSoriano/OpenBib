@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from typing import ClassVar
 
 import httpx
 
@@ -76,9 +77,7 @@ def _map_work(raw: dict) -> PaperMetadata:
                 given_name=given or None,
                 orcid=orcid,
                 affiliations=[
-                    aff.get("name", "")
-                    for aff in a.get("affiliation", [])
-                    if aff.get("name")
+                    aff.get("name", "") for aff in a.get("affiliation", []) if aff.get("name")
                 ],
             )
         )
@@ -122,7 +121,7 @@ def _map_work(raw: dict) -> PaperMetadata:
 
 class CrossrefProvider(BaseProvider):
     name = "crossref"
-    capabilities = {
+    capabilities: ClassVar[set[ProviderCapability]] = {
         ProviderCapability.LOOKUP_DOI,
         ProviderCapability.SEARCH,
         ProviderCapability.REFERENCES,

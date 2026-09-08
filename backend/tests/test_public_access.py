@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.auth.service import create_access_token, hash_password
+from app.auth.service import create_access_token, create_session, hash_password, utcnow
 from app.collections import service as collections_service
 from app.collections.schemas import CollectionCreate, Visibility
 from app.dependencies import get_db
@@ -36,6 +36,9 @@ async def _make_user(db, email: str) -> User:
         email=email,
         password_hash=hash_password("password123"),
         display_name="Test User",
+        email_verified_at=utcnow(),
+        terms_version="dev-1",
+        privacy_version="dev-1",
     )
     db.add(user)
     await db.flush()
@@ -144,7 +147,8 @@ async def test_graph_expand_uses_saved_keys_when_authenticated(db, monkeypatch):
     monkeypatch.setattr("app.graph.service.expand_graph", fake_expand)
 
     app = _make_app(db)
-    token = create_access_token(str(user.id))
+    session, _ = await create_session(db, user.id)
+    token = create_access_token(user.id, session.id)
     async with _client(app) as client:
         response = await client.post(
             "/api/v1/graph/expand",

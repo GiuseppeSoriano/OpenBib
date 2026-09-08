@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collections.models import CollectionPaper
-from app.collections.service import get_collection_or_404, _member_roles, _can_edit
+from app.collections.service import _can_edit, _member_roles, get_collection_or_404
 from app.common.exceptions import ForbiddenError
 
 
@@ -27,8 +27,9 @@ async def import_doi_list(
     if not _can_edit(coll, user_id, roles):
         raise ForbiddenError()
 
-    from app.providers.base import build_canonical_key
     from sqlalchemy import func
+
+    from app.providers.base import build_canonical_key
 
     added = 0
     skipped = 0

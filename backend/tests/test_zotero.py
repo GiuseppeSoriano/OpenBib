@@ -217,9 +217,7 @@ async def test_linked_item_gains_membership_in_new_collection(db):
             json={"key": "ITEMMV01", "version": 5, "data": {"collections": ["OLDCOLL1"]}},
         )
     )
-    patch_route = respx.patch(f"{ZOTERO}/users/42/items/ITEMMV01").mock(
-        return_value=Response(204)
-    )
+    patch_route = respx.patch(f"{ZOTERO}/users/42/items/ITEMMV01").mock(return_value=Response(204))
 
     report = await zotero_service.sync_papers(
         db,
@@ -271,5 +269,5 @@ async def test_failures_are_reported_not_raised(db):
 
     assert report.items_created == 0
     messages = {f.paper_canonical_key: f.message for f in report.failures}
-    assert messages["doi:10.4/ok"] == "Invalid creators"
+    assert messages["doi:10.4/ok"] == "Rejected by Zotero"
     assert "No cached metadata" in messages["hash:nometadata"]

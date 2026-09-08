@@ -1,4 +1,5 @@
-import { Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import TopNav from "@/components/nav/TopNav";
 import MobileTabBar from "@/components/nav/MobileTabBar";
 
@@ -7,6 +8,7 @@ import MobileTabBar from "@/components/nav/MobileTabBar";
  * No sidebars or navigation drawers anywhere.
  */
 export default function Layout() {
+  const { t } = useTranslation();
   return (
     <div className="app-shell">
       <TopNav />
@@ -15,6 +17,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+      <footer className="app-footer"><Link to="/privacy">{t("legal.privacy")}</Link><Link to="/terms">{t("legal.terms")}</Link></footer>
       <MobileTabBar />
     </div>
   );

@@ -3,8 +3,9 @@
 /* ── Auth ───────────────────────────────────────────────── */
 export interface TokenResponse {
   access_token: string;
-  refresh_token: string;
   token_type: string;
+  expires_in: number;
+  legal_acceptance_required: boolean;
 }
 
 /* ── User ───────────────────────────────────────────────── */
@@ -13,6 +14,8 @@ export interface User {
   email: string;
   display_name: string | null;
   created_at: string;
+  email_verified: boolean;
+  legal_acceptance_required: boolean;
 }
 
 /* ── Paper ──────────────────────────────────────────────── */
@@ -115,7 +118,8 @@ export interface Collection {
   name: string;
   description: string | null;
   visibility: Visibility;
-  owner_id: string;
+  is_owner: boolean;
+  can_edit: boolean;
   paper_count: number;
   created_at: string;
   updated_at: string;

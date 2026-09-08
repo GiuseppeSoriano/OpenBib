@@ -157,6 +157,7 @@
     margin: 0 auto;
     padding: var(--space-xl) var(--space-lg) var(--space-2xl);
   }
+  .app-footer { display: flex; justify-content: center; gap: var(--space-lg); padding: var(--space-lg); border-top: 1px solid var(--color-border); font-size: 0.8rem; }
 
   /* ── Breakpoints ────────────────────────────────────────── */
 

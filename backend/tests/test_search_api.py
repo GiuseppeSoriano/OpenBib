@@ -68,6 +68,7 @@ async def test_search_endpoint_returns_grouped_items(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_endpoint_merges_results_across_providers(db, monkeypatch):
     """Same paper returned by two providers shows up once with both badges."""
+
     async def override_db():
         yield db
 

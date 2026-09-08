@@ -2,8 +2,8 @@
 
 from datetime import date
 
-from app.providers.base import Author, PaperMetadata, SearchResult
 from app.papers.service import round_robin_dedupe
+from app.providers.base import Author, PaperMetadata, SearchResult
 
 
 def _paper(
@@ -120,9 +120,7 @@ def test_already_aggregated_provider_sources_are_unioned_not_overwritten():
     p1.provider_sources = ["openalex", "europepmc"]
     p2 = _paper("doi:10.1/x", "group:x", "X", provider_source="crossref")
 
-    merged = round_robin_dedupe(
-        [_result("openalex", [p1]), _result("crossref", [p2])]
-    )
+    merged = round_robin_dedupe([_result("openalex", [p1]), _result("crossref", [p2])])
 
     assert len(merged.papers) == 1
     assert merged.papers[0].provider_sources == ["crossref", "europepmc", "openalex"]
@@ -135,9 +133,7 @@ def test_zip_longest_handles_unequal_stream_lengths():
         _paper("doi:1/l2", "group:l2", "L2", provider_source="openalex"),
         _paper("doi:1/l3", "group:l3", "L3", provider_source="openalex"),
     ]
-    merged = round_robin_dedupe(
-        [_result("openalex", long), _result("arxiv", short)]
-    )
+    merged = round_robin_dedupe([_result("openalex", long), _result("arxiv", short)])
 
     assert [p.canonical_key for p in merged.papers] == [
         "doi:1/l1",

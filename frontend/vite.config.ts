@@ -1,14 +1,17 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
+import { graphCspPlugin } from "./graph-csp-plugin";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [graphCspPlugin(), react()],
+  build: { rollupOptions: { input: { main: resolve(__dirname, "index.html"), docs: resolve(__dirname, "api-docs.html") } } },
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
     },
   },
+  optimizeDeps: { exclude: ["react-force-graph-2d", "force-graph", "float-tooltip"] },
   server: {
     port: 5173,
     // Polling keeps file watching reliable on Docker bind mounts (Windows).

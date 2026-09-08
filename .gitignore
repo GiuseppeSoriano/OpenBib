@@ -38,3 +38,16 @@ data/
 
 # ── Docker ────────────────────────────────────────────────
 docker-compose.override.yml
+
+# Release tooling, test reports and private backups
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.dump
+*.sql
+*.pem
+*.key
+
+# Local generated artifacts.
+artifacts/

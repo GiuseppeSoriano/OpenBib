@@ -2,14 +2,14 @@
 
 import uuid
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
+from sqlalchemy import or_, select
 
 from app.common.exceptions import ForbiddenError, NotFoundError
 from app.dependencies import DB, CurrentUser
 from app.notes.models import Note
 from app.notes.schemas import NoteCreate, NoteRead, NoteUpdate
 from app.papers.service import get_cached_paper
-from sqlalchemy import select, or_
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 

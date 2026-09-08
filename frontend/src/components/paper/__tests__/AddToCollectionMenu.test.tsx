@@ -1,3 +1,4 @@
+import { mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
@@ -11,6 +12,9 @@ const collections = [
 const post = vi.fn(() => Promise.resolve({ data: {} }));
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
       if (url === "/collections") return Promise.resolve({ data: collections });

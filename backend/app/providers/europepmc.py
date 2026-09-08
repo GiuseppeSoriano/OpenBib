@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import ClassVar
 
 import httpx
 
@@ -43,9 +44,7 @@ def _parse_authors(raw: dict) -> list[Author]:
             if not name:
                 name = a.get("fullName", "")
             affiliations = []
-            aff_info = a.get("authorAffiliationDetailsList", {}).get(
-                "authorAffiliation", []
-            )
+            aff_info = a.get("authorAffiliationDetailsList", {}).get("authorAffiliation", [])
             for aff in aff_info:
                 if aff.get("affiliation"):
                     affiliations.append(aff["affiliation"])
@@ -85,9 +84,7 @@ def _map_result(raw: dict) -> PaperMetadata:
     # Extract PDF/abstract URLs
     pdf_url = None
     abstract_url = None
-    for ft in (
-        raw.get("fullTextUrlList", {}).get("fullTextUrl", [])
-    ):
+    for ft in raw.get("fullTextUrlList", {}).get("fullTextUrl", []):
         availability = ft.get("availabilityCode", "")
         doc_style = ft.get("documentStyle", "")
         if doc_style == "pdf" and availability == "OA":
@@ -131,7 +128,7 @@ def _map_result(raw: dict) -> PaperMetadata:
 
 class EuropePMCProvider(BaseProvider):
     name = "europepmc"
-    capabilities = {
+    capabilities: ClassVar[set[ProviderCapability]] = {
         ProviderCapability.LOOKUP_DOI,
         ProviderCapability.LOOKUP_ID,
         ProviderCapability.SEARCH,
@@ -230,9 +227,7 @@ class EuropePMCProvider(BaseProvider):
             title = ref.get("title")
             key = build_canonical_key(doi=doi, title=title)
             refs.append(
-                PaperReference(
-                    canonical_key=key, title=title, doi=doi, relation_type="references"
-                )
+                PaperReference(canonical_key=key, title=title, doi=doi, relation_type="references")
             )
         return refs
 
@@ -252,9 +247,7 @@ class EuropePMCProvider(BaseProvider):
             title = cit.get("title")
             key = build_canonical_key(doi=doi, title=title)
             cites.append(
-                PaperReference(
-                    canonical_key=key, title=title, doi=doi, relation_type="cited_by"
-                )
+                PaperReference(canonical_key=key, title=title, doi=doi, relation_type="cited_by")
             )
         return cites
 

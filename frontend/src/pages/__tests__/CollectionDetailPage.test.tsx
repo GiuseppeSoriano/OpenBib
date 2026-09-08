@@ -1,3 +1,4 @@
+import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { Routes, Route } from "react-router-dom";
@@ -60,6 +61,9 @@ vi.mock("@/lib/api", () => {
     return Promise.resolve({ data: [] });
   });
   return {
+    refreshAccessToken: vi.fn(() => mockRefresh()),
+    setAccessToken: vi.fn(),
+    setAuthFailureHandler: vi.fn(),
     default: { get, post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() },
     papers: {
       getStates: vi.fn(() => Promise.resolve([])),
@@ -78,7 +82,7 @@ vi.mock("@/lib/api", () => {
 
 function renderPage() {
   // Simulate an authenticated session: AuthProvider hydrates from /users/me.
-  localStorage.setItem("access_token", "test-token");
+  testAuth.authenticated = true;
   return renderWithProviders(
     <Routes>
       <Route path="/collections/:id" element={<CollectionDetailPage />} />

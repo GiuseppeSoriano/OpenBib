@@ -12,8 +12,8 @@ interface RenderOptions {
 
 /**
  * Render a component inside the app's provider stack (Router, React Query,
- * Theme, Toast, Auth). With no token in localStorage the AuthProvider
- * resolves to an anonymous user without any network call.
+ * Theme, Toast, Auth). Cookie refresh is mocked by test/auth-mock; no
+ * authentication test uses Web Storage.
  */
 export function renderWithProviders(ui: ReactElement, { route = "/" }: RenderOptions = {}) {
   const queryClient = new QueryClient({

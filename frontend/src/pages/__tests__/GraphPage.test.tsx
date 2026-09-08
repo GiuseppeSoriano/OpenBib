@@ -1,3 +1,4 @@
+import { mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { Routes, Route } from "react-router-dom";
@@ -6,9 +7,10 @@ import { renderWithProviders } from "@/test/utils";
 import type { PaperMetadata } from "@/types";
 
 // The canvas engine cannot run in jsdom — replace it with a stub.
-vi.mock("react-force-graph-2d", () => ({
-  default: () => <div data-testid="force-graph-stub" />,
-}));
+vi.mock("react-force-graph-2d", async () => {
+  const { forwardRef } = await import("react");
+  return { default: forwardRef(function GraphStub() { return <div data-testid="force-graph-stub" />; }) };
+});
 
 const seedPaper: PaperMetadata = {
   canonical_key: "hash:seed",
@@ -40,6 +42,9 @@ const seedPaper: PaperMetadata = {
 };
 
 vi.mock("@/lib/api", () => ({
+  refreshAccessToken: vi.fn(() => mockRefresh()),
+  setAccessToken: vi.fn(),
+  setAuthFailureHandler: vi.fn(),
   default: { get: vi.fn(() => Promise.resolve({ data: [] })), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   graph: {
     buildPaper: vi.fn(() =>

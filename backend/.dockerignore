@@ -1,0 +1,17 @@
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+tests
+
+.env
+.env.*
+.git
+.ruff_cache
+.pytest_cache
+.coverage
+htmlcov
+*.dump
+*.sql
+*.pem
+*.key
