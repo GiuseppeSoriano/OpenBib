@@ -4,6 +4,8 @@
 
 Backups can be explicitly disabled without disabling authenticated SMTP, account deletion or other production security checks. Legal configuration and bilingual privacy pages disclose the selected policy; previous configurations retain backup/deletion-journal protection. An independently enabled deletion journal can protect previous snapshots while new backups are suspended.
 
+The operator's public postal address may be omitted from legal configuration; identity and contact fields remain required. Operators remain responsible for reviewing the legal suitability of their published notices.
+
 Breaking alpha API changes remain under /api/v1. Registration now returns 202 and requires legal versions; verification requires the email token and final new_password. Login/verification return only a short-lived access token. Refresh consumes/rotates an HttpOnly cookie without a request body; refresh_token is no longer returned in JSON. Logout is server-side and asynchronous in the client.
 
 Account lifecycle endpoints add verification/resend, forgot/reset password, verified email change, password change, logout-all, legal acceptance, password-protected JSON export and password-confirmed deletion. Direct email editing and unauthenticated deletion are removed. UserRead adds email_verified and legal_acceptance_required. Collection responses expose capabilities rather than owner_id.

@@ -10,7 +10,7 @@ export interface LegalConfig {
   minimum_age: number;
   backups_enabled?: boolean;
   deletion_journal_enabled?: boolean | null;
-  operator: { name: string; address: string; country: string; privacy_email: string; support_email: string };
+  operator: { name: string; address?: string; country: string; privacy_email: string; support_email: string };
   data_location: string;
   third_parties: { name: string; purpose: string; role: string; region: string; privacy_url: string; transfer_safeguard?: string | null }[];
   retention: { access_logs_days: number; security_events_days: number; backups_days: number };

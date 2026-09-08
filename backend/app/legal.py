@@ -8,17 +8,34 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, StrictBool, model_validator
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    HttpUrl,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from app.config import settings
 
 
 class OperatorConfig(BaseModel):
     name: str = Field(min_length=2)
-    address: str = Field(min_length=5)
+    # Operators may omit a public postal address; legal suitability remains theirs to review.
+    address: str = ""
     country: str = Field(min_length=2)
     privacy_email: EmailStr
     support_email: EmailStr
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str) -> str:
+        value = value.strip()
+        if value and len(value) < 5:
+            raise ValueError("A supplied postal address must contain at least five characters")
+        return value
 
 
 class ThirdPartyConfig(BaseModel):
@@ -109,13 +126,20 @@ def get_legal_config() -> LegalConfig:
         except ValueError:
             raise RuntimeError("Legal effective_date must be an ISO date") from None
 
-        def has_empty_strings(value):
+        def has_empty_strings(value, location=()):
+            if location == ("operator", "address"):
+                return False
             if isinstance(value, str):
                 return not value.strip()
             if isinstance(value, dict):
-                return any(has_empty_strings(child) for child in value.values())
+                return any(
+                    has_empty_strings(child, (*location, key)) for key, child in value.items()
+                )
             if isinstance(value, list):
-                return any(has_empty_strings(child) for child in value)
+                return any(
+                    has_empty_strings(child, (*location, index))
+                    for index, child in enumerate(value)
+                )
             return False
 
         if has_empty_strings(raw) or len(config.third_parties) < 3:
