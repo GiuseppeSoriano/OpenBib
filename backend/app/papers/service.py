@@ -159,6 +159,23 @@ async def get_cached_papers_by_group(
     return list(result.scalars().all())
 
 
+async def get_cached_papers_by_groups(
+    db: AsyncSession, paper_group_keys: set[str]
+) -> dict[str, list[CachedPaperMetadata]]:
+    """Batched ``get_cached_papers_by_group``: versions per group, same order."""
+    if not paper_group_keys:
+        return {}
+    result = await db.execute(
+        select(CachedPaperMetadata)
+        .where(CachedPaperMetadata.paper_group_key.in_(paper_group_keys))
+        .order_by(CachedPaperMetadata.publication_date.desc(), CachedPaperMetadata.canonical_key)
+    )
+    grouped: dict[str, list[CachedPaperMetadata]] = defaultdict(list)
+    for row in result.scalars().all():
+        grouped[row.paper_group_key].append(row)
+    return dict(grouped)
+
+
 @dataclass
 class ResolvedPaper:
     status: Literal["found", "not_found", "unavailable"]

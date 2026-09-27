@@ -85,8 +85,12 @@ def hermetic_doi_resolution(monkeypatch):
     async def handle_not_registered(_doi: str) -> bool:
         return False
 
+    async def openalex_unreachable(_doi: str):
+        raise RuntimeError("tests never reach OpenAlex")
+
     monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [])
     monkeypatch.setattr(registry, "doi_handle_exists", handle_not_registered)
+    monkeypatch.setattr(registry, "openalex_work_by_doi", openalex_unreachable)
 
 
 @pytest.fixture

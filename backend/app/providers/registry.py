@@ -22,7 +22,7 @@ from app.providers.base import (
 )
 from app.providers.crossref import CrossrefProvider
 from app.providers.europepmc import EuropePMCProvider
-from app.providers.openalex import OpenAlexProvider
+from app.providers.openalex import OpenAlexProvider, RelatedPage
 
 if TYPE_CHECKING:
     from app.providers.base import BaseProvider
@@ -305,6 +305,41 @@ async def list_referenced_papers(
     except Exception:
         logger.warning("OpenAlex failed referenced-papers for %s", openalex_id, exc_info=True)
         return []
+
+
+async def related_page(
+    openalex_id: str,
+    *,
+    direction: str = "cited_by",
+    order: str = "cited_by_count",
+    cursor: str = "*",
+    per_page: int = 200,
+) -> RelatedPage:
+    """One cursor page of a work's citers (``direction="cited_by"``) or
+    references (``"cites"``) for the graph's related-paper ranges. Unlike
+    ``list_citing_papers``, failures propagate: an outage must never read as
+    "no related papers"."""
+    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
+    filter_key = "cited_by" if direction == "cites" else "cites"
+    return await _openalex.related_page(
+        openalex_id, filter_key=filter_key, sort=sort, cursor=cursor, per_page=per_page
+    )
+
+
+async def works_by_ids(openalex_ids: list[str]) -> list[PaperMetadata]:
+    """Full OpenAlex records for the given work ids, in input order. Errors
+    propagate so callers can tell an outage from a merged work."""
+    if not openalex_ids:
+        return []
+    return await _openalex.works_by_ids(openalex_ids)
+
+
+async def openalex_work_by_doi(doi: str) -> PaperMetadata | None:
+    """The OpenAlex work for a DOI, or ``None`` when OpenAlex has none (404).
+    Unlike ``resolve_doi`` there is no fallback and errors propagate: only
+    OpenAlex can say a work has no OpenAlex id, and an outage must never read
+    as "it has none"."""
+    return await _openalex.lookup_by_doi(doi)
 
 
 async def get_openalex_reference_ids(openalex_id: str | None) -> list[str]:

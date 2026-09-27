@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 _DEV_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     doi_resolve_timeout_seconds: float = 10.0
     import_resolve_concurrency: int = 4
     import_request_budget_seconds: float = 25.0
+
+    # Graph related-paper ranges: range size, OpenAlex page size, depth cap in
+    # raw provider records, per-request scan budget (hydration gets 5 s more,
+    # so a request ends within 25 s) and top-up concurrency.
+    graph_related_range_size: int = Field(30, ge=5, le=100)
+    graph_related_chunk_size: int = Field(200, ge=1, le=200)
+    graph_related_max_results: int = Field(10000, ge=200, le=50000)
+    graph_related_scan_budget_seconds: float = Field(20.0, gt=0, le=20)
+    graph_related_topup_concurrency: int = Field(4, ge=1, le=8)
 
     # Cache TTLs (seconds)
     cache_ttl_lookup: int = 86400

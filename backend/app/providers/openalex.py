@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
-from typing import ClassVar
+from typing import ClassVar, Literal
 from urllib.parse import quote
 
 import httpx
@@ -57,6 +58,55 @@ def _params() -> dict:
     return p
 
 
+def _work_keys(raw: dict) -> tuple[str, str]:
+    """``(canonical_key, paper_group_key)`` of a raw work. Shared by
+    ``_map_work`` and the compact related-list entries, so a paper gets the
+    same keys whichever way it was fetched."""
+    doi_raw = raw.get("doi") or ""
+    doi = doi_raw.removeprefix("https://doi.org/") if doi_raw else None
+    names = [a.get("author", {}).get("display_name", "") for a in raw.get("authorships", [])]
+    canonical_key = build_canonical_key(
+        doi=doi,
+        title=raw.get("title"),
+        authors=names,
+        year=raw.get("publication_year"),
+    )
+    return canonical_key, build_paper_group_key(raw.get("title"), names)
+
+
+def _short_id(work_id: str | None) -> str:
+    return (work_id or "").rsplit("/", 1)[-1]
+
+
+def _related_entry(raw: dict) -> list:
+    """Compact snapshot entry: ``[short_id, canonical_key, group_key, title,
+    cited_by_count, publication_date]``."""
+    canonical_key, group_key = _work_keys(raw)
+    return [
+        _short_id(raw.get("id")),
+        canonical_key,
+        group_key,
+        (raw.get("title") or "")[:300],
+        raw.get("cited_by_count"),
+        raw.get("publication_date"),
+    ]
+
+
+# Root fields that cover every key input of ``_work_keys`` plus the ordering
+# and display fields of an entry; abstracts and locations stay out of lists.
+_RELATED_SELECT = "id,doi,title,authorships,publication_year,publication_date,cited_by_count"
+
+
+@dataclass
+class RelatedPage:
+    """One cursor page of a related-works list. ``count`` is OpenAlex's
+    ``meta.count``; ``next_cursor`` is ``None`` at the end of the list."""
+
+    entries: list[list]
+    count: int
+    next_cursor: str | None
+
+
 def _map_work(raw: dict) -> PaperMetadata:
     doi_raw = raw.get("doi") or ""
     doi = doi_raw.removeprefix("https://doi.org/") if doi_raw else None
@@ -88,16 +138,11 @@ def _map_work(raw: dict) -> PaperMetadata:
 
     oa = raw.get("open_access") or {}
 
-    key = build_canonical_key(
-        doi=doi,
-        title=raw.get("title"),
-        authors=[a.name for a in authors],
-        year=raw.get("publication_year"),
-    )
+    key, group_key = _work_keys(raw)
 
     return PaperMetadata(
         canonical_key=key,
-        paper_group_key=build_paper_group_key(raw.get("title"), [a.name for a in authors]),
+        paper_group_key=group_key,
         title=raw.get("title", ""),
         authors=authors,
         abstract=_reconstruct_abstract(raw.get("abstract_inverted_index")),
@@ -263,6 +308,58 @@ class OpenAlexProvider(BaseProvider):
         return await self._related_works(
             paper_id, filter_key="cited_by", sort=sort, per_page=per_page
         )
+
+    async def related_page(
+        self,
+        paper_id: str,
+        *,
+        filter_key: Literal["cites", "cited_by"],
+        sort: str,
+        cursor: str = "*",
+        per_page: int = 200,
+    ) -> RelatedPage:
+        """One cursor page of the works related to ``paper_id`` (``cites`` →
+        citers, ``cited_by`` → references) as compact entries. Cursor paging
+        has no 10,000-result ceiling and keeps one stable traversal. A 404 is
+        an empty, finished list; every other failure raises."""
+        await self._limiter.acquire()
+        params = _params()
+        params["filter"] = f"{filter_key}:{_short_id(paper_id)}"
+        params["sort"] = sort
+        params["per_page"] = str(max(1, min(per_page, 200)))
+        params["cursor"] = cursor
+        params["select"] = _RELATED_SELECT
+        resp = await self._client.get("/works", params=params)
+        if resp.status_code == 404:
+            return RelatedPage([], 0, None)
+        resp.raise_for_status()
+        data = resp.json()
+        meta = data.get("meta") or {}
+        return RelatedPage(
+            entries=[_related_entry(w) for w in data.get("results") or []],
+            count=int(meta.get("count") or 0),
+            next_cursor=meta.get("next_cursor") or None,
+        )
+
+    async def works_by_ids(self, ids: list[str]) -> list[PaperMetadata]:
+        """Full records for OpenAlex work ids, in input order (ids OpenAlex
+        no longer returns, e.g. merged works, are skipped). Fetched in OR-filter
+        batches of 50; errors raise."""
+        wanted = list(dict.fromkeys(_short_id(i) for i in ids if i))
+        found: dict[str, PaperMetadata] = {}
+        for start in range(0, len(wanted), 50):
+            chunk = wanted[start : start + 50]
+            await self._limiter.acquire()
+            params = _params()
+            params["filter"] = "ids.openalex:" + "|".join(chunk)
+            params["per_page"] = str(len(chunk))
+            resp = await self._client.get("/works", params=params)
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+            for raw in resp.json().get("results") or []:
+                found[_short_id(raw.get("id"))] = _map_work(raw)
+        return [found[i] for i in wanted if i in found]
 
     async def get_author(self, author_id: str) -> AuthorMetadata | None:
         await self._limiter.acquire()
