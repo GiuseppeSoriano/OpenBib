@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
 from app.collections import service as collections_service
-from app.collections.schemas import CollectionCreate, Visibility
+from app.collections.schemas import CollectionCreate
 from app.dependencies import get_db
 from app.main import create_app
 from app.papers.service import cache_papers
@@ -177,19 +177,24 @@ async def test_user_scoped_endpoints_require_auth(db):
 async def test_collection_graph_public_vs_private(db):
     owner = await _make_user(db, "graphowner@example.com")
     public = await collections_service.create_collection(
-        db, owner.id, CollectionCreate(name="Open", visibility=Visibility.public)
+        db, owner.id, CollectionCreate(name="Open")
     )
     private = await collections_service.create_collection(
-        db, owner.id, CollectionCreate(name="Closed", visibility=Visibility.private)
+        db, owner.id, CollectionCreate(name="Closed")
     )
     await cache_papers(db, [_paper("hash:collpub", "group:collpub", "Coll Paper")])
     await collections_service.add_paper(db, public.id, owner.id, "hash:collpub")
 
+    from app.collections.sharing import read_link
+
+    token = (await read_link(db, public.id, owner.id, "enable"))["url"].split("#share=")[1]
     app = _make_app(db)
     async with _client(app) as client:
-        ok = await client.get(f"/api/v1/graph/collection/{public.id}")
+        ok = await client.get(
+            f"/api/v1/graph/collection/{public.id}", headers={"X-Collection-Share-Token": token}
+        )
         forbidden = await client.get(f"/api/v1/graph/collection/{private.id}")
 
     assert ok.status_code == 200
     assert len(ok.json()["nodes"]) == 1
-    assert forbidden.status_code == 403
+    assert forbidden.status_code == 404

@@ -1,5 +1,6 @@
+import { safeReturnTo } from "@/lib/collection-access";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/ui/Logo";
@@ -9,6 +10,7 @@ export default function LoginPage() {
   const { t } = useTranslation();
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,7 +20,7 @@ export default function LoginPage() {
     setError("");
     try {
       await login(email, password);
-      navigate("/");
+      navigate(safeReturnTo(location.state?.returnTo), { replace: true });
     } catch {
       setError(t("auth.loginError"));
     }

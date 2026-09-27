@@ -1,3 +1,4 @@
+import { useCollectionAccess, collectionRead } from "@/lib/collection-access";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -37,9 +38,11 @@ export type GraphMode = "manual" | "paper" | "collection" | "library";
 
 export default function GraphPage({ mode }: { mode: GraphMode }) {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
   const navigate = useNavigate();
+  const access = useCollectionAccess(collectionId);
+  const currentScope = useRef<string>(access.scope);
 
   const paramKey =
     mode === "paper"
@@ -61,6 +64,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   // jump on expansion. A version counter triggers React re-renders.
   const dataRef = useRef<ForceGraphData>(EMPTY_GRAPH);
   const [dataVersion, setDataVersion] = useState(0);
+  const loadedScope = useRef("");
   const graphRef = useRef<CitationGraphHandle>(null);
 
   // ── Base graph load (paper / collection / library) ───────
@@ -69,17 +73,21 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
     (mode === "collection" && !!paramKey) ||
     mode === "library";
 
-  const baseQuery = useQuery<GraphResponse>({
-    queryKey: ["graph-base", mode, paramKey, order],
+  const baseQuery = useQuery<GraphResponse | null>({
+    queryKey: ["graph-base", mode, paramKey, order, mode === "collection" ? access.scope : user?.id ?? "anonymous"],
     queryFn: () => {
       if (mode === "paper") return graphApi.buildPaper(paramKey, order);
-      if (mode === "collection") return graphApi.buildCollection(paramKey, order);
+      if (mode === "collection") return collectionRead(() => graphApi.buildCollection(paramKey, order, access.headers));
       return graphApi.buildLibrary(order);
     },
-    enabled: baseEnabled,
+    enabled: baseEnabled && !authLoading,
+    gcTime: 0, staleTime: 0, refetchOnWindowFocus: "always",
     // Provider retries/backoff happen on the server; don't multiply requests here.
     retry: false,
   });
+
+  // Ignore late expansion responses after navigation or access revocation.
+  currentScope.current = mode === "collection" && !baseQuery.data ? "" : access.scope;
 
   // Library membership colors saved nodes green (authed only).
   const { data: libraryKeys } = useQuery({
@@ -93,19 +101,22 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   // Reset the accumulated graph whenever a fresh base arrives (also on
   // order change). Seeds load un-expanded — the user picks a direction.
   useEffect(() => {
-    if (!baseQuery.data) return;
+    if (baseQuery.data === undefined) return;
+    loadedScope.current = access.scope;
+    if (baseQuery.data === null) { dataRef.current = EMPTY_GRAPH; setDataVersion((v) => v + 1); setSelectedNodeId(null); setDetailsKey(null); return; }
     dataRef.current = mergeGraph(EMPTY_GRAPH, {
       nodes: baseQuery.data.nodes,
       edges: baseQuery.data.edges,
     });
     setDataVersion((v) => v + 1);
     setSelectedNodeId(null);
-  }, [baseQuery.data]);
+  }, [baseQuery.data, access.scope]);
 
   // ── Expansion (from selection, or the whole graph) ───────
   const expandMutation = useMutation({
-    mutationFn: (body: ExpandRequest) => graphApi.expand(body),
-    onSuccess: (data, body) => {
+    mutationFn: async (body: ExpandRequest) => ({ data: await graphApi.expand(body), scope: access.scope }),
+    onSuccess: ({ data, scope }, body) => {
+      if (scope !== currentScope.current) return;
       const anchorGroup = body.focus_key
         ? dataRef.current.nodes.find(
             (n) => n.node.selected_version.canonical_key === body.focus_key,
@@ -137,7 +148,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   const links = dataRef.current.links;
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)?.node ?? null;
   const isExpanding = expandMutation.isPending;
-  const hasGraph = nodes.length > 0;
+  const hasGraph = nodes.length > 0 && (mode !== "collection" || (!!baseQuery.data && loadedScope.current === access.scope));
   const graphError = baseQuery.error ?? expandMutation.error;
   const errorDetail = (graphError as AxiosError<{ detail?: unknown }> | null)?.response?.data?.detail;
   const errorMessage = typeof errorDetail === "string" ? errorDetail : t("graph.errorFallback");
@@ -190,6 +201,8 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
       </div>
     );
   }
+
+  if (mode === "collection" && baseQuery.data === null) return <div role="alert"><p>{t("sharing.unavailable")}</p><Link to={`/collections/${collectionId}${access.fragment}`}>{t("graph.back")}</Link></div>;
 
   return (
     <div className="graph-screen" data-testid="graph-screen">
@@ -253,7 +266,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
         <button
           type="button"
           className="btn-ghost graph-back"
-          onClick={() => navigate(-1)}
+          onClick={() => mode === "collection" ? navigate(`/collections/${collectionId}${access.fragment}`) : navigate(-1)}
           title={t("graph.back")}
         >
           <ArrowLeft size={16} />
@@ -351,7 +364,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
       )}
 
       {/* Right: selected node card */}
-      {selectedNode && (
+      {hasGraph && selectedNode && (
         <div className="graph-node-card card">
           <h4>{selectedNode.selected_version.title}</h4>
           <p className="graph-node-authors">
@@ -414,7 +427,7 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
         </details>
       )}
 
-      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={hasGraph ? detailsKey : null} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }

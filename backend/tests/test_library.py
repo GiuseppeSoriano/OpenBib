@@ -39,7 +39,6 @@ async def _make_collection(db, owner_id, name="My Coll"):
         id=uuid.uuid4(),
         owner_id=owner_id,
         name=name,
-        visibility="private",
     )
     db.add(coll)
     await db.flush()

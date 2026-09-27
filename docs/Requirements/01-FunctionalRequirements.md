@@ -9,10 +9,10 @@
 
 | Actor | Capabilities |
 |-------|-------------|
-| **Anonymous user** | View public collections, register, log in |
+| **Anonymous user** | Read collections through valid read links, register, log in |
 | **Authenticated user** | All core features: collections, search, save, annotate, share, import/export, receive recommendations |
 | **Collaborator** | View/edit shared collections per assigned role |
-| **Collection owner** | Full control: share, revoke, change visibility, manage members |
+| **Collection owner** | Full control: share, revoke, manage read links, manage members |
 
 ---
 
@@ -32,7 +32,7 @@ Name (canonical + known aliases), external identifiers (ORCID, OpenAlex ID), ass
 
 ### 2.3 Collection
 
-Unique ID, name, description, owner, visibility (private / shared / public), member list with roles, paper list, tags, notes, activity log.
+Unique ID, name, description, owner, revocable read link, member list with roles, paper list, tags, notes, activity log.
 
 ### 2.4 Relations
 
@@ -77,7 +77,7 @@ Explicit feedback states on papers: unseen, seen, saved, to-read, reading, read,
 |----|-------------|
 | FR-006 | An authenticated user shall be able to create a new collection (empty or seeded with one or more papers). |
 | FR-007 | The user shall be able to rename a collection and edit its description. |
-| FR-008 | The user shall be able to set collection visibility: private, shared (invite-only), or public. |
+| FR-008 | The owner shall be able to activate a revocable read-only link and authorize existing verified accounts to edit by email. |
 | FR-009 | The user shall be able to add and remove papers from a collection. |
 | FR-010 | The user shall be able to add tags to a collection. |
 | FR-011 | The user shall be able to add notes at the collection level. |
@@ -225,15 +225,15 @@ Explicit feedback states on papers: unseen, seen, saved, to-read, reading, read,
 
 | ID | Requirement |
 |----|-------------|
-| FR-086 | The system shall support three collection visibility levels: private, shared (invite-only), and public. |
+| FR-086 | Collections shall have no visibility categories; only the owner, individual members, or holders of a valid read-only link may access them. |
 | FR-087 | The collection owner shall be able to invite collaborators with a role: editor or viewer. |
 | FR-088 | The owner shall be able to revoke access at any time. |
 | FR-089 | Editors shall be able to add/remove papers and add notes to a shared collection. Viewers can only read. |
-| FR-090 | Any authenticated user shall be able to browse public collections of other users. |
-| FR-091 | Any authenticated user shall be able to import (clone) a public collection into their own account. |
+| FR-090 | Anyone with an active read-only link shall be able to consult that collection, without a public catalog. |
+| FR-091 | Reading a collection through a link shall not automatically clone it or create permanent membership. |
 | FR-092 | In shared collections, the system shall distinguish between private notes (visible only to the author) and shared notes (visible to all members). |
 
-**Edge cases**: user removed during active editing; invite sent to non-existent user; visibility changed while collaborator is editing; owner deletes account while shared collections exist.
+**Edge cases**: user removed during active editing; unknown/unverified account rejected; link or membership revoked while a collaborator is editing; owner deletes account while shared collections exist.
 
 ---
 
@@ -346,3 +346,5 @@ The following capabilities are acknowledged but explicitly excluded from the MVP
 - **FR-D08** Collection merge (combining two collections into one)
 - **FR-D09** Exploration snapshots with shareable URLs
 - **FR-D10** Mobile-native applications
+
+Current implemented sharing contract: [Collection sharing](../Architecture/CollectionSharing.md).

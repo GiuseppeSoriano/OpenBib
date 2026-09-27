@@ -328,6 +328,7 @@ async def _fetch_referenced_ids(
 async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
     """Canonical keys the user has saved (library version pins + collection
     papers). Used to decide which discovered edges are durable enough to store."""
+    from app.collections.access import accessible_to
     from app.collections.models import Collection, CollectionPaper
     from app.library.models import UserLibraryVersion
 
@@ -339,7 +340,7 @@ async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]
     coll = await db.execute(
         select(CollectionPaper.paper_canonical_key)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
     )
     keys.update(row[0] for row in coll.all())
     return keys

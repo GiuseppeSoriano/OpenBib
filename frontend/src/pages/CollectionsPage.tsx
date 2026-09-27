@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
-import type { Collection, Visibility } from "@/types";
+import type { Collection } from "@/types";
 import { Plus, Trash2, FolderOpen } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
 import Modal from "@/components/ui/Modal";
@@ -11,19 +11,12 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import "./CollectionsPage.css";
 
-const VISIBILITIES: Visibility[] = ["private", "shared", "public"];
-
-function visibilityLabel(v: Visibility, t: (key: string) => string) {
-  return t(`collections.visibility${v.charAt(0).toUpperCase()}${v.slice(1)}`);
-}
-
 export default function CollectionsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("private");
   const [pendingDelete, setPendingDelete] = useState<Collection | null>(null);
 
   const { data: collections, isLoading } = useQuery({
@@ -36,14 +29,13 @@ export default function CollectionsPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      await api.post("/collections", { name, description: description || null, visibility });
+      await api.post("/collections", { name, description: description || null });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["collections"] });
       setShowCreate(false);
       setName("");
       setDescription("");
-      setVisibility("private");
     },
   });
 
@@ -82,17 +74,17 @@ export default function CollectionsPage() {
               <h3>{c.name}</h3>
               {c.description && <p>{c.description}</p>}
               <div className="collection-item-meta">
-                <span className="badge badge--neutral">{visibilityLabel(c.visibility, t)}</span>
+                <span className="badge badge--neutral">{t(c.is_owner ? "sharing.owner" : c.can_edit ? "sharing.editor" : "sharing.reader")}</span>
                 <span>{t("collections.paperCount", { count: c.paper_count })}</span>
               </div>
             </Link>
-            <button
+            {c.is_owner && <button
               className="btn-ghost collection-delete"
               onClick={() => setPendingDelete(c)}
               title={t("collections.deleteCollectionTitle")}
             >
               <Trash2 size={14} />
-            </button>
+            </button>}
           </div>
         ))}
       </div>
@@ -127,19 +119,6 @@ export default function CollectionsPage() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-          <div className="segmented" role="group" aria-label={t("collections.visibilityPrivate")}>
-            {VISIBILITIES.map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={visibility === v ? "active" : ""}
-                aria-pressed={visibility === v}
-                onClick={() => setVisibility(v)}
-              >
-                {visibilityLabel(v, t)}
-              </button>
-            ))}
-          </div>
           <div className="confirm-actions">
             <button
               type="button"

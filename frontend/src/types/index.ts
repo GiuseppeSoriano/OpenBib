@@ -112,14 +112,14 @@ export interface ZoteroSyncReport {
 }
 
 /* ── Collection ─────────────────────────────────────────── */
-export type Visibility = "private" | "shared" | "public";
 export type MemberRole = "owner" | "editor" | "viewer";
 
 export interface Collection {
   id: string;
   name: string;
   description: string | null;
-  visibility: Visibility;
+  revision: number;
+  can_manage_access: boolean;
   is_owner: boolean;
   can_edit: boolean;
   paper_count: number;

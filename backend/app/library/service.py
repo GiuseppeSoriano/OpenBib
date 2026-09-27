@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.collections.access import accessible_to
 from app.collections.models import Collection, CollectionPaper
 from app.common.exceptions import ConflictError, NotFoundError
 from app.library.models import UserLibraryEntry, UserLibraryVersion
@@ -250,7 +251,7 @@ async def _canonical_keys_in_collections(
         select(CollectionPaper.paper_canonical_key)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
         .where(
-            Collection.owner_id == user_id,
+            accessible_to(user_id),
             CollectionPaper.paper_canonical_key.in_(canonical_keys),
         )
     )

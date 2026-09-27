@@ -276,12 +276,12 @@ async def sync_papers(
 
 
 async def sync_collection(
-    db: AsyncSession, user_id: uuid.UUID, collection_id: uuid.UUID
+    db: AsyncSession, user_id: uuid.UUID, collection_id: uuid.UUID, share_token: str | None = None
 ) -> ZoteroSyncReport:
     from app.collections import service as collections_service
 
     coll = await collections_service.get_collection_or_404(db, collection_id)
-    rows = await collections_service.list_papers(db, collection_id, user_id)
+    rows = await collections_service.list_papers(db, collection_id, user_id, share_token)
     return await sync_papers(
         db,
         user_id,

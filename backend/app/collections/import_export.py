@@ -1,125 +1,41 @@
-"""Import service — DOI / canonical-key list import.
-
-Export lives in the Zotero one-way sync (app/zotero) — the BibTeX export
-was removed in favour of the Zotero-first integration strategy."""
-
-from __future__ import annotations
+"""Collection imports use the same authorization and library path as single additions."""
 
 import uuid
 
-from sqlalchemy import select
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.collections.models import CollectionPaper
-from app.collections.service import _can_edit, _member_roles, get_collection_or_404
-from app.common.exceptions import ForbiddenError
-
-
-async def import_doi_list(
-    db: AsyncSession,
-    collection_id: uuid.UUID,
-    user_id: uuid.UUID,
-    doi_list: list[str],
-) -> dict:
-    """Import a list of DOIs into a collection. Returns counts of added/skipped."""
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
-
-    from sqlalchemy import func
-
-    from app.providers.base import build_canonical_key
-
-    added = 0
-    skipped = 0
-
-    for doi in doi_list:
-        doi = doi.strip()
-        if not doi:
-            continue
-
-        canonical_key = build_canonical_key(doi=doi)
-
-        # Check if already in collection
-        existing = await db.execute(
-            select(CollectionPaper).where(
-                CollectionPaper.collection_id == collection_id,
-                CollectionPaper.paper_canonical_key == canonical_key,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
-            skipped += 1
-            continue
-
-        # Get next position
-        max_pos = await db.execute(
-            select(func.coalesce(func.max(CollectionPaper.position), -1)).where(
-                CollectionPaper.collection_id == collection_id
-            )
-        )
-        next_pos = (max_pos.scalar() or 0) + 1
-
-        cp = CollectionPaper(
-            collection_id=collection_id,
-            paper_canonical_key=canonical_key,
-            added_by=user_id,
-            position=next_pos,
-        )
-        db.add(cp)
-        added += 1
-
-    await db.flush()
-    return {"added": added, "skipped": skipped, "total": len(doi_list)}
+from app.collections.access import authorize
+from app.collections.service import add_paper
+from app.providers.base import build_canonical_key
 
 
 async def import_canonical_keys(
-    db: AsyncSession,
-    collection_id: uuid.UUID,
-    user_id: uuid.UUID,
-    keys: list[str],
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, keys: list[str]
 ) -> dict:
-    """Import a list of canonical keys into a collection."""
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
-
-    from sqlalchemy import func
-
-    added = 0
-    skipped = 0
-
+    await authorize(db, collection_id, user_id, permission="edit")
+    added = skipped = 0
     for key in keys:
         key = key.strip()
         if not key:
             continue
-
-        existing = await db.execute(
-            select(CollectionPaper).where(
-                CollectionPaper.collection_id == collection_id,
-                CollectionPaper.paper_canonical_key == key,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
+        try:
+            await add_paper(db, collection_id, user_id, key)
+            added += 1
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
             skipped += 1
-            continue
-
-        max_pos = await db.execute(
-            select(func.coalesce(func.max(CollectionPaper.position), -1)).where(
-                CollectionPaper.collection_id == collection_id
-            )
-        )
-        next_pos = (max_pos.scalar() or 0) + 1
-
-        cp = CollectionPaper(
-            collection_id=collection_id,
-            paper_canonical_key=key,
-            added_by=user_id,
-            position=next_pos,
-        )
-        db.add(cp)
-        added += 1
-
-    await db.flush()
     return {"added": added, "skipped": skipped, "total": len(keys)}
+
+
+async def import_doi_list(
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, doi_list: list[str]
+) -> dict:
+    result = await import_canonical_keys(
+        db,
+        collection_id,
+        user_id,
+        [build_canonical_key(doi=d.strip()) for d in doi_list if d.strip()],
+    )
+    return {**result, "total": len(doi_list)}

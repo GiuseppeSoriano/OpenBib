@@ -18,8 +18,8 @@ from tests.test_auth import PASSWORD, user_for_test
 
 async def test_deletion_transfers_editor_before_older_viewer_and_removes_private_data(db):
     owner, viewer, editor = [await user_for_test(db) for _ in range(3)]
-    shared = Collection(owner_id=owner.id, name="Shared", visibility="shared")
-    solo = Collection(owner_id=owner.id, name="Solo", visibility="private")
+    shared = Collection(owner_id=owner.id, name="Shared")
+    solo = Collection(owner_id=owner.id, name="Solo")
     db.add_all([shared, solo])
     await db.flush()
     db.add_all(
@@ -70,7 +70,7 @@ async def test_deletion_transfers_editor_before_older_viewer_and_removes_private
 
 async def test_deletion_uuid_tie_break(db):
     owner, first, second = [await user_for_test(db) for _ in range(3)]
-    coll = Collection(owner_id=owner.id, name="Tie", visibility="shared")
+    coll = Collection(owner_id=owner.id, name="Tie")
     db.add(coll)
     await db.flush()
     joined = utcnow()
