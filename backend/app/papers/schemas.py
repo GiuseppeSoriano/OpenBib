@@ -10,6 +10,7 @@ class AuthorRead(BaseModel):
     name: str
     family_name: str | None = None
     given_name: str | None = None
+    semantic_scholar_id: str | None = None
     openalex_id: str | None = None
     orcid: str | None = None
     affiliations: list[str] = []
@@ -26,6 +27,7 @@ class PaperMetadataRead(BaseModel):
     arxiv_id: str | None = None
     pmid: str | None = None
     pmcid: str | None = None
+    semantic_scholar_id: str | None = None
     openalex_id: str | None = None
     venue: str | None = None
     volume: str | None = None

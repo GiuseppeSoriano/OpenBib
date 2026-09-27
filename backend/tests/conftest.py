@@ -60,8 +60,18 @@ async def db(engine) -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
 
 
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch):
+    # Local .env credentials and backup preferences must not affect unit tests.
+    from app.config import Settings, settings
+
+    defaults = Settings(_env_file=None)
+    for name in Settings.model_fields:
+        monkeypatch.setattr(settings, name, getattr(defaults, name))
+
+
 @pytest_asyncio.fixture(autouse=True)
-async def redis_backend(monkeypatch):
+async def redis_backend(monkeypatch, isolated_settings):
     import redis.asyncio as redis
 
     original = redis.from_url

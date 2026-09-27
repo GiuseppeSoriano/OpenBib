@@ -2,7 +2,6 @@
 
 import json
 import logging
-from typing import Literal
 
 from fastapi import APIRouter, Query, Request, Response
 
@@ -26,9 +25,7 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 @router.get("/search", response_model=SearchResultRead)
 async def search_papers(
     q: str = Query(min_length=1, max_length=500),
-    providers: list[Literal["openalex", "crossref", "arxiv", "europepmc"]] | None = Query(
-        None, max_length=4
-    ),
+    providers: list[str] | None = Query(None, max_length=20),
     year_from: int | None = None,
     year_to: int | None = None,
     author: str | None = Query(None, max_length=200),
@@ -52,7 +49,9 @@ async def search_papers(
     )
     from app.providers.base import SearchFilters
     from app.providers.cache import cache_get, cache_set
-    from app.providers.registry import search_all
+    from app.providers.registry import CACHE_NAMESPACE, search_all, selected_provider_names
+
+    providers = selected_provider_names(providers)
 
     # One cache entry per full fan-out query: repeat searches within
     # cache_ttl_search are served from Redis without touching providers.
@@ -70,7 +69,7 @@ async def search_papers(
         sort_keys=True,
     )
     try:
-        cached = await cache_get(redis, "fanout", "search", cache_id)
+        cached = await cache_get(redis, CACHE_NAMESPACE, "search", cache_id)
     except Exception:  # Redis down → bypass the cache, never fail the search
         cached = None
     if cached is not None:
@@ -93,13 +92,13 @@ async def search_papers(
         logger.warning("All search providers failed or returned nothing")
 
     merged = service.round_robin_dedupe(results)
-    await service.cache_papers(db, merged.papers)
+    merged.papers = await service.cache_papers(db, merged.papers)
     response = service.build_search_response(merged)
 
     # Don't cache total provider failure — the next attempt should retry.
     if results:
         try:
-            await cache_set(redis, "fanout", "search", cache_id, response)
+            await cache_set(redis, CACHE_NAMESPACE, "search", cache_id, response)
         except Exception:
             logger.debug("Search cache write failed; continuing without cache")
 

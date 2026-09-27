@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import type { AxiosError } from "axios";
 import { graph as graphApi, library } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import CitationGraph, { type CitationGraphHandle } from "@/components/graph/CitationGraph";
@@ -76,6 +77,8 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
       return graphApi.buildLibrary(order);
     },
     enabled: baseEnabled,
+    // Provider retries/backoff happen on the server; don't multiply requests here.
+    retry: false,
   });
 
   // Library membership colors saved nodes green (authed only).
@@ -135,6 +138,9 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)?.node ?? null;
   const isExpanding = expandMutation.isPending;
   const hasGraph = nodes.length > 0;
+  const graphError = baseQuery.error ?? expandMutation.error;
+  const errorDetail = (graphError as AxiosError<{ detail?: unknown }> | null)?.response?.data?.detail;
+  const errorMessage = typeof errorDetail === "string" ? errorDetail : t("graph.errorFallback");
   void dataVersion; // re-render trigger
 
   const handleExpand = () => {
@@ -208,6 +214,23 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
       {baseQuery.isLoading && (
         <div className="graph-center-status">
           <Loader2 size={18} className="spin" /> {t("graph.loading")}
+        </div>
+      )}
+
+      {graphError && (
+        <div className="graph-error" role="alert">
+          <span>{errorMessage}</span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={baseQuery.isFetching || isExpanding}
+            onClick={() => {
+              if (baseQuery.error) void baseQuery.refetch();
+              else if (expandMutation.variables) expandMutation.mutate(expandMutation.variables);
+            }}
+          >
+            {t("graph.retry")}
+          </button>
         </div>
       )}
 

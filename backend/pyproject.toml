@@ -60,3 +60,4 @@ known-first-party = ["app", "scripts", "tests", "alembic"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["live: opt-in tests requiring Semantic Scholar credentials and network"]

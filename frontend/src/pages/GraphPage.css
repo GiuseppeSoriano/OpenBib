@@ -39,6 +39,24 @@
     font-size: 0.9rem;
   }
 
+  .graph-error {
+    position: absolute;
+    top: 4.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    width: max-content;
+    max-width: calc(100% - 2rem);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
   @keyframes graph-spin {
     to {
       transform: rotate(360deg);

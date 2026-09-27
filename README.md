@@ -17,12 +17,12 @@ Search, paper details, public collections, and citation graphs work without an a
 
 Academic discovery is spread across search engines, reference managers, and graph tools. OpenBib brings those workflows together in an application you can inspect, run locally and contribute to:
 
-- **Search four providers at once** — OpenAlex, arXiv, Crossref, and Europe PMC are queried in parallel, then deduplicated and grouped by paper version.
+- **Discover papers with Semantic Scholar** — one authenticated source for search, metadata, references and citations, normalized and deduplicated before display.
 - **Explore citation networks visually** — expand citers or references, preserve node positions, and move directly from discovery to a paper's details.
 - **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and public or collaborative collections.
 - **Keep Zotero in the workflow** — push a collection or the whole library to Zotero with an idempotent one-way sync.
 - **Use it comfortably anywhere** — responsive UI, light and dark themes, and bundled English and Italian translations.
-- **Stay useful during provider outages** — Redis caching and graceful provider degradation keep the application responsive when an upstream API is slow.
+- **Stay useful during provider outages** — Redis caching, retries and explicit upstream errors keep the application responsive when an upstream API is slow.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ flowchart LR
     Browser[React + TypeScript SPA] -->|REST /api| API[FastAPI]
     API --> Postgres[(PostgreSQL)]
     API --> Redis[(Redis cache)]
-    API --> Providers[OpenAlex · arXiv<br/>Crossref · Europe PMC]
+    API --> Providers[Semantic Scholar]
     API --> Zotero[Zotero Web API]
 ```
 
@@ -100,9 +100,8 @@ Copy [`.env.example`](.env.example) to `.env` before starting the Compose stack.
 | `JWT_SECRET_KEY` | Signs short-lived access tokens | Insecure development placeholder |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `10` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime | `7` |
-| `OPENALEX_API_KEY` | Optional OpenAlex API key | Empty |
-| `OPENALEX_EMAIL` | Contact email for OpenAlex requests | Example address |
-| `CROSSREF_MAILTO` | Contact email for Crossref polite-pool requests | Example address |
+| `SEMANTIC_SCHOLAR_API_KEY` | Required for live paper retrieval; `x-api-key` header | Empty |
+| `SEMANTIC_SCHOLAR_API_KEY_FILE` | Optional secret file, takes precedence | Empty |
 | `CORS_ORIGINS` | JSON list of allowed browser origins | Local web ports |
 | `CACHE_TTL_*` | Provider-cache lifetimes in seconds | See `.env.example` |
 
@@ -119,7 +118,9 @@ docker compose up -d db cache mailpit
 ### Backend
 
 ```bash
-cp .env.example backend/.env
+# If you do not already have a root .env:
+cp -n .env.example .env
+# Set SEMANTIC_SCHOLAR_API_KEY in .env. backend/.env overrides root values.
 cd backend
 
 uv sync --frozen --extra dev --python 3.12
@@ -209,4 +210,6 @@ OpenBib is available under the [MIT License](LICENSE). By contributing, you agre
 
 ## Acknowledgements
 
-OpenBib builds on bibliographic data and APIs provided by [OpenAlex](https://openalex.org/), [arXiv](https://arxiv.org/), [Crossref](https://www.crossref.org/), and [Europe PMC](https://europepmc.org/), with optional export to [Zotero](https://www.zotero.org/).
+OpenBib retrieves bibliographic data exclusively from [Semantic Scholar](https://www.semanticscholar.org/), with optional export to [Zotero](https://www.zotero.org/). OpenAlex, arXiv, Crossref and Europe PMC adapters remain available as inactive implementations.
+
+See the [provider audit and endpoint mapping](docs/Architecture/SemanticScholar.md) for enablement, identity rules, operational limits and live test instructions.

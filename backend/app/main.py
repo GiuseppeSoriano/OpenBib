@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI):
     pool = app.state.redis
     logger.info("Redis pool initialized")
     yield
+    from app.providers.registry import close_providers
+
+    await close_providers()
     await pool.aclose()
     await engine.dispose()
     logger.info("Application resources closed")

@@ -15,7 +15,7 @@ from app.providers import registry
 
 
 def _cached(
-    key: str, group: str, title: str, openalex_id: str | None = None
+    key: str, group: str, title: str, semantic_scholar_id: str | None = None
 ) -> CachedPaperMetadata:
     return CachedPaperMetadata(
         canonical_key=key,
@@ -24,8 +24,8 @@ def _cached(
         authors_json=[],
         topics_json=[],
         keywords_json=[],
-        openalex_id=openalex_id,
-        provider_source="openalex",
+        semantic_scholar_id=semantic_scholar_id,
+        provider_source="semantic_scholar",
     )
 
 
@@ -33,30 +33,30 @@ def _meta(
     key: str,
     group: str,
     title: str,
-    openalex_id: str | None = None,
+    semantic_scholar_id: str | None = None,
     cited_by_count: int | None = None,
 ) -> provider_base.PaperMetadata:
     return provider_base.PaperMetadata(
         canonical_key=key,
         paper_group_key=group,
         title=title,
-        openalex_id=openalex_id,
+        semantic_scholar_id=semantic_scholar_id,
         cited_by_count=cited_by_count,
-        provider_source="openalex",
+        provider_source="semantic_scholar",
     )
 
 
 @pytest.mark.asyncio
 async def test_expand_adds_only_new_leaves_and_cited_by_direction(db, monkeypatch):
-    db.add(_cached("doi:seed", "group:seed", "Seed", openalex_id="https://openalex.org/W1"))
+    db.add(_cached("doi:seed", "group:seed", "Seed", semantic_scholar_id="W1"))
     await db.flush()
 
     citers = [
-        _meta("doi:c1", "group:c1", "Citer One", "https://openalex.org/W2", cited_by_count=10),
-        _meta("doi:c2", "group:c2", "Citer Two", "https://openalex.org/W3", cited_by_count=5),
+        _meta("doi:c1", "group:c1", "Citer One", "W2", cited_by_count=10),
+        _meta("doi:c2", "group:c2", "Citer Two", "W3", cited_by_count=5),
     ]
 
-    async def fake_list(openalex_id, *, order="cited_by_count", limit=25):
+    async def fake_list(semantic_scholar_id, *, order="cited_by_count", limit=25):
         return citers
 
     monkeypatch.setattr(registry, "list_citing_papers", fake_list)
@@ -91,15 +91,15 @@ async def test_expand_adds_only_new_leaves_and_cited_by_direction(db, monkeypatc
 
 @pytest.mark.asyncio
 async def test_expand_persists_edges_only_between_saved_papers(db, monkeypatch):
-    db.add(_cached("doi:seed", "group:seed", "Seed", openalex_id="https://openalex.org/W1"))
+    db.add(_cached("doi:seed", "group:seed", "Seed", semantic_scholar_id="W1"))
     await db.flush()
 
     citers = [
-        _meta("doi:c1", "group:c1", "Citer One", "https://openalex.org/W2"),
-        _meta("doi:c2", "group:c2", "Citer Two", "https://openalex.org/W3"),
+        _meta("doi:c1", "group:c1", "Citer One", "W2"),
+        _meta("doi:c2", "group:c2", "Citer Two", "W3"),
     ]
 
-    async def fake_list(openalex_id, *, order="cited_by_count", limit=25):
+    async def fake_list(semantic_scholar_id, *, order="cited_by_count", limit=25):
         return citers
 
     monkeypatch.setattr(registry, "list_citing_papers", fake_list)
@@ -121,20 +121,20 @@ async def test_expand_persists_edges_only_between_saved_papers(db, monkeypatch):
 async def test_base_graph_links_intra_set_via_references(db, monkeypatch):
     db.add_all(
         [
-            _cached("doi:a", "group:a", "Paper A", openalex_id="https://openalex.org/WA"),
-            _cached("doi:b", "group:b", "Paper B", openalex_id="https://openalex.org/WB"),
+            _cached("doi:a", "group:a", "Paper A", semantic_scholar_id="WA"),
+            _cached("doi:b", "group:b", "Paper B", semantic_scholar_id="WB"),
         ]
     )
     await db.flush()
 
-    async def fake_refs(openalex_id):
+    async def fake_refs(semantic_scholar_id):
         # A references B (A cites B); B references nothing in the set.
         return {
-            "https://openalex.org/WA": ["https://openalex.org/WB"],
-            "https://openalex.org/WB": [],
-        }.get(openalex_id, [])
+            "WA": ["WB"],
+            "WB": [],
+        }.get(semantic_scholar_id, [])
 
-    monkeypatch.setattr(registry, "get_openalex_reference_ids", fake_refs)
+    monkeypatch.setattr(registry, "get_reference_ids", fake_refs)
 
     res = await graph_service.build_base_graph(db, None, ["doi:a", "doi:b"])
 
@@ -149,14 +149,12 @@ async def test_base_graph_links_intra_set_via_references(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_expand_cites_direction_orients_edges_seed_to_reference(db, monkeypatch):
-    db.add(_cached("doi:seed", "group:seed", "Seed", openalex_id="https://openalex.org/W1"))
+    db.add(_cached("doi:seed", "group:seed", "Seed", semantic_scholar_id="W1"))
     await db.flush()
 
-    refs = [
-        _meta("doi:r1", "group:r1", "Reference One", "https://openalex.org/W9", cited_by_count=99)
-    ]
+    refs = [_meta("doi:r1", "group:r1", "Reference One", "W9", cited_by_count=99)]
 
-    async def fake_refs(openalex_id, *, order="cited_by_count", limit=25):
+    async def fake_refs(semantic_scholar_id, *, order="cited_by_count", limit=25):
         return refs
 
     monkeypatch.setattr(registry, "list_referenced_papers", fake_refs)
