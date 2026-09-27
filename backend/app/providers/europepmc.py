@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import httpx
 
+from app.common.identifiers import strip_doi_prefixes
 from app.providers.base import (
     Author,
     AuthorMetadata,
@@ -143,8 +144,10 @@ class EuropePMCProvider(BaseProvider):
 
     async def lookup_by_doi(self, doi: str) -> PaperMetadata | None:
         await self._limiter.acquire()
+        # A stray quote would break out of the phrase query.
+        clean = strip_doi_prefixes(doi).replace('"', "")
         params = {
-            "query": f'DOI:"{doi}"',
+            "query": f'DOI:"{clean}"',
             "format": "json",
             "resultType": "core",
             "pageSize": "1",

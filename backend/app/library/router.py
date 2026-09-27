@@ -12,6 +12,7 @@ from app.library.schemas import (
     LibraryVersionAdd,
     LibraryVersionPin,
 )
+from app.papers.service import get_cached_paper
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -40,14 +41,19 @@ async def get_entry(paper_group_key: str, user: CurrentUser, db: DB):
 
 @router.post("/entries", response_model=LibraryEntryRead, status_code=201)
 async def ensure_entry(body: LibraryEntryEnsure, user: CurrentUser, db: DB):
-    await service.ensure_entry_and_version(
+    """Save a paper to the Library. Cached metadata is authoritative for the
+    group: a client-supplied group that disagrees with it is ignored, and the
+    entry that actually holds the paper is returned."""
+    cached = await get_cached_paper(db, body.paper_canonical_key)
+    entry, _ = await service.ensure_entry_and_version(
         db,
         user.id,
-        body.paper_group_key,
+        cached.paper_group_key if cached is not None else body.paper_group_key,
         body.paper_canonical_key,
         body.source_provider,
+        authoritative_group=cached is not None,
     )
-    return await service.get_entry(db, user.id, body.paper_group_key)
+    return await service.get_entry(db, user.id, entry.paper_group_key)
 
 
 @router.patch("/entries/{paper_group_key:path}", response_model=LibraryEntryRead)
@@ -61,9 +67,32 @@ async def repin_primary(
     return await service.get_entry(db, user.id, paper_group_key)
 
 
+# Declared before the greedy DELETE /entries/{paper_group_key:path} below,
+# which would otherwise swallow this route.
+@router.delete(
+    "/entries/{paper_group_key}/versions/{paper_canonical_key:path}",
+    status_code=204,
+)
+async def remove_version(
+    paper_group_key: str,
+    paper_canonical_key: str,
+    user: CurrentUser,
+    db: DB,
+):
+    await service.remove_version(db, user.id, paper_group_key, paper_canonical_key)
+
+
 @router.delete("/entries/{paper_group_key:path}", status_code=204)
-async def delete_entry(paper_group_key: str, user: CurrentUser, db: DB):
-    await service.delete_entry(db, user.id, paper_group_key)
+async def delete_entry(
+    paper_group_key: str,
+    user: CurrentUser,
+    db: DB,
+    detach: bool = Query(False),
+):
+    """409 ``entry_in_collections`` (with the collections) while a pinned
+    version is still in one of your collections; ``detach=true`` removes it
+    from them first."""
+    await service.delete_entry(db, user.id, paper_group_key, detach=detach)
 
 
 @router.post(
@@ -84,16 +113,3 @@ async def add_version(
         body.paper_canonical_key,
         body.source_provider,
     )
-
-
-@router.delete(
-    "/entries/{paper_group_key}/versions/{paper_canonical_key:path}",
-    status_code=204,
-)
-async def remove_version(
-    paper_group_key: str,
-    paper_canonical_key: str,
-    user: CurrentUser,
-    db: DB,
-):
-    await service.remove_version(db, user.id, paper_group_key, paper_canonical_key)

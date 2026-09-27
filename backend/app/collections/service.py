@@ -2,14 +2,17 @@
 
 import uuid
 
-from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.schemas import CollectionCreate, CollectionUpdate
-from app.common.exceptions import ForbiddenError, NotFoundError
+from app.common.exceptions import ApiError, ForbiddenError, NotFoundError
+from app.common.identifiers import normalize_paper_key, parse_paper_identifier, synthetic_group_key
+from app.papers.models import CachedPaperMetadata
+from app.papers.service import cache_papers, cached_paper_to_read, get_cached_paper
+from app.providers import registry
 
 
 async def get_collection_or_404(db: AsyncSession, collection_id: uuid.UUID) -> Collection:
@@ -132,25 +135,78 @@ async def delete_collection(db: AsyncSession, collection_id: uuid.UUID, user_id:
     await db.delete(coll)
 
 
-async def add_paper(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, paper_key: str
-) -> CollectionPaper:
-    coll = await get_collection_or_404(db, collection_id)
+async def require_edit(
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, *, refresh: bool = False
+) -> Collection:
+    coll = await db.get(Collection, collection_id, populate_existing=refresh)
+    if coll is None:
+        raise NotFoundError("Collection not found")
     roles = await _member_roles(db, collection_id)
     if not _can_edit(coll, user_id, roles):
         raise ForbiddenError()
+    return coll
 
-    existing = await db.execute(
-        select(CollectionPaper).where(
+
+async def reopen_for_write(db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Start the short write transaction that follows provider I/O.
+
+    Callers commit (releasing the per-user row lock that authentication takes
+    on every write request) before calling providers; this re-takes the lock
+    and re-checks edit rights, which may have changed in the meantime.
+    """
+    from app.auth.service import lock_user
+
+    await lock_user(db, user_id)
+    await require_edit(db, collection_id, user_id, refresh=True)
+
+
+async def keys_in_collection(
+    db: AsyncSession, collection_id: uuid.UUID, canonical_keys: set[str]
+) -> set[str]:
+    if not canonical_keys:
+        return set()
+    result = await db.execute(
+        select(CollectionPaper.paper_canonical_key).where(
             CollectionPaper.collection_id == collection_id,
-            CollectionPaper.paper_canonical_key == paper_key,
+            CollectionPaper.paper_canonical_key.in_(canonical_keys),
         )
     )
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="Paper already in collection",
-        )
+    return {row[0] for row in result.all()}
+
+
+def _already_in_collection(canonical_key: str) -> ApiError:
+    return ApiError(
+        http_status.HTTP_409_CONFLICT,
+        "already_in_collection",
+        "This paper is already in the collection.",
+        canonical_key=canonical_key,
+    )
+
+
+def _paper_row(cp: CollectionPaper, cached: CachedPaperMetadata | None) -> dict:
+    return {
+        "paper_canonical_key": cp.paper_canonical_key,
+        "paper_group_key": cached.paper_group_key if cached else None,
+        "position": cp.position,
+        "added_at": cp.added_at,
+        # Full metadata snapshot; None while the paper is pending (no cached
+        # row yet) — the frontend then renders the unresolved card.
+        "paper": cached_paper_to_read(cached) if cached else None,
+        "resolved": cached is not None,
+    }
+
+
+async def _add_paper_core(
+    db: AsyncSession,
+    collection_id: uuid.UUID,
+    user_id: uuid.UUID,
+    canonical_key: str,
+    cached: CachedPaperMetadata | None,
+) -> dict:
+    """Insert the collection row, keeping the Library invariant: every paper
+    in a collection has a Library entry + version pin behind it, anchored to
+    the provider's real group (a synthetic one while the paper is pending)."""
+    from app.library.service import ensure_entry_and_version
 
     max_pos = await db.execute(
         select(func.coalesce(func.max(CollectionPaper.position), -1)).where(
@@ -159,58 +215,97 @@ async def add_paper(
     )
     next_pos = (max_pos.scalar() or 0) + 1
 
-    # Library invariant — every paper in a collection must have a Library
-    # entry + version pin behind it, so notes/tags/states can anchor on
-    # the group_key. Look up group_key from the cache; fall back to a
-    # synthesized hash if the cache row is missing (e.g. legacy import).
-    from app.library.service import ensure_entry_and_version
-    from app.papers.models import CachedPaperMetadata
-
-    cached = await db.get(CachedPaperMetadata, paper_key)
     if cached is not None:
-        paper_group_key = cached.paper_group_key
-        source_provider = cached.provider_source
+        await ensure_entry_and_version(
+            db,
+            user_id,
+            cached.paper_group_key,
+            canonical_key,
+            cached.provider_source,
+            authoritative_group=True,
+        )
     else:
-        # Synthesize a deterministic group_key so the entry can still anchor
-        # notes/tags. The opportunistic re-anchor on next provider fetch
-        # will overwrite it with the correct value via the backfill script.
-        import hashlib
-
-        digest = hashlib.sha256(paper_key.encode("utf-8")).hexdigest()[:16]
-        paper_group_key = f"group:{digest}"
-        source_provider = None
-
-    await ensure_entry_and_version(db, user_id, paper_group_key, paper_key, source_provider)
+        await ensure_entry_and_version(
+            db, user_id, synthetic_group_key(canonical_key), canonical_key
+        )
 
     cp = CollectionPaper(
         collection_id=collection_id,
-        paper_canonical_key=paper_key,
+        paper_canonical_key=canonical_key,
         added_by=user_id,
         position=next_pos,
     )
     db.add(cp)
     await db.flush()
-    return cp
+    return _paper_row(cp, cached)
+
+
+async def add_paper(
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, raw_key: str
+) -> dict:
+    """Add a paper by DOI (bare, ``doi:``, ``DOI``-labelled or a doi.org link)
+    or by an existing ``hash:`` key, and return it as a list row.
+
+    No provider call happens while the request holds the per-user row lock:
+    authorize, parse and pre-dedupe, then commit; resolve the DOI with no
+    transaction open; then write in a short transaction that re-checks edit
+    rights and duplicates (the provider may answer with an alias key).
+    """
+    await require_edit(db, collection_id, user_id)
+    parsed = parse_paper_identifier(raw_key)
+    if await keys_in_collection(db, collection_id, {parsed.canonical_key}):
+        raise _already_in_collection(parsed.canonical_key)
+
+    cached = await get_cached_paper(db, parsed.canonical_key)
+    if cached is None:
+        if parsed.doi is None:
+            raise ApiError(
+                http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "unknown_paper_key",
+                "This paper key is not known.",
+                value=raw_key[:200],
+            )
+        await db.commit()
+        lookup = await registry.resolve_doi(parsed.doi)
+        if lookup.status == "not_found":
+            raise ApiError(
+                http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "doi_not_found",
+                "No paper is registered under this DOI.",
+                doi=parsed.doi,
+            )
+        await reopen_for_write(db, collection_id, user_id)
+        if lookup.paper is not None:
+            await cache_papers(db, [lookup.paper])
+            cached = await get_cached_paper(db, lookup.paper.canonical_key)
+        candidates = {parsed.canonical_key} | ({cached.canonical_key} if cached else set())
+        present = await keys_in_collection(db, collection_id, candidates)
+        if present:
+            raise _already_in_collection(min(present))
+
+    canonical_key = cached.canonical_key if cached is not None else parsed.canonical_key
+    return await _add_paper_core(db, collection_id, user_id, canonical_key, cached)
 
 
 async def remove_paper(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, paper_key: str
 ) -> None:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
+    await require_edit(db, collection_id, user_id)
 
-    result = await db.execute(
-        select(CollectionPaper).where(
-            CollectionPaper.collection_id == collection_id,
-            CollectionPaper.paper_canonical_key == paper_key,
+    # Exact key first, then the normalized one, so rows stored under a
+    # legacy raw key stay removable.
+    for key in dict.fromkeys((paper_key, normalize_paper_key(paper_key))):
+        result = await db.execute(
+            select(CollectionPaper).where(
+                CollectionPaper.collection_id == collection_id,
+                CollectionPaper.paper_canonical_key == key,
+            )
         )
-    )
-    cp = result.scalar_one_or_none()
-    if cp is None:
-        raise NotFoundError("Paper not in collection")
-    await db.delete(cp)
+        cp = result.scalar_one_or_none()
+        if cp is not None:
+            await db.delete(cp)
+            return
+    raise NotFoundError("Paper not in collection")
 
 
 async def list_papers(
@@ -220,9 +315,6 @@ async def list_papers(
     roles = await _member_roles(db, collection_id)
     if not _can_view(coll, user_id, roles):
         raise ForbiddenError()
-
-    from app.papers.models import CachedPaperMetadata
-    from app.papers.service import cached_paper_to_read
 
     stmt = (
         select(CollectionPaper, CachedPaperMetadata)
@@ -234,18 +326,7 @@ async def list_papers(
         .order_by(CollectionPaper.position)
     )
     rows = (await db.execute(stmt)).all()
-    return [
-        {
-            "paper_canonical_key": cp.paper_canonical_key,
-            "paper_group_key": cached.paper_group_key if cached else None,
-            "position": cp.position,
-            "added_at": cp.added_at,
-            # Full metadata snapshot; None when no cached row exists yet —
-            # the frontend degrades to showing the canonical key.
-            "paper": cached_paper_to_read(cached) if cached else None,
-        }
-        for cp, cached in rows
-    ]
+    return [_paper_row(cp, cached) for cp, cached in rows]
 
 
 async def add_member(

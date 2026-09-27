@@ -20,7 +20,6 @@ Behavior:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import sys
 
@@ -32,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import models as _auth_models  # noqa: F401
 from app.collections import models as _collection_models  # noqa: F401
 from app.collections.models import CollectionPaper
+from app.common.identifiers import synthetic_group_key
 from app.database import async_session_factory
 from app.graph import models as _graph_models  # noqa: F401
 from app.library import models as _library_models  # noqa: F401
@@ -45,11 +45,6 @@ from app.users import models as _user_models  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("backfill_library")
-
-
-def _synthetic_group_key(canonical_key: str) -> str:
-    digest = hashlib.sha256(canonical_key.encode("utf-8")).hexdigest()[:16]
-    return f"group:{digest}"
 
 
 async def _ensure_for_collection_papers(db: AsyncSession) -> tuple[int, int, int]:
@@ -89,7 +84,7 @@ async def _ensure_for_collection_papers(db: AsyncSession) -> tuple[int, int, int
         if cache_hit is not None:
             paper_group_key, provider = cache_hit
         else:
-            paper_group_key = _synthetic_group_key(canonical_key)
+            paper_group_key = synthetic_group_key(canonical_key)
             provider = None
 
         had_entry_before = (owner_id, paper_group_key) in pre_existing_entries

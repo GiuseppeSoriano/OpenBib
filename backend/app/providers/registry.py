@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+from urllib.parse import quote
 
+import httpx
+
+from app.config import settings
 from app.providers.arxiv import ArxivProvider
 from app.providers.base import (
     AuthorMetadata,
@@ -50,17 +55,81 @@ def get_provider(name: str) -> BaseProvider | None:
     return _PROVIDERS.get(name)
 
 
-async def lookup_by_doi(doi: str) -> PaperMetadata | None:
-    for provider in LOOKUP_DOI_CHAIN:
+@dataclass
+class DoiLookup:
+    """Outcome of resolving a DOI. ``not_found`` is definitive (every provider
+    answered with a miss and doi.org does not know the handle); any failure,
+    timeout or registered-but-undescribed DOI is ``unavailable``."""
+
+    status: Literal["found", "not_found", "unavailable"]
+    paper: PaperMetadata | None = None
+
+
+_handle_client = httpx.AsyncClient(base_url="https://doi.org", timeout=5)
+
+
+async def doi_handle_exists(doi: str) -> bool | None:
+    """Ask the doi.org handle API whether the DOI is registered at all.
+    ``None`` means the check itself failed."""
+    try:
+        resp = await _handle_client.get(
+            f"/api/handles/{quote(doi, safe='/')}", params={"type": "URL"}
+        )
+    except httpx.HTTPError:
+        logger.warning("DOI handle check failed", exc_info=True)
+        return None
+    if resp.status_code == 404:
+        return False
+    if resp.status_code != 200:
+        return None
+    try:
+        return resp.json().get("responseCode") == 1
+    except ValueError:
+        return None
+
+
+async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
+    # Read the module attribute on every call so tests can swap the chain.
+    chain = LOOKUP_DOI_CHAIN
+    if not chain:
+        return DoiLookup("unavailable")
+    failed = False
+    for provider in chain:
         try:
             result = await provider.lookup_by_doi(doi)
-            if result:
-                return result
         except Exception:
+            failed = True
             logger.warning(
                 "Provider %s failed DOI lookup for %s", provider.name, doi, exc_info=True
             )
-    return None
+            continue
+        if result:
+            return DoiLookup("found", result)
+    if failed:
+        return DoiLookup("unavailable")
+    if not confirm_missing:
+        return DoiLookup("not_found")
+    # DataCite-only DOIs (Zenodo, figshare, arXiv) can miss everywhere: a
+    # registered handle means "save as pending", never "does not exist". Only
+    # a definitive "not registered" from doi.org rejects; a failed check is
+    # an unconfirmed miss and stays pending too.
+    exists = await doi_handle_exists(doi)
+    return DoiLookup("not_found") if exists is False else DoiLookup("unavailable")
+
+
+async def resolve_doi(doi: str, *, confirm_missing: bool = True) -> DoiLookup:
+    try:
+        return await asyncio.wait_for(
+            _resolve_doi_chain(doi, confirm_missing=confirm_missing),
+            timeout=settings.doi_resolve_timeout_seconds,
+        )
+    except TimeoutError:
+        logger.warning("DOI resolution timed out for %s", doi)
+        return DoiLookup("unavailable")
+
+
+async def lookup_by_doi(doi: str) -> PaperMetadata | None:
+    return (await resolve_doi(doi, confirm_missing=False)).paper
 
 
 async def lookup_by_arxiv_id(arxiv_id: str) -> PaperMetadata | None:

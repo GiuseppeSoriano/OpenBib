@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from datetime import date
 from typing import ClassVar
+from urllib.parse import quote
 
 import httpx
 
+from app.common.identifiers import strip_doi_prefixes
 from app.config import settings
 from app.providers.base import (
     Author,
@@ -136,7 +138,8 @@ class OpenAlexProvider(BaseProvider):
 
     async def lookup_by_doi(self, doi: str) -> PaperMetadata | None:
         await self._limiter.acquire()
-        clean = doi.strip().removeprefix("https://doi.org/").removeprefix("http://doi.org/")
+        # Quoted so DOIs containing "#", "?" or "<" stay inside the URL path.
+        clean = quote(strip_doi_prefixes(doi), safe="/")
         resp = await self._client.get(f"/works/doi:{clean}", params=_params())
         if resp.status_code == 404:
             return None

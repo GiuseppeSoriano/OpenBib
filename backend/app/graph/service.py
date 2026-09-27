@@ -10,6 +10,8 @@ import redis.asyncio as aioredis
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.exceptions import InvalidIdentifierError
+from app.common.identifiers import parse_paper_identifier
 from app.graph.models import PaperGraphEdge
 from app.graph.schemas import ExpandResponse, GraphEdge, GraphNode, GraphResponse
 from app.papers import service as paper_service
@@ -352,6 +354,19 @@ async def library_seed_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     return [row[0] for row in q.all()]
 
 
+async def _resolve_single_seed(db: AsyncSession, canonical_key: str) -> str:
+    """Resolve an uncached DOI seed once, so a graph opened from a DOI link
+    shows the paper instead of a node titled with the raw key."""
+    if not canonical_key.startswith("doi:"):
+        return canonical_key
+    try:
+        parsed = parse_paper_identifier(canonical_key)
+    except InvalidIdentifierError:
+        return canonical_key
+    resolved = await paper_service.resolve_identifier(db, parsed)
+    return resolved.row.canonical_key if resolved.row is not None else canonical_key
+
+
 async def build_base_graph(
     db: AsyncSession,
     redis: aioredis.Redis | None,
@@ -366,6 +381,8 @@ async def build_base_graph(
     next open is fast.
     """
     seed_keys = list(dict.fromkeys(seed_keys))
+    if len(seed_keys) == 1:
+        seed_keys = [await _resolve_single_seed(db, seed_keys[0])]
     canonical_cache: dict[str, PaperMetadataRead] = {}
     group_cache: dict[str, list[PaperMetadataRead]] = {}
     nodes: dict[str, GraphNode] = {}

@@ -76,6 +76,19 @@ async def redis_backend(monkeypatch):
     await pool.aclose()
 
 
+@pytest.fixture(autouse=True)
+def hermetic_doi_resolution(monkeypatch):
+    """No test may reach a real DOI provider or doi.org: an empty chain makes
+    every uncached DOI resolve as ``unavailable`` (stored as pending)."""
+    from app.providers import registry
+
+    async def handle_not_registered(_doi: str) -> bool:
+        return False
+
+    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [])
+    monkeypatch.setattr(registry, "doi_handle_exists", handle_not_registered)
+
+
 @pytest.fixture
 def user_id():
     return uuid4()

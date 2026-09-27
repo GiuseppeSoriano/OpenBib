@@ -12,6 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from app.collections import service as collection_service
+from app.common.identifiers import PaperKey
 from app.common.rate_limit import client_ip, enforce_rate_limit
 from app.dependencies import DB, CurrentUser, OptionalUser, Redis
 from app.graph import service
@@ -121,7 +122,7 @@ async def collection_graph(
 
 @router.get("/paper/{paper_key:path}", response_model=GraphResponse)
 async def paper_graph(
-    paper_key: str,
+    paper_key: PaperKey,
     db: DB,
     redis: Redis,
     request: Request,
@@ -144,7 +145,7 @@ async def paper_graph(
 
 @router.get("/{paper_key:path}", response_model=GraphResponse)
 async def get_graph(
-    paper_key: str,
+    paper_key: PaperKey,
     db: DB,
     redis: Redis,
     request: Request,

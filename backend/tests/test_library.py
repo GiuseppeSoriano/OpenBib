@@ -7,11 +7,13 @@ from datetime import date
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
-from app.collections.models import Collection
+from app.collections.models import Collection, CollectionPaper
 from app.collections.service import add_paper as add_paper_to_collection
 from app.collections.service import get_user_stats
 from app.common.exceptions import ConflictError, NotFoundError
+from app.common.identifiers import synthetic_group_key
 from app.library import service as library_service
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
@@ -99,8 +101,104 @@ async def test_delete_entry_blocked_when_version_in_collection(db):
     await _cache_paper(db, "doi:10.1/z", "group:z")
     await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(HTTPException) as exc_info:
         await library_service.delete_entry(db, user.id, "group:z")
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "entry_in_collections"
+    assert exc_info.value.detail["collections"] == [{"id": str(coll.id), "name": "My Coll"}]
+
+
+async def test_delete_entry_with_detach_removes_it_from_collections(db):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await _cache_paper(db, "doi:10.1/z", "group:z")
+    await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
+
+    await library_service.delete_entry(db, user.id, "group:z", detach=True)
+
+    assert (await db.get(UserLibraryEntry, (user.id, "group:z"))) is None
+    assert (await db.get(CollectionPaper, (coll.id, "doi:10.1/z"))) is None
+
+
+async def test_unresolved_entry_outside_collections_can_be_deleted(db):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await add_paper_to_collection(db, coll.id, user.id, "10.9/pending")
+    from app.collections.service import remove_paper
+
+    await remove_paper(db, coll.id, user.id, "doi:10.9/pending")
+    group = synthetic_group_key("doi:10.9/pending")
+    assert (await db.get(UserLibraryEntry, (user.id, group))) is not None
+
+    await library_service.delete_entry(db, user.id, group)
+
+    assert (await db.get(UserLibraryEntry, (user.id, group))) is None
+    assert (await db.get(UserLibraryVersion, (user.id, "doi:10.9/pending"))) is None
+
+
+async def test_real_group_reanchors_a_synthetic_pin_with_its_tags_and_notes(db):
+    user = await _make_user(db)
+    synthetic = synthetic_group_key("doi:10.1/late")
+    await library_service.ensure_entry_and_version(db, user.id, synthetic, "doi:10.1/late")
+    await paper_service.add_tag(db, user.id, "doi:10.1/late", "later")
+    db.add(
+        Note(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            target_type="paper",
+            target_key="doi:10.1/late",
+            paper_group_key=None,
+            content="Read this",
+        )
+    )
+    await db.flush()
+
+    # Metadata arrives later; saving again under the real group must not
+    # leave a second, pin-less entry behind.
+    await _cache_paper(db, "doi:10.1/late", "group:late")
+    entry, pin = await library_service.ensure_entry_and_version(
+        db, user.id, "group:late", "doi:10.1/late", "openalex", authoritative_group=True
+    )
+
+    assert entry.paper_group_key == "group:late"
+    assert pin.paper_group_key == "group:late"
+    entries = (
+        (await db.execute(select(UserLibraryEntry).where(UserLibraryEntry.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    assert [e.paper_group_key for e in entries] == ["group:late"]
+    tags = (await db.execute(select(UserPaperTag).where(UserPaperTag.user_id == user.id))).scalars()
+    assert [(t.tag, t.paper_group_key) for t in tags] == [("later", "group:late")]
+    notes = (await db.execute(select(Note).where(Note.user_id == user.id))).scalars()
+    assert [n.paper_group_key for n in notes] == ["group:late"]
+
+
+async def test_non_authoritative_group_keeps_the_existing_pin(db):
+    user = await _make_user(db)
+    await library_service.ensure_entry_and_version(db, user.id, "group:first", "doi:10.1/keep")
+
+    entry, pin = await library_service.ensure_entry_and_version(
+        db, user.id, "group:client-guess", "doi:10.1/keep"
+    )
+
+    assert entry.paper_group_key == "group:first"
+    assert pin.paper_group_key == "group:first"
+    assert (await db.get(UserLibraryEntry, (user.id, "group:client-guess"))) is None
+
+
+async def test_reanchor_moves_only_the_version_when_other_pins_remain(db):
+    user = await _make_user(db)
+    await library_service.ensure_entry_and_version(db, user.id, "group:mixed", "doi:10.1/a")
+    await library_service.ensure_entry_and_version(db, user.id, "group:mixed", "doi:10.1/b")
+    await library_service.repin_primary(db, user.id, "group:mixed", "doi:10.1/b")
+
+    await library_service.reanchor_pin(db, user.id, "doi:10.1/b", "group:real")
+
+    old = await db.get(UserLibraryEntry, (user.id, "group:mixed"))
+    assert old is not None
+    assert old.primary_canonical_key == "doi:10.1/a"
+    assert (await db.get(UserLibraryEntry, (user.id, "group:real"))) is not None
 
 
 async def test_delete_entry_cascades_when_no_collections(db):

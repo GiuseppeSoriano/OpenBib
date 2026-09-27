@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import ClassVar
+from urllib.parse import quote
 
 import httpx
 
+from app.common.identifiers import strip_doi_prefixes
 from app.config import settings
 from app.providers.base import (
     Author,
@@ -133,7 +135,7 @@ class CrossrefProvider(BaseProvider):
 
     async def lookup_by_doi(self, doi: str) -> PaperMetadata | None:
         await self._limiter.acquire()
-        clean = doi.strip().removeprefix("https://doi.org/").removeprefix("http://doi.org/")
+        clean = quote(strip_doi_prefixes(doi), safe="/")
         resp = await self._client.get(f"/works/{clean}", params=_params())
         if resp.status_code == 404:
             return None

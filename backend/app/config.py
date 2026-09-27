@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     openalex_api_key: str = ""
     openalex_email: str = ""
     crossref_mailto: str = ""
+    # Budget for resolving one DOI across the provider chain before it is
+    # stored as pending, plus the per-request limits of batch imports.
+    doi_resolve_timeout_seconds: float = 10.0
+    import_resolve_concurrency: int = 4
+    import_request_budget_seconds: float = 25.0
 
     # Cache TTLs (seconds)
     cache_ttl_lookup: int = 86400

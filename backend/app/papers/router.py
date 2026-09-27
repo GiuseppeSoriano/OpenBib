@@ -6,8 +6,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Query, Request, Response
 
+from app.common.identifiers import DOI_RE, PaperKey
 from app.common.rate_limit import client_ip, enforce_rate_limit
-from app.dependencies import DB, CurrentUser, Redis
+from app.dependencies import DB, CurrentUser, OptionalUser, Redis
 from app.papers import service
 from app.papers.schemas import (
     PaperDetailRead,
@@ -115,23 +116,28 @@ async def get_dismissed(user: CurrentUser, db: DB):
     return keys
 
 
+# Keys are normalized (bare DOI or DOI link → doi:<lowercase>) on every route
+# below; deletes take the raw key and try it before the normalized form so
+# rows stored under legacy keys stay removable.
+
+
 @router.get("/{paper_key:path}/states", response_model=list[StateRead])
-async def get_states(paper_key: str, user: CurrentUser, db: DB):
+async def get_states(paper_key: PaperKey, user: CurrentUser, db: DB):
     return await service.get_paper_states(db, user.id, paper_key)
 
 
 @router.put("/{paper_key:path}/state", response_model=StateRead)
-async def set_state(paper_key: str, body: StateUpdate, user: CurrentUser, db: DB):
+async def set_state(paper_key: PaperKey, body: StateUpdate, user: CurrentUser, db: DB):
     return await service.set_paper_state(db, user.id, paper_key, body.state)
 
 
 @router.get("/{paper_key:path}/tags", response_model=list[TagRead])
-async def get_tags(paper_key: str, user: CurrentUser, db: DB):
+async def get_tags(paper_key: PaperKey, user: CurrentUser, db: DB):
     return await service.get_tags(db, user.id, paper_key)
 
 
 @router.post("/{paper_key:path}/tags", response_model=TagRead, status_code=201)
-async def add_tag(paper_key: str, body: TagCreate, user: CurrentUser, db: DB):
+async def add_tag(paper_key: PaperKey, body: TagCreate, user: CurrentUser, db: DB):
     return await service.add_tag(db, user.id, paper_key, body.tag)
 
 
@@ -141,7 +147,7 @@ async def remove_tag(paper_key: str, tag: str, user: CurrentUser, db: DB):
 
 
 @router.post("/{paper_key:path}/dismiss", status_code=201)
-async def dismiss_paper(paper_key: str, user: CurrentUser, db: DB):
+async def dismiss_paper(paper_key: PaperKey, user: CurrentUser, db: DB):
     dp = await service.dismiss_paper(db, user.id, paper_key)
     return {"paper_canonical_key": dp.paper_canonical_key, "dismissed_at": dp.dismissed_at}
 
@@ -158,5 +164,27 @@ async def undismiss_paper(paper_key: str, user: CurrentUser, db: DB):
 
 
 @router.get("/{paper_key:path}", response_model=PaperDetailRead)
-async def get_paper(paper_key: str, db: DB):
+async def get_paper(
+    paper_key: PaperKey,
+    request: Request,
+    response: Response,
+    user: OptionalUser,
+    db: DB,
+    redis: Redis,
+):
+    detail = await service.get_cached_detail(db, paper_key)
+    if detail is not None:
+        return detail
+    if paper_key.startswith("doi:") and DOI_RE.fullmatch(paper_key[len("doi:") :]):
+        # Only the live provider lookup is metered; cached details are free.
+        await enforce_rate_limit(
+            redis,
+            request,
+            response,
+            scope="paper-lookup",
+            identity=f"user:{user.id}" if user else client_ip(request),
+            limit=60 if user else 20,
+            window_seconds=60,
+            fail_closed=True,
+        )
     return await service.get_paper_detail(db, paper_key)

@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.common.identifiers import PaperKey
 from app.papers.schemas import PaperMetadataRead, StateRead
 
 
@@ -20,20 +21,21 @@ class LibraryVersionPin(BaseModel):
 
 class LibraryEntryEnsure(BaseModel):
     """Idempotent create — the frontend always knows both keys because it
-    just rendered them, so we never have to fetch metadata server-side."""
+    just rendered them, so we never have to fetch metadata server-side.
+    Cached metadata still wins over a mismatching ``paper_group_key``."""
 
-    paper_group_key: str = Field(max_length=512)
-    paper_canonical_key: str = Field(max_length=512)
+    paper_group_key: str = Field(max_length=512, pattern=r"^group:\S+$")
+    paper_canonical_key: PaperKey
     source_provider: str | None = Field(default=None, max_length=50)
 
 
 class LibraryVersionAdd(BaseModel):
-    paper_canonical_key: str = Field(max_length=512)
+    paper_canonical_key: PaperKey
     source_provider: str | None = Field(default=None, max_length=50)
 
 
 class LibraryEntryRepin(BaseModel):
-    primary_canonical_key: str = Field(max_length=512)
+    primary_canonical_key: PaperKey
 
 
 class LibraryEntryRead(BaseModel):

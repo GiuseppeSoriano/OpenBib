@@ -3,6 +3,8 @@
 import hashlib
 import re
 
+from app.common.identifiers import strip_doi_prefixes
+
 
 def _normalize_title(title: str | None) -> str:
     if not title:
@@ -33,9 +35,9 @@ def build_canonical_key(
     year: int | None = None,
 ) -> str:
     if doi:
-        normalized = doi.strip().lower()
-        normalized = normalized.removeprefix("https://doi.org/")
-        normalized = normalized.removeprefix("http://doi.org/")
+        # Never percent-decodes or validates: provider DOIs keep the exact
+        # keys they always had; only prefixed input (doi:, dx.doi.org) changes.
+        normalized = strip_doi_prefixes(doi, decode=False).lower()
         return f"doi:{normalized}"
 
     parts: list[str] = [build_paper_group_key(title, authors)]

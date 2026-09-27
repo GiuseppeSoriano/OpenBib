@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,19 +53,20 @@ class MemberAdd(BaseModel):
 
 
 class PaperAdd(BaseModel):
-    paper_canonical_key: str = Field(max_length=512)
-
-
-class IdentifierImport(BaseModel):
-    dois: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=500
+    paper_canonical_key: str = Field(
+        min_length=1,
+        max_length=512,
+        description="DOI, doi:…, https://doi.org/… or an existing hash: key",
     )
+
+
+# Blank lines are allowed here and dropped by the import service.
+class IdentifierImport(BaseModel):
+    dois: list[Annotated[str, Field(max_length=512)]] = Field(default_factory=list, max_length=500)
 
 
 class KeyImport(BaseModel):
-    keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=500
-    )
+    keys: list[Annotated[str, Field(max_length=512)]] = Field(default_factory=list, max_length=500)
 
 
 class CollectionPaperRead(BaseModel):
@@ -74,5 +75,26 @@ class CollectionPaperRead(BaseModel):
     position: int
     added_at: datetime
     paper: PaperMetadataRead | None = None
+    # False while the paper is stored as pending (providers unavailable).
+    resolved: bool
 
     model_config = {"from_attributes": True}
+
+
+class ImportLineResult(BaseModel):
+    line: int  # 1-based index within the request list
+    input: str
+    status: Literal["added", "duplicate", "invalid", "not_found", "unresolved"]
+    canonical_key: str | None = None
+    title: str | None = None
+
+
+class ImportResult(BaseModel):
+    added: int
+    duplicate: int
+    invalid: int
+    not_found: int
+    unresolved: int
+    total: int
+    skipped: int  # deprecated alias of ``duplicate``
+    results: list[ImportLineResult]
