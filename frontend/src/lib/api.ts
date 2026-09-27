@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { CitingOrder, ExpandRequest, ExpandResponse, GraphResponse, LibraryEntry, LibraryEntryListItem, LibraryVersionPin, Note, PaperDetail, PaperState, ReadingState, TokenResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { CitingOrder, ExpandRequest, ExpandResponse, GraphResponse, LibraryEntry, LibraryEntryListItem, LibraryVersionPin, Note, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -107,6 +107,8 @@ export const graph = {
   async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order } })).data; },
   async buildLibrary(order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>("/graph/library", { params: { order } })).data; },
   async expand(body: ExpandRequest) { return (await api.post<ExpandResponse>("/graph/expand", body)).data; },
+  async related(body: RelatedRangeRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<RelatedRangeResponse>("/graph/related", body, { signal: options.signal })).data; },
+  async topUp(body: TopUpRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<TopUpResponse>("/graph/related/top-up", body, { signal: options.signal })).data; },
 };
 
 export default api;

@@ -255,6 +255,9 @@ export interface GraphResponse {
   active_paper_group_key: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Related-range size and depth cap; absent from older servers (use 30 / 10,000). */
+  related_range_size?: number;
+  related_max_results?: number;
 }
 
 export type CitingOrder = "cited_by_count" | "recent";
@@ -274,4 +277,79 @@ export interface ExpandRequest {
 export interface ExpandResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+export interface RelatedRangeRequest {
+  source_key: string;
+  source_group_key: string;
+  direction: RelationDirection;
+  order: CitingOrder;
+  range_start: number;
+  last: boolean;
+  /** Pinned groups other than the source (≤ 500). */
+  exclude_group_keys: string[];
+}
+
+export interface RelatedRangeResponse {
+  source_key: string;
+  source_group_key: string;
+  direction: RelationDirection;
+  order: CitingOrder;
+  /** The served range in rank order, including nodes already on the canvas. */
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  group_keys: string[];
+  range_start: number;
+  /** Exclusive. */
+  range_end: number;
+  range_size: number;
+  max_results: number;
+  total_available: number;
+  total_exact: boolean;
+  total_capped: boolean;
+  provider_total: number | null;
+  scanned: number;
+  has_more: boolean;
+  exhausted: boolean;
+  clamped: boolean;
+  scan_incomplete: boolean;
+  snapshot_id: string | null;
+  reason: "no_provider_id" | null;
+}
+
+export interface TopUpSource {
+  source_key: string;
+  source_group_key: string;
+  /** Unpinned members of the (source, direction, order) branch (≤ 60). */
+  connected_group_keys: string[];
+}
+
+export interface TopUpRequest {
+  direction: RelationDirection;
+  order: CitingOrder;
+  target_per_source: number;
+  exclude_group_keys: string[];
+  sources: TopUpSource[];
+}
+
+export interface TopUpSourceResult {
+  source_key: string;
+  source_group_key: string;
+  added_group_keys: string[];
+  connected_count: number;
+  total_available: number;
+  total_exact: boolean;
+  total_capped: boolean;
+  provider_total: number | null;
+  exhausted: boolean;
+  reason: "no_provider_id" | null;
+  error: "provider_unavailable" | "timeout" | null;
+}
+
+export interface TopUpResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  sources: TopUpSourceResult[];
+  range_size: number;
+  max_results: number;
 }

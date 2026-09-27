@@ -30,12 +30,33 @@ export interface ForceGraphData {
 
 export const EMPTY_GRAPH: ForceGraphData = { nodes: [], links: [] };
 
-function endpointId(endpoint: string | ForceNode): string {
+export function endpointId(endpoint: string | ForceNode): string {
   return typeof endpoint === "object" ? endpoint.id : endpoint;
 }
 
-function linkKey(link: { source: string | ForceNode; target: string | ForceNode; relation_type: string }) {
+export function linkKey(link: { source: string | ForceNode; target: string | ForceNode; relation_type: string }) {
   return `${endpointId(link.source)}__${endpointId(link.target)}__${link.relation_type}`;
+}
+
+/**
+ * Drop nodes not in `keepIds`, and links that touch a dropped node or (when
+ * given) are not in `keepLinkKeys`. Survivors keep their object identity, so
+ * d3 positions and pins are untouched; the arrays are new.
+ */
+export function pruneGraph(
+  prev: ForceGraphData,
+  keepIds: ReadonlySet<string>,
+  keepLinkKeys?: ReadonlySet<string>,
+): ForceGraphData {
+  return {
+    nodes: prev.nodes.filter((node) => keepIds.has(node.id)),
+    links: prev.links.filter(
+      (link) =>
+        keepIds.has(endpointId(link.source)) &&
+        keepIds.has(endpointId(link.target)) &&
+        (!keepLinkKeys || keepLinkKeys.has(linkKey(link))),
+    ),
+  };
 }
 
 /** Ring-spawn geometry: the radius grows with sibling count so every
