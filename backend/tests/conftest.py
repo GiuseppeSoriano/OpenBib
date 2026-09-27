@@ -89,3 +89,22 @@ async def redis_backend(monkeypatch, isolated_settings):
 @pytest.fixture
 def user_id():
     return uuid4()
+
+
+@pytest.fixture
+def client_app(db):
+    from app.dependencies import get_db
+    from app.main import create_app
+
+    app = create_app()
+
+    async def dependency():
+        try:
+            yield db
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    app.dependency_overrides[get_db] = dependency
+    return app

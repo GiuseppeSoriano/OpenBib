@@ -116,8 +116,37 @@ def main():
                 "SELECT column_name FROM information_schema.columns WHERE table_name='zotero_credentials' AND column_name='api_key'"
             )
         )
+        # Upgrade the actual pre-OTP head with existing account/action data.
+        reset()
+        migrate("d6e7f8a9b0c1", key_file)
+        asyncio.run(
+            sql(
+                "INSERT INTO users (id,email,password_hash,display_name) VALUES (:id,'otp-migration@example.com','preserved-hash','Preserved')",
+                {"id": user_id},
+            )
+        )
+        for digit, purpose in enumerate(("verify_email", "reset_password", "change_email"), 1):
+            asyncio.run(
+                sql(
+                    "INSERT INTO user_action_tokens (id,user_id,purpose,token_digest,expires_at) VALUES (:id,:uid,:purpose,:digest,CURRENT_TIMESTAMP + INTERVAL '1 day')",
+                    {
+                        "id": str(uuid.uuid4()),
+                        "uid": user_id,
+                        "purpose": purpose,
+                        "digest": str(digit) * 64,
+                    },
+                )
+            )
+        migrate("head", key_file)
+        assert (
+            asyncio.run(sql("SELECT password_hash FROM users"))[0]["password_hash"]
+            == "preserved-hash"
+        )
+        actions = asyncio.run(sql("SELECT purpose,used_at FROM user_action_tokens"))
+        assert all((r["used_at"] is not None) == (r["purpose"] == "verify_email") for r in actions)
+        assert asyncio.run(sql("SELECT count(*) AS n FROM registration_challenges"))[0]["n"] == 0
         print(
-            "Clean upgrade, previous-head upgrade, encryption round-trip and failure atomicity passed"
+            "Clean upgrade, previous-head upgrade, encryption round-trip, failure atomicity and pre-OTP upgrade passed"
         )
 
 

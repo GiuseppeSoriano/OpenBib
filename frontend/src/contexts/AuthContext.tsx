@@ -4,13 +4,12 @@ import api, { refreshAccessToken, setAccessToken, setAuthFailureHandler } from "
 import { assertSession, changeSession, listenForSessionChanges, sessionGeneration } from "@/lib/session";
 import type { TokenResponse, User } from "@/types";
 
-interface RegistrationInput { email: string; password: string; displayName: string; locale: "en" | "it"; termsVersion: string; privacyVersion: string; }
+interface RegistrationInput { password: string; displayName: string; termsVersion: string; privacyVersion: string; }
 interface AuthState {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (input: RegistrationInput) => Promise<void>;
-  verifyEmail: (token: string, newPassword: string) => Promise<void>;
+  completeRegistration: (input: RegistrationInput) => Promise<void>;
   logout: () => Promise<void>;
   clearSession: () => void;
   refreshUser: () => Promise<void>;
@@ -71,13 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetchMe();
   }, [fetchMe]);
 
-  const register = useCallback(async (input: RegistrationInput) => {
-    await api.post("/auth/register", { email: input.email, password: input.password, display_name: input.displayName, locale: input.locale, accept_terms: true, terms_version: input.termsVersion, privacy_version: input.privacyVersion });
-  }, []);
-
-  const verifyEmail = useCallback(async (token: string, newPassword: string) => {
+  const completeRegistration = useCallback(async (input: RegistrationInput) => {
     let expected = 0;
-    await changeSession(() => api.post<TokenResponse>("/auth/verify-email", { token, new_password: newPassword }), ({ data }) => {
+    await changeSession(() => api.post<TokenResponse>("/auth/registration/complete", {
+      password: input.password, display_name: input.displayName, accept_terms: true,
+      terms_version: input.termsVersion, privacy_version: input.privacyVersion,
+    }), ({ data }) => {
       setAccessToken(data.access_token);
       expected = sessionGeneration();
     });
@@ -89,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await changeSession(() => api.post("/auth/logout"), clearSession);
   }, [clearSession]);
 
-  return <AuthContext.Provider value={{ user, isLoading, login, register, verifyEmail, logout, clearSession, refreshUser: fetchMe }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, isLoading, login, completeRegistration, logout, clearSession, refreshUser: fetchMe }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

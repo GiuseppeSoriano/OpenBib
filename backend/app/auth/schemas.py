@@ -11,19 +11,6 @@ def _normalize_email(value: str) -> str:
     return value.strip().lower()
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=15, max_length=128)
-    display_name: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
-    ]
-    locale: Literal["en", "it"] = "en"
-    accept_terms: Literal[True]
-    terms_version: str = Field(min_length=1, max_length=50)
-    privacy_version: str = Field(min_length=1, max_length=50)
-    _email = field_validator("email", mode="before")(_normalize_email)
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
@@ -41,11 +28,7 @@ class TokenRequest(BaseModel):
 
 
 class PasswordResetRequest(TokenRequest):
-    new_password: str = Field(min_length=15, max_length=128)
-
-
-class VerifyEmailRequest(PasswordResetRequest):
-    """Mailbox possession authorizes the final password, preventing account pre-claiming."""
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class EmailChangeRequest(BaseModel):
@@ -57,7 +40,7 @@ class EmailChangeRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=15, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class LegalAcceptanceRequest(BaseModel):
@@ -75,3 +58,22 @@ class TokenResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str = "If the request is valid, further instructions will be sent."
+
+
+class RegistrationVerifyRequest(BaseModel):
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class RegistrationCompleteRequest(LegalAcceptanceRequest):
+    password: str = Field(min_length=8, max_length=128)
+    display_name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
+    ]
+
+
+class RegistrationStatus(BaseModel):
+    stage: Literal["email", "otp", "profile", "expired", "locked"]
+    email_masked: str | None = None
+    expires_at: str | None = None
+    otp_expires_at: str | None = None
+    resend_after: int = 0

@@ -52,6 +52,30 @@ class UserActionToken(Base):
     __table_args__ = (Index("ix_action_user_purpose", "user_id", "purpose"),)
 
 
+class RegistrationChallenge(Base):
+    """No account or password exists until mailbox verification and completion."""
+
+    __tablename__ = "registration_challenges"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    locale: Mapped[str] = mapped_column(String(2), nullable=False)
+    cookie_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    otp_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    otp_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resend_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class EmailOutbox(Base):
     __tablename__ = "email_outbox"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -61,3 +61,6 @@ known-first-party = ["app", "scripts", "tests", "alembic"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["live: opt-in tests requiring Semantic Scholar credentials and network"]
+
+[tool.setuptools.package-data]
+"app.auth" = ["assets/*.png"]

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 from dataclasses import dataclass
@@ -49,6 +51,12 @@ class EncryptionKeyring:
             nonce, value.encode(), f"{purpose}:{aad}:v{version}".encode()
         )
         return EncryptedValue(ciphertext=ciphertext, nonce=nonce, key_version=version)
+
+    def digest(self, value: str, *, purpose: str, version: int) -> str:
+        """Keyed verification for low-entropy secrets, isolated by purpose/version."""
+        return hmac.new(
+            self._purpose_key(version, purpose), value.encode(), hashlib.sha256
+        ).hexdigest()
 
     def decrypt(self, value: EncryptedValue, *, purpose: str, aad: str) -> str:
         plaintext = AESGCM(self._purpose_key(value.key_version, purpose)).decrypt(
