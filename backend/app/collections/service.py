@@ -393,10 +393,23 @@ async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]
     )
     total_papers = total_papers_result.scalar() or 0
 
-    # Distinct papers
+    # Distinct papers: versions of one work share a group key; uncached keys count on their own
     distinct_papers_result = await db.execute(
-        select(func.count(func.distinct(CollectionPaper.paper_canonical_key)))
+        select(
+            func.count(
+                func.distinct(
+                    func.coalesce(
+                        CachedPaperMetadata.paper_group_key, CollectionPaper.paper_canonical_key
+                    )
+                )
+            )
+        )
+        .select_from(CollectionPaper)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
+        .outerjoin(
+            CachedPaperMetadata,
+            CachedPaperMetadata.canonical_key == CollectionPaper.paper_canonical_key,
+        )
         .where(Collection.owner_id == user_id)
     )
     distinct_papers = distinct_papers_result.scalar() or 0

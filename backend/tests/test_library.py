@@ -324,6 +324,25 @@ async def test_user_stats_includes_library_total(db):
     assert stats["distinct_papers"] == 2
 
 
+async def test_user_stats_count_versions_of_one_paper_once(db):
+    user = await _make_user(db, email="carol@example.com")
+    first = await _make_collection(db, user.id, name="First")
+    second = await _make_collection(db, user.id, name="Second")
+    await _cache_paper(db, "doi:10.1/v1", "group:versions")
+    await _cache_paper(db, "doi:10.1/v2", "group:versions")
+    await add_paper_to_collection(db, first.id, user.id, "doi:10.1/v1")
+    await add_paper_to_collection(db, second.id, user.id, "doi:10.1/v2")
+    # A legacy row without cached metadata falls back to its own key, once across collections.
+    db.add(CollectionPaper(collection_id=first.id, paper_canonical_key="hash:0123456789abcdef"))
+    db.add(CollectionPaper(collection_id=second.id, paper_canonical_key="hash:0123456789abcdef"))
+    await db.flush()
+
+    stats = await get_user_stats(db, user.id)
+    assert stats["total_collections"] == 2
+    assert stats["total_papers"] == 4
+    assert stats["distinct_papers"] == 2
+
+
 async def test_remove_paper_from_collection_keeps_library_entry(db):
     """Removing a paper from a collection must NOT touch the Library row."""
     from app.collections.service import remove_paper
