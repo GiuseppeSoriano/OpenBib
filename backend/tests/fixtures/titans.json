@@ -1,0 +1,21 @@
+{
+  "paperId": "5e7a795d89910634f001cc3a631023f1dd4e2e23",
+  "title": "Titans: Learning to Memorize at Test Time",
+  "authors": [
+    {"authorId": "0001", "name": "Ali Behrouz"},
+    {"authorId": "0002", "name": "Pei-Lin Zhong"},
+    {"authorId": "0003", "name": "V. Mirrokni"}
+  ],
+  "abstract": "A mocked abstract for normalization regression tests.",
+  "externalIds": {"DOI": "10.48550/arXiv.2501.00663", "ArXiv": "2501.00663"},
+  "year": 2025,
+  "publicationDate": "2024-12-31",
+  "citationCount": 341,
+  "referenceCount": 135,
+  "isOpenAccess": true,
+  "openAccessPdf": {"url": "https://arxiv.org/pdf/2501.00663"},
+  "url": "https://www.semanticscholar.org/paper/5e7a795d89910634f001cc3a631023f1dd4e2e23",
+  "venue": "arXiv.org",
+  "publicationTypes": ["JournalArticle"],
+  "fieldsOfStudy": ["Computer Science"]
+}

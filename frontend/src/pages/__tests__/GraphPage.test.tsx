@@ -1,6 +1,7 @@
 import { mockRefresh } from "@/test/auth-mock";
-import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { graph as graphApi } from "@/lib/api";
 import { Routes, Route } from "react-router-dom";
 import GraphPage from "@/pages/GraphPage";
 import { renderWithProviders } from "@/test/utils";
@@ -85,6 +86,42 @@ function renderGraph(route: string) {
 }
 
 describe("GraphPage", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows a base-load failure and recovers through explicit retry", async () => {
+    vi.mocked(graphApi.buildPaper).mockRejectedValueOnce({
+      response: { status: 503, data: { detail: "Semantic Scholar is busy; please retry." } },
+    });
+    renderGraph("/graph/hash:seed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Semantic Scholar is busy");
+    expect(graphApi.buildPaper).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("force-graph-stub")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(graphApi.buildPaper).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the graph on expansion failure and retries the failed request", async () => {
+    vi.mocked(graphApi.expand)
+      .mockRejectedValueOnce({ response: { status: 503, data: { detail: "Please retry later." } } })
+      .mockResolvedValueOnce({ nodes: [], edges: [] });
+    renderGraph("/graph/hash:seed");
+    await screen.findByTestId("force-graph-stub");
+    fireEvent.click(screen.getByRole("button", { name: "Expand entire graph" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Please retry later.");
+    expect(screen.getByText("1 nodes · 0 edges")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(graphApi.expand).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(graphApi.expand).mock.calls[1]).toEqual(vi.mocked(graphApi.expand).mock.calls[0]);
+  });
+
+  it("uses a readable fallback for network failures or non-string error details", async () => {
+    vi.mocked(graphApi.buildPaper).mockRejectedValueOnce({ response: { data: { detail: [] } } });
+    renderGraph("/graph/hash:seed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load the graph");
+  });
+
   it("renders the full-viewport canvas with the expansion bar (no search input)", async () => {
     renderGraph("/graph/hash:seed");
 

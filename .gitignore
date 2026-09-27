@@ -21,6 +21,8 @@ frontend/.vite/
 .env
 .env.local
 .env.production
+.env.*
+!.env.example
 
 # ── IDE / OS ──────────────────────────────────────────────
 .DS_Store

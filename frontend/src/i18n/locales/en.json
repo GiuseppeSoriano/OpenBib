@@ -197,6 +197,8 @@
     "deleteFromLibrary": "Delete from Library"
   },
   "graph": {
+    "errorFallback": "Unable to load the graph. The service may be temporarily unavailable. Please try again later.",
+    "retry": "Retry",
     "title": "Citation Graph",
     "modePaper": "Paper",
     "modeCollection": "Collection",
@@ -233,8 +235,8 @@
     "tagline": "Discover, organize, and explore research papers",
     "searchPlaceholder": "Search millions of papers by title, author, DOI…",
     "hint": "Free to explore — no account needed. Sign up to build your library.",
-    "featureSearchTitle": "Multi-provider search",
-    "featureSearchDesc": "One search across OpenAlex, arXiv, Crossref, and Europe PMC.",
+    "featureSearchTitle": "Paper search",
+    "featureSearchDesc": "Discover papers with Semantic Scholar.",
     "featureGraphTitle": "Citation graph",
     "featureGraphDesc": "Explore how papers cite each other, fluidly.",
     "featureLibraryTitle": "Personal library",

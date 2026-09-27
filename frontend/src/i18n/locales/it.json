@@ -197,6 +197,8 @@
     "deleteFromLibrary": "Elimina dalla Libreria"
   },
   "graph": {
+    "errorFallback": "Impossibile caricare il grafo. Il servizio potrebbe essere temporaneamente non disponibile. Riprova tra poco.",
+    "retry": "Riprova",
     "title": "Grafo delle citazioni",
     "modePaper": "Articolo",
     "modeCollection": "Raccolta",
@@ -233,8 +235,8 @@
     "tagline": "Scopri, organizza ed esplora articoli scientifici",
     "searchPlaceholder": "Cerca tra milioni di articoli per titolo, autore, DOI…",
     "hint": "Esplora liberamente — nessun account richiesto. Registrati per costruire la tua libreria.",
-    "featureSearchTitle": "Ricerca multi-provider",
-    "featureSearchDesc": "Una sola ricerca su OpenAlex, arXiv, Crossref ed Europe PMC.",
+    "featureSearchTitle": "Ricerca di articoli",
+    "featureSearchDesc": "Scopri articoli con Semantic Scholar.",
     "featureGraphTitle": "Grafo delle citazioni",
     "featureGraphDesc": "Esplora in modo fluido come gli articoli si citano.",
     "featureLibraryTitle": "Libreria personale",

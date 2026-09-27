@@ -37,6 +37,7 @@ function paper(overrides: Partial<PaperMetadata>): PaperMetadata {
 
 describe("providerLabel", () => {
   it("maps known providers to display names", () => {
+    expect(providerLabel("semantic_scholar")).toBe("Semantic Scholar");
     expect(providerLabel("openalex")).toBe("OpenAlex");
     expect(providerLabel("europepmc")).toBe("Europe PMC");
     expect(providerLabel(null)).toBe("—");

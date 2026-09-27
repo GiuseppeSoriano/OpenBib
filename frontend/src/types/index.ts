@@ -30,6 +30,7 @@ export interface PaperMetadata {
   arxiv_id: string | null;
   pmid?: string | null;
   pmcid?: string | null;
+  semantic_scholar_id?: string | null;
   openalex_id?: string | null;
   venue: string | null;
   volume?: string | null;
@@ -52,6 +53,7 @@ export interface Author {
   name: string;
   family_name?: string | null;
   given_name?: string | null;
+  semantic_scholar_id?: string | null;
   openalex_id: string | null;
   orcid: string | null;
   affiliations: string[];

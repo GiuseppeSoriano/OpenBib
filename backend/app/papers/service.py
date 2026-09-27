@@ -21,8 +21,9 @@ from app.papers.models import (
     UserPaperTag,
 )
 from app.papers.schemas import PaperMetadataRead
-from app.providers.base import PaperMetadata
+from app.providers.base import Author, PaperMetadata
 from app.providers.base import SearchResult as ProviderSearchResult
+from app.providers.identity import deduplicate, normalize_arxiv, normalize_doi
 
 
 def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, str]:
@@ -61,6 +62,7 @@ def cached_paper_to_read(row: CachedPaperMetadata) -> PaperMetadataRead:
             "pmid": row.pmid,
             "pmcid": row.pmcid,
             "openalex_id": row.openalex_id,
+            "semantic_scholar_id": row.semantic_scholar_id,
             "venue": row.venue,
             "volume": row.volume,
             "issue": row.issue,
@@ -80,19 +82,36 @@ def cached_paper_to_read(row: CachedPaperMetadata) -> PaperMetadataRead:
     )
 
 
-async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
+async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> list[PaperMetadata]:
+    """Upsert by strong identity without renaming keys already used by saved data.
+
+    A later DOI may enrich an S2-only snapshot. Keep its durable key, and resolve
+    both aliases in get_cached_paper; never orphan library pins, notes or edges.
+    """
+    papers = deduplicate(papers)
     if not papers:
-        return
-
-    existing_rows = await db.execute(
-        select(CachedPaperMetadata).where(
-            CachedPaperMetadata.canonical_key.in_([paper.canonical_key for paper in papers])
-        )
-    )
-    existing = {row.canonical_key: row for row in existing_rows.scalars().all()}
-
+        return []
+    clauses = [CachedPaperMetadata.canonical_key.in_([p.canonical_key for p in papers])]
+    for field in ("semantic_scholar_id", "doi", "arxiv_id", "pmid", "pmcid"):
+        values = [getattr(p, field) for p in papers if getattr(p, field)]
+        if values:
+            clauses.append(getattr(CachedPaperMetadata, field).in_(values))
+    rows = list((await db.execute(select(CachedPaperMetadata).where(or_(*clauses)))).scalars())
+    stored = []
     for paper in papers:
-        row = existing.get(paper.canonical_key)
+        row = None
+        for candidate in sorted(rows, key=lambda r: r.canonical_key):
+            data = cached_paper_to_read(candidate).model_dump()
+            data["authors"] = [Author(**author) for author in data["authors"]]
+            combined = deduplicate([PaperMetadata(**data), paper])
+            if len(combined) == 1:
+                row = candidate
+                paper = combined[0]
+                paper.canonical_key = row.canonical_key
+                # Group keys anchor notes/tags. Preserve the existing anchor.
+                paper.paper_group_key = row.paper_group_key
+                break
+        stored.append(paper)
         incoming_sources = _provider_sources_for(paper)
         payload = {
             "paper_group_key": paper.paper_group_key,
@@ -105,6 +124,7 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
             "pmid": paper.pmid,
             "pmcid": paper.pmcid,
             "openalex_id": paper.openalex_id,
+            "semantic_scholar_id": paper.semantic_scholar_id,
             "venue": paper.venue,
             "volume": paper.volume,
             "issue": paper.issue,
@@ -121,13 +141,13 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
             "provider_source": paper.provider_source,
         }
         if row is None:
-            db.add(
-                CachedPaperMetadata(
-                    canonical_key=paper.canonical_key,
-                    provider_sources_json=incoming_sources,
-                    **payload,
-                )
+            row = CachedPaperMetadata(
+                canonical_key=paper.canonical_key,
+                provider_sources_json=incoming_sources,
+                **payload,
             )
+            db.add(row)
+            rows.append(row)
             continue
         for field_name, value in payload.items():
             setattr(row, field_name, value)
@@ -139,10 +159,31 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
         db.add(row)
 
     await db.flush()
+    return stored
 
 
 async def get_cached_paper(db: AsyncSession, canonical_key: str) -> CachedPaperMetadata | None:
-    return await db.get(CachedPaperMetadata, canonical_key)
+    row = await db.get(CachedPaperMetadata, canonical_key)
+    if row is not None:
+        return row
+    prefix, _, value = canonical_key.partition(":")
+    fields = {
+        "s2": "semantic_scholar_id",
+        "doi": "doi",
+        "arxiv": "arxiv_id",
+        "pmid": "pmid",
+        "pmcid": "pmcid",
+    }
+    if prefix not in fields:
+        return None
+    value = {"doi": normalize_doi, "arxiv": normalize_arxiv}.get(prefix, str.strip)(value)
+    result = await db.execute(
+        select(CachedPaperMetadata)
+        .where(getattr(CachedPaperMetadata, fields[prefix]) == value)
+        .order_by(CachedPaperMetadata.canonical_key)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_cached_papers_by_group(
@@ -158,19 +199,22 @@ async def get_cached_papers_by_group(
 
 async def get_paper_detail(db: AsyncSession, canonical_key: str) -> dict:
     """Hydrate a single paper from the durable metadata snapshot, falling
-    back to a live DOI lookup (which upserts the snapshot) on a cache miss.
+    back to a live stable-identifier lookup on a cache miss.
 
     hash:-keyed papers with no cached row cannot be re-fetched and 404.
     """
     row = await get_cached_paper(db, canonical_key)
 
-    if row is None and canonical_key.startswith("doi:"):
+    if row is None and canonical_key.startswith(("doi:", "s2:", "arxiv:", "pmid:", "pmcid:")):
         from app.providers import registry
 
-        doi = canonical_key[len("doi:") :]
-        paper = await registry.lookup_by_doi(doi)
+        paper = (
+            await registry.lookup_by_doi(canonical_key[4:])
+            if canonical_key.startswith("doi:")
+            else await registry.lookup_by_id(canonical_key)
+        )
         if paper is not None:
-            await cache_papers(db, [paper])
+            paper = (await cache_papers(db, [paper]))[0]
             row = await get_cached_paper(db, paper.canonical_key)
 
     if row is None:
@@ -196,9 +240,8 @@ async def get_cached_papers_by_keys(
 
 
 def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchResult:
-    """Interleave provider results round-robin by rank, deduplicate by
-    canonical_key (keeping the earliest-position occurrence), and union
-    provider_sources on each kept paper.
+    """Interleave provider results by rank, merge strong identity aliases and
+    complementary metadata, retaining the first result position.
 
     Returns a synthetic SearchResult whose `.papers` preserves the merged
     order, `.providers` is the list of provider names that contributed,
@@ -217,22 +260,14 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         )
 
     streams = [r.papers for r in results]
-    seen: dict[str, PaperMetadata] = {}
-    ordered: list[PaperMetadata] = []
-
-    for round_papers in zip_longest(*streams):
-        for paper in round_papers:
-            if paper is None:
-                continue
-            if paper.canonical_key in seen:
-                existing = seen[paper.canonical_key]
-                sources = set(_provider_sources_for(existing))
-                sources.update(_provider_sources_for(paper))
-                existing.provider_sources = sorted(sources)
-                continue
-            paper.provider_sources = sorted(set(_provider_sources_for(paper)))
-            seen[paper.canonical_key] = paper
-            ordered.append(paper)
+    ordered = deduplicate(
+        [
+            paper
+            for round_papers in zip_longest(*streams)
+            for paper in round_papers
+            if paper is not None
+        ]
+    )
 
     raw_total = sum(len(r.papers) for r in results)
     provider_names = [r.provider for r in results if r.provider]
