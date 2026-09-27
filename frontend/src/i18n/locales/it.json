@@ -4,7 +4,11 @@
     "confirm": "Conferma",
     "delete": "Elimina",
     "language": "Lingua",
-    "theme": "Tema"
+    "theme": "Tema",
+    "showMore": "Mostra altri",
+    "loading": "Caricamento…",
+    "retry": "Riprova",
+    "loadFailed": "Impossibile caricare gli elementi. Riprova."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -13,7 +17,8 @@
     "library": "Libreria",
     "settings": "Impostazioni",
     "signIn": "Accedi",
-    "logout": "Esci"
+    "logout": "Esci",
+    "contribute": "Open source · Contribuisci su GitHub"
   },
   "auth": {
     "logoutFailed": "Disconnessione non completata. La sessione è ancora attiva: riprova.",
@@ -173,7 +178,9 @@
     "notes": "Note",
     "notePlaceholder": "Scrivi una nota su questa raccolta…",
     "createdOn": "Creata il {{date}}",
-    "notFound": "Raccolta non trovata"
+    "notFound": "Raccolta non trovata",
+    "createFailed": "Impossibile creare la raccolta. Riprova.",
+    "deleteFailed": "Impossibile eliminare la raccolta. Riprova."
   },
   "library": {
     "title": "Libreria",

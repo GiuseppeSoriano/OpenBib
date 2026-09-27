@@ -4,7 +4,11 @@
     "confirm": "Confirm",
     "delete": "Delete",
     "language": "Language",
-    "theme": "Theme"
+    "theme": "Theme",
+    "showMore": "Show more",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "loadFailed": "Could not load items. Please try again."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -13,7 +17,8 @@
     "library": "Library",
     "settings": "Settings",
     "signIn": "Sign in",
-    "logout": "Logout"
+    "logout": "Logout",
+    "contribute": "Open source · Contribute on GitHub"
   },
   "auth": {
     "logoutFailed": "Logout could not be completed. Your session is still active; please try again.",
@@ -173,7 +178,9 @@
     "notes": "Notes",
     "notePlaceholder": "Write a note about this collection…",
     "createdOn": "Created {{date}}",
-    "notFound": "Collection not found"
+    "notFound": "Collection not found",
+    "createFailed": "Could not create the collection. Please try again.",
+    "deleteFailed": "Could not delete the collection. Please try again."
   },
   "library": {
     "title": "Library",

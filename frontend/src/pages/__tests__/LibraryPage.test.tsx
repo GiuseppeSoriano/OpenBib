@@ -124,3 +124,35 @@ describe("LibraryPage", () => {
     expect(await screen.findByTestId("paper-details")).toBeInTheDocument();
   });
 });
+
+it("continues beyond 100 entries without duplicating page overlaps", async () => {
+  const { library } = await import("@/lib/api");
+  const { waitFor } = await import("@testing-library/react");
+  vi.mocked(library.listEntries).mockImplementation(async (params) => {
+    const page = params?.page ?? 1;
+    const start = (page - 1) * 25;
+    const batch = Array.from({ length: page < 5 ? 25 : 2 }, (_, i) => {
+      const key = `entry-${start + i}`;
+      return { ...entries[0]!, paper_group_key: key, primary_canonical_key: key, primary_version: paper(key, `Library item ${start + i}`) };
+    });
+    if (page === 5) batch[0] = { ...batch[0]!, paper_group_key: 'entry-99', primary_version: paper('entry-99', 'Library item 99') };
+    return batch;
+  });
+  renderWithProviders(<LibraryPage />);
+  await screen.findByText("Library item 0");
+  for (let page = 2; page <= 5; page++) {
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await screen.findByText(`Library item ${page === 5 ? 101 : (page - 1) * 25}`);
+  }
+  expect(screen.getAllByText("Library item 99")).toHaveLength(1);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Show more" })).toBeNull());
+});
+
+it("shows a retry instead of an empty library on a failed request", async () => {
+  const { library } = await import("@/lib/api");
+  vi.mocked(library.listEntries).mockRejectedValueOnce(new Error("offline")).mockResolvedValue(entries);
+  renderWithProviders(<LibraryPage />);
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+});

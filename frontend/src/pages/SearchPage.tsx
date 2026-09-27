@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AxiosError } from "axios";
@@ -18,6 +18,8 @@ import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import SearchResultCard from "@/components/search/SearchResultCard";
 import VersionPicker from "@/components/search/VersionPicker";
 import { providerLabel } from "@/components/paper/versionLabel";
+import { mergeSearchPages } from "@/lib/search-pages";
+import QueryError from "@/components/ui/QueryError";
 import "./SearchPage.css";
 
 function searchErrorMessage(error: unknown, fallback: string): string {
@@ -39,7 +41,7 @@ function getSelectedPaper(
 
 export default function SearchPage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(initialQuery);
@@ -49,32 +51,27 @@ export default function SearchPage() {
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data: pages, isLoading, isError, error, isFetching, refetch, hasNextPage, fetchNextPage, isFetchingNextPage, isFetchNextPageError } = useInfiniteQuery({
     queryKey: ["search", submitted],
-    queryFn: async () => {
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) => {
       const { data } = await api.get<SearchResult>("/papers/search", {
-        params: { q: submitted, page: 1, size: 20 },
+        params: { q: submitted, page: pageParam, size: 20 },
       });
       return data;
     },
-    enabled: !!submitted,
-    retry: 2,
-    retryDelay: 1000,
+    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.page + 1 : undefined,
+    enabled: !!submitted && !authLoading,
+    retry: false,
   });
 
-  useEffect(() => {
-    if (!data) {
-      setSelectedVersions({});
-      return;
-    }
-    const nextSelections: Record<string, string> = {};
-    for (const item of data.items) {
-      if (item.kind === "paper_group") {
-        nextSelections[item.paper_group_key] = item.selected_version.canonical_key;
-      }
-    }
-    setSelectedVersions(nextSelections);
-  }, [data]);
+  const data = useMemo(() => pages ? {
+    items: mergeSearchPages(pages.pages),
+    providers: [...new Set(pages.pages.flatMap(page => page.providers))],
+  } : undefined, [pages]);
+
+  // Loading another page must not reset a user's selected paper version.
+  useEffect(() => { setSelectedVersions({}); }, [submitted]);
 
   // User-scoped overlays: never fired anonymously (no 401 noise).
   const { data: memberships } = useQuery({
@@ -142,7 +139,7 @@ export default function SearchPage() {
       {isLoading && <SkeletonCard count={4} />}
 
       {isError && (
-        <p className="search-error">{searchErrorMessage(error, t("search.errorFallback"))}</p>
+        <QueryError message={searchErrorMessage(error, t("search.errorFallback"))} busy={isFetching} onRetry={() => void (isFetchNextPageError ? fetchNextPage() : refetch())} />
       )}
 
       {data && (
@@ -150,7 +147,7 @@ export default function SearchPage() {
           <div className="search-toolbar">
             <p className="search-meta">
               {t("search.resultsMeta", {
-                count: data.total_count,
+                count: data.items.length,
                 providers:
                   data.providers.length > 0
                     ? data.providers.map(providerLabel).join(", ")
@@ -225,6 +222,9 @@ export default function SearchPage() {
         />
       )}
 
+      {hasNextPage && !isFetchNextPageError && <div className="load-more">
+        <button className="btn btn-secondary" disabled={isFetching} onClick={() => void fetchNextPage()}>{t(isFetchingNextPage ? "common.loading" : "common.showMore")}</button>
+      </div>}
       <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );

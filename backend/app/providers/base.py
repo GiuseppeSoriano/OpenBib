@@ -81,6 +81,8 @@ class SearchResult:
     page_size: int
     provider: str
     providers: list[str] = field(default_factory=list)
+    # Providers must report continuation before local filtering/deduplication.
+    has_more: bool = False
 
 
 @dataclass

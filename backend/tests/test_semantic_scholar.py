@@ -501,3 +501,25 @@ async def test_normalized_publication_types_reach_zotero(db):
         for p in stored
     ]
     assert types == ["preprint", "conferencePaper", "bookSection"]
+
+
+@pytest.mark.parametrize(
+    ("next_offset", "page", "author", "expected"),
+    [
+        (20, 1, None, True),
+        (20, 1, "no matching author", True),
+        (None, 1, None, False),
+        (1000, 50, None, False),
+    ],
+)
+async def test_search_continuation_survives_filtering_and_respects_limit(
+    provider, next_offset, page, author, expected
+):
+    client, responses, _ = provider
+    responses.append({"data": [TITANS, TITANS], "total": 10000, "next": next_offset})
+    result = await client.search("Titans", SearchFilters(author=author), page=page, size=20)
+    assert result.has_more is expected
+    merged = service.round_robin_dedupe([result])
+    assert service.build_search_response(merged)["has_more"] is expected
+    if author:
+        assert not result.papers

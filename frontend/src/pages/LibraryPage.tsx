@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { library, zotero } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import type { LibraryEntryListItem, ZoteroSyncReport } from "@/types";
+import QueryError from "@/components/ui/QueryError";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -28,17 +29,26 @@ export default function LibraryPage() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
-  const { data: entries, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = useInfiniteQuery({
     queryKey: ["library-entries"],
-    queryFn: () => library.listEntries({ page: 1, size: 100 }),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => library.listEntries({ page: pageParam, size: 25 }),
+    getNextPageParam: (lastPage, _pages, page) => lastPage.length === 25 ? page + 1 : undefined,
+  });
+  const entries = useMemo(() => data ? Array.from(new Map(data.pages.flat().map(entry => [entry.paper_group_key, entry])).values()) : undefined, [data]);
+
+  const { data: focusedEntry } = useQuery({
+    queryKey: ["library-entry", focusKey],
+    queryFn: () => library.getEntry(focusKey!),
+    enabled: !!focusKey && !!entries && !entries.some(entry => entry.paper_group_key === focusKey),
   });
 
-  // Deep link (?focus=<group_key>) opens the details panel.
+  // A deep link can target an entry beyond the pages loaded so far.
   useEffect(() => {
     if (!focusKey || !entries) return;
-    const entry = entries.find((e) => e.paper_group_key === focusKey);
+    const entry = entries.find((e) => e.paper_group_key === focusKey) ?? focusedEntry;
     if (entry) setDetailsKey(entry.primary_canonical_key);
-  }, [focusKey, entries]);
+  }, [focusKey, entries, focusedEntry]);
 
   const { data: zoteroStatus } = useQuery({
     queryKey: ["zotero-status"],
@@ -107,6 +117,7 @@ export default function LibraryPage() {
       </header>
 
       {isLoading && <SkeletonCard count={4} />}
+      {isError && <QueryError onRetry={() => void (isFetchNextPageError ? fetchNextPage() : refetch())} busy={isFetching} />}
 
       {entries && entries.length === 0 && (
         <EmptyState
@@ -132,6 +143,9 @@ export default function LibraryPage() {
         ))}
       </div>
 
+      {hasNextPage && !isFetchNextPageError && <div className="load-more">
+        <button className="btn btn-secondary" disabled={isFetching} onClick={() => void fetchNextPage()}>{t(isFetchingNextPage ? "common.loading" : "common.showMore")}</button>
+      </div>}
       <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
 
       {pendingDelete && (

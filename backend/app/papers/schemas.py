@@ -73,6 +73,7 @@ class SearchResultRead(BaseModel):
     items: list[SearchPaperItemRead | SearchPaperGroupItemRead]
     total_count: int
     raw_total_count: int
+    has_more: bool = False
     page: int
     page_size: int
     providers: list[str] = []

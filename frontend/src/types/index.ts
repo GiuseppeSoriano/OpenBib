@@ -201,6 +201,7 @@ export interface SearchResult {
   items: SearchResultItem[];
   total_count: number;
   raw_total_count: number;
+  has_more: boolean;
   page: number;
   page_size: number;
   providers: string[];

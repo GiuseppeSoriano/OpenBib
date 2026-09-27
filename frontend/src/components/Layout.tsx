@@ -17,7 +17,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
-      <footer className="app-footer"><Link to="/privacy">{t("legal.privacy")}</Link><Link to="/terms">{t("legal.terms")}</Link></footer>
+      <footer className="app-footer"><Link to="/privacy">{t("legal.privacy")}</Link><Link to="/terms">{t("legal.terms")}</Link><a href="https://github.com/GiuseppeSoriano/OpenBib" target="_blank" rel="noopener noreferrer">{t("nav.contribute")}</a></footer>
       <MobileTabBar />
     </div>
   );
