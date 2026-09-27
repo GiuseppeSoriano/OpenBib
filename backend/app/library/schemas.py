@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -60,3 +61,24 @@ class LibraryEntryListItem(BaseModel):
 
 class LibraryKeysResponse(BaseModel):
     paper_group_keys: list[str] = []
+
+
+class LibraryResolve(BaseModel):
+    """Retry or correct a stored paper key. ``paper_canonical_key`` is the key
+    exactly as stored (not normalized); ``replacement`` is a corrected DOI,
+    DOI link or known ``hash:`` key."""
+
+    paper_canonical_key: str = Field(min_length=1, max_length=512)
+    replacement: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class LibraryResolveRead(BaseModel):
+    status: Literal["resolved", "not_found", "unavailable"]
+    previous_key: str
+    # Effective key after re-keying (equal to previous_key when unchanged).
+    canonical_key: str
+    # Effective Library group; None when the caller has no pin for the paper.
+    paper_group_key: str | None = None
+    paper: PaperMetadataRead | None = None
+    # Rows touched per table.
+    moved: dict[str, int] = {}

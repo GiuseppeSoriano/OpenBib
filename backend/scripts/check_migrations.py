@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -30,7 +31,7 @@ async def sql(statement, parameters=None):
         await engine.dispose()
 
 
-def migrate(revision, key_file, success=True):
+def migrate(revision, key_file, success=True, command="upgrade"):
     env = {
         **os.environ,
         "DATABASE_URL": TARGET,
@@ -40,10 +41,12 @@ def migrate(revision, key_file, success=True):
         "DATABASE_URL_FILE": "",
     }
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", revision], env=env, capture_output=True
+        [sys.executable, "-m", "alembic", command, revision], env=env, capture_output=True
     )
     if (result.returncode == 0) != success:
+        print(result.stderr.decode(errors="replace"), file=sys.stderr)
         raise RuntimeError("Unexpected migration outcome; inspect the disposable database")
+    return result.stderr.decode(errors="replace")
 
 
 def reset():
@@ -119,6 +122,117 @@ def main():
         print(
             "Clean upgrade, previous-head upgrade, encryption round-trip and failure atomicity passed"
         )
+        check_key_repair(key_file)
+
+
+KEY_REPAIR_FROM = "c7d8e9f0a1b2"
+TNN = "doi:10.1109/tnn.2008.2005605"
+RAW_KEYS = ("10.1109/tnn.2008.2005605", "https://dx.doi.org/10.1109/TNN.2008.2005605")
+
+
+def synthetic_group(key):
+    return "group:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def seed_legacy_keys():
+    """The audit shape at c7d8: raw and doi: rows for one paper, conflicting
+    states, a duplicate tag and a note on the raw key, plus an invalid key."""
+    user_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
+    statements = [
+        (
+            "INSERT INTO users (id,email,password_hash,display_name) VALUES (:u,'repair@example.com','test-only','Repair')",
+            {},
+        ),
+        (
+            "INSERT INTO collections (id,owner_id,name,visibility) VALUES (:c,:u,'Audit','private')",
+            {},
+        ),
+        (
+            "INSERT INTO collection_members (collection_id,user_id,role) VALUES (:c,:u,'owner')",
+            {},
+        ),
+        (
+            "INSERT INTO cached_paper_metadata (canonical_key,paper_group_key,title,authors_json,topics_json,keywords_json,provider_source) VALUES (:k,'group:gnn','The Graph Neural Network Model','[]','[]','[]','openalex')",
+            {"k": TNN},
+        ),
+    ]
+    keys = [(RAW_KEYS[0], 0), (TNN, 1), (RAW_KEYS[1], 2), ("doi:not-a-doi", 3)]
+    for key, position in keys:
+        group = "group:gnn" if key == TNN else synthetic_group(key)
+        statements += [
+            (
+                "INSERT INTO collection_papers (collection_id,paper_canonical_key,added_by,position) VALUES (:c,:k,:u,:p)",
+                {"k": key, "p": position},
+            ),
+            (
+                "INSERT INTO user_library_entries (user_id,paper_group_key,primary_canonical_key) VALUES (:u,:g,:k)",
+                {"k": key, "g": group},
+            ),
+            (
+                "INSERT INTO user_library_versions (user_id,paper_canonical_key,paper_group_key) VALUES (:u,:k,:g)",
+                {"k": key, "g": group},
+            ),
+        ]
+    statements += [
+        (
+            "INSERT INTO user_paper_states (user_id,paper_canonical_key,state) VALUES (:u,:raw,'reading'),(:u,:k,'to_read')",
+            {"raw": RAW_KEYS[0], "k": TNN},
+        ),
+        (
+            "INSERT INTO user_paper_tags (user_id,paper_canonical_key,tag,paper_group_key) VALUES (:u,:raw,'gnn',:g),(:u,:k,'gnn','group:gnn')",
+            {"raw": RAW_KEYS[0], "k": TNN, "g": synthetic_group(RAW_KEYS[0])},
+        ),
+        (
+            "INSERT INTO notes (id,user_id,target_type,target_key,paper_group_key,content) VALUES (:n,:u,'paper',:raw,:g,'Raw-key note')",
+            {"n": str(uuid.uuid4()), "raw": RAW_KEYS[0], "g": synthetic_group(RAW_KEYS[0])},
+        ),
+    ]
+    for statement, parameters in statements:
+        asyncio.run(sql(statement, {"u": user_id, "c": collection_id, **parameters}))
+
+
+def assert_key_repair():
+    rows = asyncio.run(
+        sql("SELECT paper_canonical_key, position FROM collection_papers ORDER BY position")
+    )
+    assert [(row["paper_canonical_key"], row["position"]) for row in rows] == [
+        (TNN, 0),
+        ("doi:not-a-doi", 3),
+    ], rows
+    entries = asyncio.run(
+        sql("SELECT paper_group_key, primary_canonical_key FROM user_library_entries")
+    )
+    assert sorted(
+        (row["paper_group_key"], row["primary_canonical_key"]) for row in entries
+    ) == sorted([("group:gnn", TNN), (synthetic_group("doi:not-a-doi"), "doi:not-a-doi")]), entries
+    pins = asyncio.run(
+        sql("SELECT paper_canonical_key, paper_group_key FROM user_library_versions")
+    )
+    assert sorted((row["paper_canonical_key"], row["paper_group_key"]) for row in pins) == sorted(
+        [(TNN, "group:gnn"), ("doi:not-a-doi", synthetic_group("doi:not-a-doi"))]
+    ), pins
+    states = asyncio.run(sql("SELECT paper_canonical_key, state FROM user_paper_states"))
+    assert [(row["paper_canonical_key"], row["state"]) for row in states] == [(TNN, "reading")]
+    tags = asyncio.run(sql("SELECT paper_canonical_key, tag, paper_group_key FROM user_paper_tags"))
+    assert [tuple(row.values()) for row in tags] == [(TNN, "gnn", "group:gnn")], tags
+    notes = asyncio.run(sql("SELECT target_key, paper_group_key FROM notes"))
+    assert [tuple(row.values()) for row in notes] == [(TNN, "group:gnn")], notes
+
+
+def check_key_repair(key_file):
+    reset()
+    migrate(KEY_REPAIR_FROM, key_file)
+    seed_legacy_keys()
+    log = migrate("head", key_file)
+    assert "Paper key repair: 2 keys mapped, 1 unrepairable" in log, log
+    assert_key_repair()
+    # The downgrade is a documented no-op; upgrading again re-runs the repair
+    # over already repaired data, which must change nothing.
+    migrate(KEY_REPAIR_FROM, key_file, command="downgrade")
+    log = migrate("head", key_file)
+    assert "Paper key repair: 0 keys mapped, 1 unrepairable" in log, log
+    assert_key_repair()
+    print("Legacy paper-key repair, its logged counts and re-upgrade idempotency passed")
 
 
 if __name__ == "__main__":

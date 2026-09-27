@@ -61,6 +61,68 @@ Field audit (all present and consumed by the details view):
 
 The Zotero sync also maps items directly from this table.
 
+### Paper identifiers
+
+Every paper row is keyed by a canonical key: `doi:<lowercase DOI>`, or
+`hash:<16 hex>` (title, authors and year) for papers without a DOI. All
+versions of one logical paper share a `group:` key, which anchors Library
+entries, tags and notes.
+
+**Accepted input** (collection add and import, Library resolve): a bare DOI
+(`10.1038/nature14539`), `doi:`, `DOI:` or `DOI ` prefixes, `https://doi.org/`,
+`http://dx.doi.org/` and `www.doi.org/` links, a percent-encoded DOI link and
+surrounding whitespace (including NBSP and zero-width characters), or a
+`hash:` key that is already cached.
+
+**Normalization** (`app/common/identifiers.py`). Keys built from provider data
+(`build_canonical_key`) stay byte-identical; only user input is normalized.
+
+| Helper | Used on | Behavior |
+|--------|---------|----------|
+| `parse_paper_identifier` (strict) | Write paths: add, import, resolve `replacement` | Any accepted DOI form becomes `doi:<lowercase>`; a `hash:` key passes (the caller checks it is known); anything else is 422 `invalid_identifier` |
+| `normalize_paper_key`, `PaperKey` (lenient) | Read, annotation and delete paths | DOI-like input becomes `doi:…`, `hash:`/`group:` keys pass through, anything else is returned stripped so the lookup simply misses; deletes try the exact stored key first |
+
+Only URL-form input is percent-decoded (a `doi:` key never is), and trailing
+punctuation is kept because some DOIs end in a period.
+
+**Resolution** (`registry.resolve_doi`, bounded by `DOI_RESOLVE_TIMEOUT_SECONDS`):
+
+| Status | Meaning | Effect on add |
+|--------|---------|---------------|
+| `found` | A provider returned metadata | Snapshot upserted; stored under the provider's key (possibly an alias) and real group |
+| `not_found` | Every provider missed and doi.org does not know the handle | 422 `doi_not_found`; nothing written |
+| `unavailable` | Timeout, provider error, or a registered handle without metadata | Stored as pending (`resolved: false`) |
+
+No provider call runs while a request holds the per-user row lock: write
+paths authorize and pre-dedupe, commit, resolve with no transaction open, then
+re-check rights and duplicates in a short write transaction.
+
+**Synthetic groups and re-anchoring.** A pending paper is pinned under
+`synthetic_group_key(key)` (`group:` plus the first 16 hex characters of
+the key's SHA-256), so its entry can hold tags and notes. When the real group
+becomes known (a later add or save, or `POST /library/resolve`),
+`reanchor_pin` moves the pin with its tags and notes to the real entry and
+deletes the old entry once no pin is left under it.
+
+**Retry and correction.** `POST /library/resolve`
+(`{paper_canonical_key, replacement?}`, 30 per minute per user) resolves a
+stored key again, or re-keys it to a corrected identifier. It changes only the
+caller's own rows and rows in collections they can edit; `not_found` changes
+nothing.
+
+**Legacy repair.** Keys stored before normalization existed (bare DOIs,
+`DOI:` labels, doi.org links) are re-keyed to `doi:` by migration
+`1d2e3f4a5b6c` (`app/common/key_repair.py`, a frozen copy of the normalizer
+over frozen table definitions). Rows already stored under the canonical key
+absorb the legacy ones: collection rows keep the earliest position, reading
+states keep the most progressed one, duplicate tags, dismissals, Zotero links
+and graph edges are dropped. `cached_paper_metadata` is never touched, and keys
+that cannot become a DOI (such as `doi:not-a-doi`) are left for the user to
+fix through resolve. The repair is idempotent and its downgrade is a no-op, so
+take a backup first and preview it with
+`python -m scripts.repair_paper_keys --dry-run`; the migration log shows
+counts only.
+
 ## Redis — short-TTL API cache
 
 Cache-through in `app/providers/cache.py`; key format

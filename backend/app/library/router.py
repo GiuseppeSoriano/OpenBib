@@ -1,14 +1,17 @@
 """Library router — persistent personal archive endpoints."""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 
-from app.dependencies import DB, CurrentUser
+from app.common.rate_limit import enforce_rate_limit
+from app.dependencies import DB, CurrentUser, Redis
 from app.library import service
 from app.library.schemas import (
     LibraryEntryEnsure,
     LibraryEntryListItem,
     LibraryEntryRead,
     LibraryEntryRepin,
+    LibraryResolve,
+    LibraryResolveRead,
     LibraryVersionAdd,
     LibraryVersionPin,
 )
@@ -54,6 +57,41 @@ async def ensure_entry(body: LibraryEntryEnsure, user: CurrentUser, db: DB):
         authoritative_group=cached is not None,
     )
     return await service.get_entry(db, user.id, entry.paper_group_key)
+
+
+@router.post("/resolve", response_model=LibraryResolveRead)
+async def resolve_paper(
+    body: LibraryResolve,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: DB,
+    redis: Redis,
+):
+    """Retry resolving a paper stored in your Library or in a collection you
+    can edit, or correct its identifier with ``replacement`` (same forms as
+    adding a paper).
+
+    ``resolved``: the paper is stored under its canonical key and real Library
+    group, merged with any row already there. ``unavailable``: providers did
+    not answer; a legacy key still moves to its normalized ``doi:`` form.
+    ``not_found``: nothing changed. Only your own rows and rows in collections
+    you can edit are re-keyed. Errors: 404 ``not_in_library``; 422
+    ``invalid_identifier``.
+    """
+    await enforce_rate_limit(
+        redis,
+        request,
+        response,
+        scope="paper-resolve",
+        identity=f"user:{user.id}",
+        limit=30,
+        window_seconds=60,
+        fail_closed=True,
+    )
+    return await service.resolve_library_paper(
+        db, user.id, body.paper_canonical_key, body.replacement
+    )
 
 
 @router.patch("/entries/{paper_group_key:path}", response_model=LibraryEntryRead)
