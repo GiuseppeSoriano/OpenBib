@@ -1,6 +1,7 @@
 import { mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import LibraryPage from "@/pages/LibraryPage";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperMetadata } from "@/types";
@@ -122,5 +123,31 @@ describe("LibraryPage", () => {
       route: "/library?focus=group%3Adoi%3A10.1%2Fb",
     });
     expect(await screen.findByTestId("paper-details")).toBeInTheDocument();
+  });
+
+  it("moves focus into the details dialog and back to the title on Escape", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryPage />, { route: "/library" });
+    const title = await screen.findByRole("button", { name: "First Library Paper" });
+
+    await user.click(title);
+    const dialog = await screen.findByRole("dialog", { name: /Paper details/ });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(title);
+  });
+
+  it("closes a ?focus= deep-linked panel without a trigger, focusing the page heading", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryPage />, {
+      route: "/library?focus=group%3Adoi%3A10.1%2Fb",
+    });
+    await screen.findByTestId("paper-details");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Library" }));
   });
 });

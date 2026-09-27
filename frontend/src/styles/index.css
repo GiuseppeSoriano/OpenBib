@@ -21,9 +21,15 @@
   }
 
   html {
-    font-size: 16px;
+    /* 100%, not 16px: respect the browser's text-size preference. */
+    font-size: 100%;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scroll lock while a modal dialog is open (ui/dialogStack). */
+  html.has-modal {
+    overflow: hidden;
   }
 
   body {
@@ -234,6 +240,10 @@
     background: var(--color-surface-hover);
     color: var(--color-text-secondary);
   }
+  .badge--warning {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+  }
 
   /* Pill toggle (filters) */
   .pill {
@@ -342,7 +352,7 @@
   .toast-container {
     position: fixed;
     top: calc(var(--nav-height) + var(--space-md));
-    right: var(--space-lg);
+    right: max(var(--space-lg), env(safe-area-inset-right, 0px));
     z-index: 1100;
     display: flex;
     flex-direction: column;
@@ -353,7 +363,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
+    /* The 44px close button supplies the height; keep the card compact. */
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -381,11 +392,18 @@
     border: none;
     color: var(--color-text-secondary);
     display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
     padding: 2px;
     border-radius: var(--radius-sm);
   }
   .toast-close:hover {
     color: var(--color-text);
+  }
+  .toast-close:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
   @keyframes toast-in {
     from {
@@ -400,9 +418,9 @@
   @media (max-width: 639px) {
     .toast-container {
       top: auto;
-      bottom: calc(var(--bottomnav-height) + var(--space-md));
-      left: var(--space-md);
-      right: var(--space-md);
+      bottom: calc(var(--bottomnav-clearance) + var(--space-md));
+      left: max(var(--space-md), env(safe-area-inset-left, 0px));
+      right: max(var(--space-md), env(safe-area-inset-right, 0px));
       max-width: none;
     }
   }
@@ -439,6 +457,17 @@
   }
   .modal-close {
     padding: var(--space-xs);
+  }
+  /* Dialog and toast close buttons: full touch targets around small icons. */
+  .panel-header .btn-ghost,
+  .modal-close,
+  .toast-close {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+  .modal:focus,
+  .panel:focus {
+    outline: none;
   }
   @keyframes modal-in {
     from {
@@ -491,6 +520,8 @@
     justify-content: space-between;
     gap: var(--space-md);
     padding: var(--space-md) var(--space-lg);
+    /* viewport-fit=cover: keep content clear of a landscape notch. */
+    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
   }
@@ -506,7 +537,10 @@
   .panel-body {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-lg);
+    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
+    padding-bottom: calc(var(--space-lg) + var(--safe-area-bottom));
   }
   @keyframes panel-in {
     from {
@@ -518,6 +552,43 @@
       opacity: 1;
     }
   }
+  /* Bottom sheet: always for placement="bottom", and for every panel ≤767px. */
+  .panel--bottom {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 88vh;
+    max-height: 88dvh;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-in 0.2s ease-out;
+  }
+  .panel--bottom .panel-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-border);
+    margin: var(--space-sm) auto 0;
+    flex-shrink: 0;
+  }
+  .panel--bottom .panel-header,
+  .panel--bottom .panel-body {
+    padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(28px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
   @media (max-width: 767px) {
     .panel {
       top: auto;
@@ -526,6 +597,7 @@
       bottom: 0;
       width: 100%;
       max-height: 88vh;
+      max-height: 88dvh;
       border-left: none;
       border-top: 1px solid var(--color-border);
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -540,15 +612,9 @@
       margin: var(--space-sm) auto 0;
       flex-shrink: 0;
     }
-    @keyframes sheet-in {
-      from {
-        transform: translateY(28px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
+    .panel-header,
+    .panel-body {
+      padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
     }
   }
 
@@ -573,6 +639,8 @@
   /* Theme toggle / icon buttons in nav */
   .theme-toggle {
     padding: var(--space-sm);
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 
   /* Popover menus (ui/Menu) */

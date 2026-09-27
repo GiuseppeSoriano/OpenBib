@@ -6,6 +6,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 
 type ToastType = "success" | "error" | "info";
@@ -25,6 +27,7 @@ const ToastContext = createContext<ToastState | null>(null);
 const ICONS = { success: CheckCircle2, error: AlertCircle, info: Info } as const;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
 
@@ -44,25 +47,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="toast-container" role="status" aria-live="polite">
-        {items.map((t) => {
-          const Icon = ICONS[t.type];
-          return (
-            <div key={t.id} className={`toast toast--${t.type}`}>
-              <Icon size={16} className="toast-icon" />
-              <span className="toast-message">{t.message}</span>
-              <button
-                type="button"
-                className="toast-close"
-                onClick={() => dismiss(t.id)}
-                aria-label="Dismiss"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+      {/* Portaled next to dialogs and exempt from their inert background. */}
+      {createPortal(
+        <div className="toast-container" data-live-layer="" role="status" aria-live="polite">
+          {items.map((item) => {
+            const Icon = ICONS[item.type];
+            return (
+              <div key={item.id} className={`toast toast--${item.type}`}>
+                <Icon size={16} className="toast-icon" />
+                <span className="toast-message">{item.message}</span>
+                <button
+                  type="button"
+                  className="toast-close"
+                  onClick={() => dismiss(item.id)}
+                  aria-label={t("common.dismiss")}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
     </ToastContext.Provider>
   );
 }

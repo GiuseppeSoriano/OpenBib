@@ -1,6 +1,8 @@
 import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import i18n from "@/i18n";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperDetail } from "@/types";
@@ -117,6 +119,78 @@ describe("PaperDetailsPanel", () => {
   });
 });
 
+describe("PaperDetailsPanel — dialog accessibility", () => {
+  it("is named after the paper and has a localized close button", async () => {
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+
+    expect(
+      await screen.findByRole("dialog", { name: /Paper details.*Panel Paper/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+
+    await act(async () => {
+      await i18n.changeLanguage("it");
+    });
+    expect(screen.getByRole("dialog", { name: /Dettagli articolo.*Panel Paper/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Chiudi" })).toBeInTheDocument();
+  });
+
+  it("closes only the add-to-collection menu on Escape", async () => {
+    testAuth.authenticated = true;
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={onClose} />);
+
+    const trigger = await screen.findByTestId("add-to-collection");
+    await user.click(trigger);
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes only the menu on Escape when focus fell back to the body", async () => {
+    testAuth.authenticated = true;
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={onClose} />);
+
+    await user.click(await screen.findByTestId("add-to-collection"));
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+    // A clicked menu item that becomes disabled drops focus to <body>.
+    act(() => (document.activeElement as HTMLElement).blur());
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("does not close on Escape while a note draft is being typed", async () => {
+    testAuth.authenticated = true;
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={onClose} />);
+
+    const note = within(await screen.findByTestId("notes-panel")).getByRole("textbox");
+    await user.type(note, "A thought worth keeping");
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.clear(note);
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("PaperDetailsPanel — managed library versions", () => {
   function setupLibraryPaper() {
     libState.keys = ["group:panel"];
@@ -158,6 +232,17 @@ describe("PaperDetailsPanel — managed library versions", () => {
     // Pin without matching metadata degrades to the provider label — never a raw key.
     expect(section).toHaveTextContent("arXiv");
     expect(section.textContent).not.toMatch(/hash:|doi:/);
+  });
+
+  it("gives the version icon buttons accessible names", async () => {
+    setupLibraryPaper();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+    const section = await screen.findByTestId("managed-versions");
+
+    expect(
+      within(section).getByRole("button", { name: "Make this version the default shown" }),
+    ).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Remove this version pin" })).toBeInTheDocument();
   });
 
   it("repins and removes versions through the panel", async () => {

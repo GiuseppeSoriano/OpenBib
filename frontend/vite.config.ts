@@ -27,5 +27,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
+    // Vitest blanks CSS imports by default; keep `?raw` ones for the layout contract test.
+    css: { include: [/\.css\?raw$/] },
   },
 });

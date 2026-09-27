@@ -70,6 +70,10 @@ export default function NotesPanel({ paperKey, paperGroupKey }: NotesPanelProps)
           className="input notes-textarea"
           value={content}
           onChange={(e) => setContent(e.target.value)}
+          onKeyDown={(e) => {
+            // Keep an unsaved draft: Escape must not close the details panel.
+            if (e.key === "Escape" && content.trim()) e.preventDefault();
+          }}
           placeholder={t("paper.notePlaceholder")}
           rows={3}
         />

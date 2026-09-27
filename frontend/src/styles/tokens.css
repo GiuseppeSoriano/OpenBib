@@ -33,7 +33,7 @@
     --color-success-soft: #e8eef7;
     --color-danger: #b03a3a;
     --color-danger-soft: #f9eaea;
-    --color-warning: #9a6317;
+    --color-warning: #8f5b14; /* 5:1 on --color-warning-soft (badge text) */
     --color-warning-soft: #f7efdf;
 
     /* Foreground on a filled danger surface — never hardcode #fff:
@@ -77,9 +77,36 @@
     /* Focus */
     --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
 
-    /* Layout */
-    --nav-height: 56px;
-    --bottomnav-height: 56px;
+    /* Layout — bar heights scale with the browser text size (56px at 16px). */
+    --nav-height: calc(2.25rem + 20px);
+    --bottomnav-height: calc(2.25rem + 20px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    /* The only document clearance for the fixed bottom tab bar (0 without it). */
+    --bottomnav-clearance: 0px;
+
+    /* Target sizes: --touch-target is the WCAG-friendly minimum; --control-min
+       is the dense desktop size that grows to it on touch screens. */
+    --touch-target: 44px;
+    --control-min: 32px;
+  }
+
+  /*
+   * Breakpoints — keep in sync with src/lib/breakpoints.ts:
+   *   @custom-media --phone (max-width: 639px);   bottom tab bar
+   *   @custom-media --compact (max-width: 639px), (max-height: 500px);
+   *   @custom-media --touch (max-width: 639px), (pointer: coarse), (max-height: 500px);
+   *   Panel bottom sheet: (max-width: 767px).
+   */
+  @media (max-width: 639px) {
+    :root {
+      --bottomnav-clearance: calc(var(--bottomnav-height) + var(--safe-area-bottom));
+    }
+  }
+
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    :root {
+      --control-min: var(--touch-target);
+    }
   }
 
   [data-theme="dark"] {

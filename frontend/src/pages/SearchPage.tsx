@@ -2,8 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { AxiosError } from "axios";
 import api, { library } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
   PaperMemberships,
@@ -19,11 +19,6 @@ import SearchResultCard from "@/components/search/SearchResultCard";
 import VersionPicker from "@/components/search/VersionPicker";
 import { providerLabel } from "@/components/paper/versionLabel";
 import "./SearchPage.css";
-
-function searchErrorMessage(error: unknown, fallback: string): string {
-  const axiosError = error as AxiosError<{ detail?: string }>;
-  return axiosError.response?.data?.detail || fallback;
-}
 
 function getSelectedPaper(
   item: SearchResultItem,
@@ -142,7 +137,7 @@ export default function SearchPage() {
       {isLoading && <SkeletonCard count={4} />}
 
       {isError && (
-        <p className="search-error">{searchErrorMessage(error, t("search.errorFallback"))}</p>
+        <p className="search-error">{apiErrorMessage(error, t("search.errorFallback"))}</p>
       )}
 
       {data && (

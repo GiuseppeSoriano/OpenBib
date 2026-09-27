@@ -1,8 +1,10 @@
+import { useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BookMarked, ExternalLink, FileText, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
 import api, { library, papers } from "@/lib/api";
+import { apiStatus } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
@@ -19,6 +21,8 @@ interface PaperDetailsPanelProps {
   /** Canonical key of the paper to show; null keeps the panel closed. */
   paperKey: string | null;
   onClose: () => void;
+  /** Focus target on close when the opener no longer exists. */
+  fallbackFocus?: () => HTMLElement | null | undefined;
 }
 
 /** Human label for a pinned version — metadata match first, provider fallback. */
@@ -37,8 +41,13 @@ function pinLabel(
  * Low-level identifiers (DOIs, canonical keys) never appear as text —
  * external references are presented as link chips.
  */
-export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPanelProps) {
+export default function PaperDetailsPanel({
+  paperKey,
+  onClose,
+  fallbackFocus,
+}: PaperDetailsPanelProps) {
   const { t, i18n } = useTranslation();
+  const titleId = useId();
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -94,8 +103,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
       library.removeVersion(paper!.paper_group_key, canonicalKey),
     onSuccess: invalidateEntry,
     onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      toast(status === 409 ? t("library.remove409") : t("library.removeFailed"), "error");
+      toast(apiStatus(err) === 409 ? t("library.remove409") : t("library.removeFailed"), "error");
     },
   });
 
@@ -119,13 +127,21 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
       : null;
 
   return (
-    <Panel open={!!paperKey} onClose={onClose} title={t("paper.detailsTitle")}>
+    <Panel
+      open={!!paperKey}
+      onClose={onClose}
+      title={t("paper.detailsTitle")}
+      labelledBy={paper ? titleId : undefined}
+      fallbackFocus={fallbackFocus}
+    >
       {isLoading && <Skeleton lines={8} />}
       {isError && <p className="pd-error">{t("paper.notFound")}</p>}
 
       {paper && (
         <div className="pd" data-testid="paper-details">
-          <h2 className="pd-title">{paper.title}</h2>
+          <h2 id={titleId} className="pd-title">
+            {paper.title}
+          </h2>
 
           <div className="pd-badges">
             {paper.open_access && <span className="badge">{t("paper.openAccess")}</span>}
@@ -263,6 +279,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
                               disabled={repinMutation.isPending}
                               onClick={() => repinMutation.mutate(pin.paper_canonical_key)}
                               title={t("library.repinTitle")}
+                              aria-label={t("library.repinTitle")}
                             >
                               <Pin size={13} />
                             </button>
@@ -274,6 +291,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
                                 removeVersionMutation.mutate(pin.paper_canonical_key)
                               }
                               title={t("library.removeVersionTitle")}
+                              aria-label={t("library.removeVersionTitle")}
                             >
                               <Trash2 size={13} />
                             </button>

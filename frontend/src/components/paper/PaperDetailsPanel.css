@@ -101,6 +101,8 @@
   .pd-version-actions .btn-ghost {
     padding: 3px;
     font-size: 0.72rem;
+    min-width: var(--control-min);
+    min-height: var(--control-min);
   }
 
   .pd-actions {

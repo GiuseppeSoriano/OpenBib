@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
+import i18n from "@/i18n";
 import Layout from "@/components/Layout";
 import { renderWithProviders } from "@/test/utils";
 
@@ -23,5 +24,31 @@ describe("Layout (top navbar shell)", () => {
     renderWithProviders(<Layout />);
     expect(await screen.findByText("Sign in")).toBeInTheDocument();
     expect(screen.queryByTestId("user-menu")).toBeNull();
+  });
+
+  it("orders main, footer links, then the tab bar so the footer is cleared (F03)", async () => {
+    const { container } = renderWithProviders(<Layout />);
+    await screen.findByText("Sign in");
+    const shell = container.querySelector(".app-shell")!;
+    expect(Array.from(shell.children).map((el) => el.tagName)).toEqual([
+      "HEADER",
+      "MAIN",
+      "FOOTER",
+      "NAV",
+    ]);
+
+    const footer = shell.querySelector("footer")!;
+    expect(within(footer).getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+    expect(within(footer).getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+    expect(shell.lastElementChild).toHaveClass("tabbar");
+  });
+
+  it("labels both primary navigations in the current language", async () => {
+    renderWithProviders(<Layout />);
+    expect(await screen.findAllByRole("navigation", { name: "Primary" })).toHaveLength(2);
+    await act(async () => {
+      await i18n.changeLanguage("it");
+    });
+    expect(screen.getAllByRole("navigation", { name: "Principale" })).toHaveLength(2);
   });
 });

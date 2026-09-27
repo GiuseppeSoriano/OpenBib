@@ -27,7 +27,7 @@ export default function TopNav() {
         <span className="topnav-wordmark">OpenBib</span>
       </Link>
 
-      <nav className="topnav-links" aria-label="Primary">
+      <nav className="topnav-links" aria-label={t("nav.primary")}>
         {NAV_ITEMS.map(({ to, labelKey, end }) => (
           <NavLink
             key={to}
@@ -50,7 +50,7 @@ export default function TopNav() {
         ) : (
           <Link to="/login" className="btn btn-primary topnav-signin">
             <LogIn size={14} />
-            {t("nav.signIn")}
+            <span className="topnav-signin-label">{t("nav.signIn")}</span>
           </Link>
         )}
       </div>

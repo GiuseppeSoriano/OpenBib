@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { library, zotero } from "@/lib/api";
+import { apiErrorMessage, apiStatus } from "@/lib/apiError";
 import { useToast } from "@/components/ui/Toast";
 import type { LibraryEntryListItem, ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -27,6 +28,7 @@ export default function LibraryPage() {
   const focusKey = searchParams.get("focus");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ["library-entries"],
@@ -61,8 +63,7 @@ export default function LibraryPage() {
       }
     },
     onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      toast(status === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
+      toast(apiStatus(err) === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
     },
   });
 
@@ -73,14 +74,8 @@ export default function LibraryPage() {
       void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
     },
     onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data
-        ?.detail;
-      if (status === 409) {
-        toast(detail ?? t("library.delete409"), "error");
-      } else {
-        toast(detail ?? t("library.deleteFailed"), "error");
-      }
+      const fallback = apiStatus(err) === 409 ? t("library.delete409") : t("library.deleteFailed");
+      toast(apiErrorMessage(err, fallback), "error");
     },
   });
 
@@ -88,7 +83,9 @@ export default function LibraryPage() {
     <div className="library-page">
       <header className="library-header">
         <div>
-          <h1>{t("library.title")}</h1>
+          <h1 ref={headingRef} tabIndex={-1}>
+            {t("library.title")}
+          </h1>
           <p className="library-subtitle">{t("library.subtitle")}</p>
         </div>
         <div className="library-toolbar">
@@ -132,7 +129,11 @@ export default function LibraryPage() {
         ))}
       </div>
 
-      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel
+        paperKey={detailsKey}
+        onClose={() => setDetailsKey(null)}
+        fallbackFocus={() => headingRef.current}
+      />
 
       {pendingDelete && (
         <ConfirmModal

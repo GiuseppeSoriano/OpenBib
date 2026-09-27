@@ -14,7 +14,7 @@ export default function MobileTabBar() {
   const { t } = useTranslation();
 
   return (
-    <nav className="tabbar" aria-label="Primary">
+    <nav className="tabbar" aria-label={t("nav.primary")}>
       {TABS.map(({ to, icon: Icon, labelKey, end }) => (
         <NavLink
           key={to}

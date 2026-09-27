@@ -4,9 +4,10 @@
   .graph-screen {
     position: fixed;
     top: var(--nav-height);
-    left: 0;
-    right: 0;
-    bottom: 0;
+    /* viewport-fit=cover: keep the overlays clear of a landscape notch. */
+    left: env(safe-area-inset-left, 0px);
+    right: env(safe-area-inset-right, 0px);
+    bottom: var(--bottomnav-clearance);
     overflow: hidden;
     background: var(--color-bg);
   }
@@ -258,10 +259,6 @@
   /* ── Breakpoints ────────────────────────────────────────── */
 
   @media (max-width: 639px) {
-    .graph-screen {
-      bottom: var(--bottomnav-height);
-    }
-
     .graph-counts {
       display: none;
     }
