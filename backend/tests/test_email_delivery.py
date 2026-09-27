@@ -14,6 +14,7 @@ from app.auth.email import queue_email
 from app.auth.models import EmailOutbox
 from app.auth.service import utcnow
 from app.common import deletion_journal
+from app.common.crypto import keyring
 from app.config import settings
 from app.users.models import User
 from scripts import replay_deletions
@@ -23,6 +24,20 @@ from tests.test_auth import user_for_test
 async def test_email_delivery_clears_encrypted_payload(db, engine, monkeypatch):
     user = await user_for_test(db)
     await queue_email(db, user.id, user.email, "Verify", "private #token=not-for-logs")
+    # Match a pre-HTML queued message exactly: no html/registration keys.
+    row = (await db.execute(select(EmailOutbox))).scalar_one()
+    legacy = keyring.encrypt(
+        json.dumps(
+            {"recipient": user.email, "subject": "Verify", "body": "private #token=not-for-logs"}
+        ),
+        purpose="email",
+        aad=f"email:{row.user_id}:{row.id}",
+    )
+    row.payload_ciphertext, row.payload_nonce, row.key_version = (
+        legacy.ciphertext,
+        legacy.nonce,
+        legacy.key_version,
+    )
     await db.commit()
     monkeypatch.setattr(
         email_worker, "async_session_factory", async_sessionmaker(engine, expire_on_commit=False)

@@ -82,3 +82,10 @@
   .auth-check input { margin-top: 0.25rem; }
   .auth-forgot { align-self: center; }
 }
+
+@layer pages {
+  .registration-code { text-align: center; font-size: 1.8rem; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
+  .registration-step { text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7rem !important; margin-bottom: var(--space-sm); }
+  .registration-restart { display: block; margin: var(--space-md) auto 0; }
+  .auth-message { line-height: 1.6; margin-bottom: var(--space-md); }
+}

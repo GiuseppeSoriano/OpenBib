@@ -81,7 +81,7 @@ backend/
 │   ├── config.py              # Pydantic Settings (env-based)
 │   ├── dependencies.py        # FastAPI dependency injection (DB session, current user, etc.)
 │   ├── auth/
-│   │   ├── router.py          # POST /auth/register, /auth/login, /auth/refresh, /auth/logout
+│   │   ├── router.py          # Login/sessioni; registrazione OTP in registration.py
 │   │   ├── service.py         # password hash/verify, token create/validate
 │   │   └── schemas.py
 │   ├── users/

@@ -277,3 +277,11 @@ export interface ExpandResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+export interface RegistrationStatus {
+  stage: "email" | "otp" | "profile" | "expired" | "locked";
+  email_masked?: string | null;
+  expires_at?: string | null;
+  otp_expires_at?: string | null;
+  resend_after?: number;
+}

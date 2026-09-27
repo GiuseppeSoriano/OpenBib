@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from datetime import timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -11,8 +12,8 @@ from pathlib import Path
 import aiosmtplib
 from sqlalchemy import select
 
-from app.auth.models import EmailOutbox
-from app.auth.service import utcnow
+from app.auth.models import EmailOutbox, RegistrationChallenge
+from app.auth.service import is_expired, utcnow
 from app.common.crypto import EncryptedValue, keyring
 from app.config import settings
 from app.database import async_session_factory
@@ -48,11 +49,38 @@ async def deliver_one() -> bool:
                 aad=f"email:{row.user_id}:{row.id}",
             )
             payload = json.loads(raw)
+            registration = payload.get("registration")
+            if registration:
+                challenge = await db.get(RegistrationChallenge, uuid.UUID(registration["id"]))
+                if (
+                    challenge is None
+                    or challenge.used_at is not None
+                    or challenge.verified_at is not None
+                    or challenge.attempts >= 5
+                    or challenge.generation != registration["generation"]
+                    or is_expired(challenge.otp_expires_at)
+                    or is_expired(challenge.expires_at)
+                ):
+                    row.failed_at = utcnow()
+                    row.last_error = "SupersededRegistration"
+                    row.payload_ciphertext = row.payload_nonce = None
+                    row.key_version = None
+                    await db.commit()
+                    return True
             message = EmailMessage()
             message["From"] = settings.email_from
             message["To"] = payload["recipient"]
             message["Subject"] = payload["subject"]
             message.set_content(payload["body"])
+            if payload.get("html"):
+                message.add_alternative(payload["html"], subtype="html")
+                message.get_payload()[-1].add_related(
+                    Path(__file__).with_name("assets").joinpath("logo.png").read_bytes(),
+                    maintype="image",
+                    subtype="png",
+                    cid="<openbib-logo>",
+                    disposition="inline",
+                )
             await aiosmtplib.send(
                 message,
                 hostname=settings.smtp_host or "mailpit",
