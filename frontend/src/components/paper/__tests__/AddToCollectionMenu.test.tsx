@@ -5,8 +5,9 @@ import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
 import { renderWithProviders } from "@/test/utils";
 
 const collections = [
-  { id: "c1", name: "Deep Learning", visibility: "private", owner_id: "u1", paper_count: 3, created_at: "2026-01-01" },
-  { id: "c2", name: "Optimization", visibility: "private", owner_id: "u1", paper_count: 1, created_at: "2026-01-02" },
+  { id: "read-only", name: "Read only collection", can_edit: false, owner_id: "u2", paper_count: 0, created_at: "2026-01-01" },
+  { id: "c1", name: "Deep Learning", can_edit: true, owner_id: "u1", paper_count: 3, created_at: "2026-01-01" },
+  { id: "c2", name: "Optimization", can_edit: true, owner_id: "u1", paper_count: 1, created_at: "2026-01-02" },
 ];
 
 const post = vi.fn(() => Promise.resolve({ data: {} }));
@@ -57,6 +58,7 @@ describe("AddToCollectionMenu", () => {
 
     fireEvent.click(screen.getByTestId("add-to-collection"));
     const saved = await screen.findByRole("menuitem", { name: /Optimization/ });
+    expect(screen.queryByRole("menuitem", { name: "Read only collection" })).toBeNull();
     expect(saved).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: /Deep Learning/ })).toBeEnabled();
   });

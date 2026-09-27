@@ -49,7 +49,7 @@ export default function App() {
       <Route path="/confirm-email" element={<ConfirmEmailPage />} />
       <Route path="/legal-review" element={<RequireBasicAuth><LegalReviewPage /></RequireBasicAuth>} />
       <Route element={<Layout />}>
-        {/* Public: search, paper details, graph exploration, public collections */}
+        {/* Public: search, paper details, graph exploration, collections with read links */}
         <Route path="/" element={<HomeRoute />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/graph" element={<GraphPage mode="manual" />} />

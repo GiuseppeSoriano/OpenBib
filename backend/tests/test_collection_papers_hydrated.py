@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.auth.service import hash_password
 from app.collections import service as collections_service
-from app.collections.schemas import CollectionCreate, Visibility
+from app.collections.schemas import CollectionCreate
 from app.dependencies import get_db
 from app.main import create_app
 from app.papers.service import cache_papers
@@ -45,7 +45,7 @@ def _paper(canonical_key: str, group_key: str, title: str) -> PaperMetadata:
 async def test_collection_papers_return_full_metadata(db):
     user = await _make_user(db, "hydrated@example.com")
     coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="ML Papers", visibility=Visibility.private)
+        db, user.id, CollectionCreate(name="ML Papers")
     )
     await cache_papers(db, [_paper("doi:10.1/hyd", "group:hyd", "Hydrated Paper")])
     await collections_service.add_paper(db, coll.id, user.id, "doi:10.1/hyd")
@@ -65,9 +65,7 @@ async def test_collection_papers_return_full_metadata(db):
 @pytest.mark.asyncio
 async def test_collection_papers_degrade_without_cached_metadata(db):
     user = await _make_user(db, "degraded@example.com")
-    coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Sparse", visibility=Visibility.private)
-    )
+    coll = await collections_service.create_collection(db, user.id, CollectionCreate(name="Sparse"))
     await collections_service.add_paper(db, coll.id, user.id, "doi:10.9/nocache")
 
     rows = await collections_service.list_papers(db, coll.id, user.id)
@@ -82,7 +80,7 @@ async def test_collection_papers_degrade_without_cached_metadata(db):
 async def test_public_collection_papers_readable_anonymously_with_metadata(db):
     user = await _make_user(db, "publicowner@example.com")
     coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Public Reads", visibility=Visibility.public)
+        db, user.id, CollectionCreate(name="Public Reads")
     )
     await cache_papers(db, [_paper("doi:10.2/pub", "group:pub", "Public Paper")])
     await collections_service.add_paper(db, coll.id, user.id, "doi:10.2/pub")
@@ -93,9 +91,14 @@ async def test_public_collection_papers_readable_anonymously_with_metadata(db):
     app = create_app()
     app.dependency_overrides[get_db] = override_db
 
+    from app.collections.sharing import read_link
+
+    token = (await read_link(db, coll.id, user.id, "enable"))["url"].split("#share=")[1]
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get(f"/api/v1/collections/{coll.id}/papers")
+        response = await client.get(
+            f"/api/v1/collections/{coll.id}/papers", headers={"X-Collection-Share-Token": token}
+        )
 
     assert response.status_code == 200
     payload = response.json()

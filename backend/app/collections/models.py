@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,11 +19,11 @@ class Collection(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    visibility: Mapped[str] = mapped_column(
-        Enum("private", "shared", "public", name="visibility_enum"),
-        nullable=False,
-        server_default="private",
-    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    read_link_digest: Mapped[str | None] = mapped_column(String(64))
+    read_link_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    read_link_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    read_link_key_version: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 

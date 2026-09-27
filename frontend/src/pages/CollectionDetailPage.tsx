@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -26,16 +26,23 @@ import {
   FileText,
 } from "lucide-react";
 import "./CollectionDetailPage.css";
+import CollectionSharing from "@/components/collections/CollectionSharing";
+import { useCollectionAccess, collectionRead } from "@/lib/collection-access";
 
 export default function CollectionDetailPage() {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const access = useCollectionAccess(id);
+  const [showSharing, setShowSharing] = useState(false);
+  const collectionKey = ["collection", id, access.scope];
+  const papersKey = ["collection-papers", id, access.scope];
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editRevision, setEditRevision] = useState(0);
   const [addPaperKey, setAddPaperKey] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [newNote, setNewNote] = useState("");
@@ -44,23 +51,27 @@ export default function CollectionDetailPage() {
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
-  const { data: collection, isLoading } = useQuery({
-    queryKey: ["collection", id],
-    queryFn: async () => {
-      const { data } = await api.get<Collection>(`/collections/${id}`);
-      return data;
-    },
-    enabled: !!id,
+  const { data: collection, isLoading, isError: collectionError } = useQuery({
+    queryKey: collectionKey,
+    queryFn: () => collectionRead(async () => (await api.get<Collection>(`/collections/${id}`, { headers: access.headers })).data),
+    gcTime: 0, staleTime: 0, refetchOnWindowFocus: "always", retry: false,
+    enabled: !!id && !authLoading,
   });
 
   const { data: papers } = useQuery({
-    queryKey: ["collection-papers", id],
-    queryFn: async () => {
-      const { data } = await api.get<CollectionPaper[]>(`/collections/${id}/papers`);
-      return data;
-    },
-    enabled: !!id,
+    queryKey: papersKey,
+    queryFn: () => collectionRead(async () => (await api.get<CollectionPaper[]>(`/collections/${id}/papers`, { headers: access.headers })).data),
+    gcTime: 0, staleTime: 0, refetchOnWindowFocus: "always", retry: false,
+    enabled: !!collection,
   });
+
+  useEffect(() => {
+    if (collection === null) {
+      void queryClient.cancelQueries({ queryKey: ["collection-papers", id] });
+      queryClient.setQueriesData({ queryKey: ["collection-papers", id] }, null);
+      setDetailsKey(null);
+    }
+  }, [collection, id, queryClient]);
 
   const { data: notes } = useQuery({
     queryKey: ["notes", "collection", id],
@@ -75,15 +86,22 @@ export default function CollectionDetailPage() {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      await api.patch(`/collections/${id}`, { name: editName, description: editDesc || null });
+      await api.patch(`/collections/${id}`, { name: editName, description: editDesc || null, revision: editRevision });
     },
+    onError: () => { toast(t("sharing.updateConflict"), "error"); void queryClient.invalidateQueries({ queryKey: ["collection", id] }); },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["collection", id] });
       setEditing(false);
     },
   });
 
+  const refreshAccessAfterError = () => {
+    toast(t("sharing.error"), "error");
+    void queryClient.invalidateQueries({ queryKey: ["collection", id] });
+  };
+
   const addPaperMutation = useMutation({
+    onError: refreshAccessAfterError,
     mutationFn: async (paperKey: string) => {
       await api.post(`/collections/${id}/papers`, { paper_canonical_key: paperKey });
     },
@@ -99,17 +117,18 @@ export default function CollectionDetailPage() {
       await api.delete(`/collections/${id}/papers/${encodeURIComponent(paperKey)}`);
     },
     onMutate: async (paperKey: string) => {
-      await queryClient.cancelQueries({ queryKey: ["collection-papers", id] });
-      const previous = queryClient.getQueryData<CollectionPaper[]>(["collection-papers", id]);
+      await queryClient.cancelQueries({ queryKey: papersKey });
+      const previous = queryClient.getQueryData<CollectionPaper[]>(papersKey);
       queryClient.setQueryData<CollectionPaper[]>(
-        ["collection-papers", id],
+        papersKey,
         (old) => old?.filter((cp) => cp.paper_canonical_key !== paperKey) ?? [],
       );
       return { previous };
     },
     onError: (_err, _key, context) => {
+      refreshAccessAfterError();
       if (context?.previous) {
-        queryClient.setQueryData(["collection-papers", id], context.previous);
+        queryClient.setQueryData(papersKey, context.previous);
       }
     },
     onSettled: () => {
@@ -138,6 +157,7 @@ export default function CollectionDetailPage() {
   });
 
   const importDoisMutation = useMutation({
+    onError: refreshAccessAfterError,
     mutationFn: async (dois: string[]) => {
       const { data } = await api.post(`/collections/${id}/import/dois`, { dois });
       return data as { added: number; skipped: number; total: number };
@@ -158,7 +178,7 @@ export default function CollectionDetailPage() {
   });
 
   const zoteroSyncMutation = useMutation({
-    mutationFn: () => zotero.syncCollection(id!),
+    mutationFn: () => zotero.syncCollection(id!, access.headers),
     onSuccess: (report: ZoteroSyncReport) => {
       toast(
         t("zotero.report", {
@@ -181,12 +201,8 @@ export default function CollectionDetailPage() {
   const formatDate = (value: string) =>
     new Intl.DateTimeFormat(i18n.language).format(new Date(value));
 
-  if (isLoading) return <SkeletonCard count={3} />;
-  if (!collection) return <p className="cd-notfound">{t("collections.notFound")}</p>;
-
-  const visibilityLabel = t(
-    `collections.visibility${collection.visibility.charAt(0).toUpperCase()}${collection.visibility.slice(1)}`,
-  );
+  if (isLoading || authLoading) return <SkeletonCard count={3} />;
+  if (!collection || collectionError) return <div className="cd-notfound"><p>{t("sharing.unavailable")}</p>{!user && <Link to="/login" state={{ returnTo: access.returnTo }} className="btn btn-primary">{t("sharing.login")}</Link>}</div>;
 
   const importCount = importDois.split("\n").filter((d) => d.trim()).length;
 
@@ -194,7 +210,7 @@ export default function CollectionDetailPage() {
     <div className="collection-detail">
       {/* Header */}
       <header className="cd-header">
-        {editing ? (
+        {editing && collection.can_edit ? (
           <form
             className="cd-edit-form"
             onSubmit={(e) => {
@@ -228,11 +244,12 @@ export default function CollectionDetailPage() {
           <>
             <div className="cd-title-row">
               <h1>{collection.name}</h1>
-              <span className="badge badge--neutral">{visibilityLabel}</span>
-              {user && (
+              <span className="badge badge--neutral">{t(collection.is_owner ? "sharing.owner" : collection.can_edit ? "sharing.editor" : "sharing.reader")}</span>
+              {collection.can_edit && (
                 <button
                   className="btn-ghost"
                   onClick={() => {
+                    setEditRevision(collection.revision);
                     setEditName(collection.name);
                     setEditDesc(collection.description || "");
                     setEditing(true);
@@ -249,7 +266,9 @@ export default function CollectionDetailPage() {
               {t("collections.createdOn", { date: formatDate(collection.created_at) })}
             </p>
             <div className="cd-toolbar">
-              <Link to={`/graph/collection/${id}`} className="btn btn-secondary">
+              {collection.can_manage_access && <button className="btn btn-primary" onClick={() => setShowSharing(true)}>{t("sharing.title")}</button>}
+              {!user && <Link className="btn btn-secondary" to="/login" state={{ returnTo: access.returnTo }}>{t("sharing.login")}</Link>}
+              <Link to={`/graph/collection/${id}${access.fragment}`} className="btn btn-secondary">
                 <GitFork size={14} /> {t("collections.viewGraph")}
               </Link>
               {user && (
@@ -262,9 +281,9 @@ export default function CollectionDetailPage() {
                   >
                     <BookUp size={14} /> {t("zotero.sync")}
                   </button>
-                  <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
+                  {collection.can_edit && <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
                     <Upload size={14} /> {t("collections.importDois")}
-                  </button>
+                  </button>}
                 </>
               )}
             </div>
@@ -273,7 +292,7 @@ export default function CollectionDetailPage() {
       </header>
 
       {/* Add paper */}
-      {user && (
+      {collection.can_edit && (
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -306,6 +325,7 @@ export default function CollectionDetailPage() {
           <CollectionPaperItem
             key={cp.paper_canonical_key}
             item={cp}
+            canEdit={collection.can_edit}
             onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
             onOpenDetails={setDetailsKey}
           />
@@ -364,7 +384,7 @@ export default function CollectionDetailPage() {
 
       {/* Import modal */}
       <Modal
-        open={showImport}
+        open={showImport && collection.can_edit}
         onClose={() => setShowImport(false)}
         title={t("collections.importDois")}
       >
@@ -393,11 +413,11 @@ export default function CollectionDetailPage() {
         </div>
       </Modal>
 
-      {pendingDeleteKey && (
+      {pendingDeleteKey && collection.can_edit && (
         <ConfirmModal
           title={t("collections.removePaperTitle")}
           message={t("collections.removePaperMessage", {
-            name: paperDisplayName(papers, pendingDeleteKey, t("collections.thisPaper")),
+            name: paperDisplayName(papers ?? undefined, pendingDeleteKey, t("collections.thisPaper")),
           })}
           confirmLabel={t("collections.remove")}
           onConfirm={() => {
@@ -408,6 +428,7 @@ export default function CollectionDetailPage() {
         />
       )}
 
+      {showSharing && collection.can_manage_access && <CollectionSharing collectionId={id!} onClose={() => setShowSharing(false)} />}
       <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
@@ -426,10 +447,12 @@ function paperDisplayName(
 
 function CollectionPaperItem({
   item,
+  canEdit,
   onRemove,
   onOpenDetails,
 }: {
   item: CollectionPaper;
+  canEdit: boolean;
   onRemove: () => void;
   onOpenDetails: (key: string) => void;
 }) {
@@ -461,7 +484,7 @@ function CollectionPaperItem({
         <GitFork size={14} />
         {t("paper.exploreGraph")}
       </Link>
-      {user && (
+      {canEdit && (
         <button
           className="btn-ghost cd-remove"
           onClick={onRemove}

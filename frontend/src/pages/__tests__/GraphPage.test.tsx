@@ -1,8 +1,9 @@
+import { focusManager } from "@tanstack/react-query";
 import { mockRefresh } from "@/test/auth-mock";
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { graph as graphApi } from "@/lib/api";
-import { Routes, Route } from "react-router-dom";
+import { Link, Routes, Route } from "react-router-dom";
 import GraphPage from "@/pages/GraphPage";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperMetadata } from "@/types";
@@ -68,6 +69,7 @@ vi.mock("@/lib/api", () => ({
       }),
     ),
     expand: vi.fn(),
+    buildCollection: vi.fn(),
   },
   papers: { getDetail: vi.fn() },
   library: { listKeys: vi.fn(() => Promise.resolve([])) },
@@ -150,4 +152,37 @@ describe("GraphPage", () => {
     expect(screen.queryByTestId("expand-bar")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
+});
+
+
+function collectionGraph(id = "group:seed") {
+  return { active_paper_key: "", active_paper_group_key: "", nodes: [{ id, label: "Seed Paper", type: "paper" as const, paper_group_key: id, version_count: 1, selected_version: seedPaper, versions: [seedPaper], is_seed: true }], edges: [] };
+}
+function renderCollectionGraph() {
+  return renderWithProviders(<><Link to="/graph/collection/c2">Switch collection</Link><Routes><Route path="/graph/collection/:collectionId" element={<GraphPage mode="collection" />} /></Routes></>, { route: "/graph/collection/c1#share=" + "a".repeat(43) });
+}
+
+it("clears a collection graph when its read capability is revoked", async () => {
+  vi.mocked(graphApi.buildCollection).mockReset().mockResolvedValueOnce(collectionGraph()).mockRejectedValue({ response: { status: 404 } });
+  renderCollectionGraph();
+  await screen.findByTestId("force-graph-stub");
+  expect(graphApi.buildCollection).toHaveBeenCalledWith("c1", "cited_by_count", { "X-Collection-Share-Token": "a".repeat(43) });
+  focusManager.setFocused(false); focusManager.setFocused(true);
+  await screen.findByText("Collection unavailable or access no longer granted.");
+  expect(screen.queryByTestId("force-graph-stub")).toBeNull();
+  focusManager.setFocused(undefined);
+});
+
+it("ignores an old expansion response after changing the collection access scope", async () => {
+  vi.mocked(graphApi.buildCollection).mockReset().mockImplementation(async (id) => collectionGraph("group:" + id));
+  let resolveExpansion: (value: ReturnType<typeof collectionGraph>) => void = () => {};
+  vi.mocked(graphApi.expand).mockReset().mockReturnValue(new Promise((resolve) => { resolveExpansion = resolve; }));
+  renderCollectionGraph(); await screen.findByTestId("force-graph-stub");
+  fireEvent.click(screen.getByRole("button", { name: "Expand entire graph" }));
+  await waitFor(() => expect(graphApi.expand).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("link", { name: "Switch collection" }));
+  await waitFor(() => expect(graphApi.buildCollection).toHaveBeenCalledWith("c2", "cited_by_count", {}));
+  await screen.findByTestId("force-graph-stub");
+  await act(async () => resolveExpansion(collectionGraph("group:old-expansion")));
+  expect(screen.getByText("1 nodes · 0 edges")).toBeInTheDocument();
 });

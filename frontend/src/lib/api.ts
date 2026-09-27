@@ -98,13 +98,13 @@ export const zotero = {
   async getStatus() { return (await api.get<ZoteroStatus>("/zotero/credentials")).data; },
   async setCredentials(apiKey: string) { return (await api.put<ZoteroStatus>("/zotero/credentials", { api_key: apiKey })).data; },
   async deleteCredentials() { await api.delete("/zotero/credentials"); },
-  async syncCollection(collectionId: string) { return (await api.post<ZoteroSyncReport>(`/zotero/sync/collection/${collectionId}`)).data; },
+  async syncCollection(collectionId: string, headers: Record<string, string> = {}) { return (await api.post<ZoteroSyncReport>(`/zotero/sync/collection/${collectionId}`, undefined, { headers })).data; },
   async syncLibrary() { return (await api.post<ZoteroSyncReport>("/zotero/sync/library")).data; },
 };
 
 export const graph = {
   async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`, { params: { order } })).data; },
-  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order } })).data; },
+  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count", headers: Record<string, string> = {}) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order }, headers })).data; },
   async buildLibrary(order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>("/graph/library", { params: { order } })).data; },
   async expand(body: ExpandRequest) { return (await api.post<ExpandResponse>("/graph/expand", body)).data; },
 };

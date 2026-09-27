@@ -90,9 +90,7 @@ export default function DashboardPage() {
                 {c.description && <p className="dashboard-collection-desc">{c.description}</p>}
                 <span className="dashboard-collection-meta">
                   {t("dashboard.paperCount", { count: c.paper_count })} ·{" "}
-                  {t(
-                    `collections.visibility${c.visibility.charAt(0).toUpperCase()}${c.visibility.slice(1)}`,
-                  )}
+                  {t(c.is_owner ? "sharing.owner" : c.can_edit ? "sharing.editor" : "sharing.reader")}
                 </span>
               </Link>
             ))}

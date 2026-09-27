@@ -7,6 +7,7 @@ from fastapi import status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.collections.access import accessible_to, authorize
 from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.schemas import CollectionCreate, CollectionUpdate
 from app.common.exceptions import ForbiddenError, NotFoundError
@@ -19,31 +20,6 @@ async def get_collection_or_404(db: AsyncSession, collection_id: uuid.UUID) -> C
     return coll
 
 
-def _can_view(collection: Collection, user_id: uuid.UUID | None, member_roles: dict) -> bool:
-    if collection.visibility == "public":
-        return True
-    if user_id is None:
-        return False
-    if collection.owner_id == user_id:
-        return True
-    return user_id in member_roles
-
-
-def _can_edit(collection: Collection, user_id: uuid.UUID, member_roles: dict) -> bool:
-    if collection.owner_id == user_id:
-        return True
-    return member_roles.get(user_id) in ("owner", "editor")
-
-
-async def _member_roles(db: AsyncSession, collection_id: uuid.UUID) -> dict[uuid.UUID, str]:
-    result = await db.execute(
-        select(CollectionMember.user_id, CollectionMember.role).where(
-            CollectionMember.collection_id == collection_id
-        )
-    )
-    return {row.user_id: row.role for row in result.all()}
-
-
 async def list_collections(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
     stmt = (
         select(
@@ -51,18 +27,29 @@ async def list_collections(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
             func.count(CollectionPaper.paper_canonical_key).label("paper_count"),
         )
         .outerjoin(CollectionPaper, CollectionPaper.collection_id == Collection.id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
         .group_by(Collection.id)
         .order_by(Collection.updated_at.desc())
     )
     result = await db.execute(stmt)
     rows = result.all()
+    member_roles = dict(
+        (
+            await db.execute(
+                select(CollectionMember.collection_id, CollectionMember.role).where(
+                    CollectionMember.user_id == user_id
+                )
+            )
+        ).all()
+    )
     return [
         {
             **row.Collection.__dict__,
             "paper_count": row.paper_count,
-            "is_owner": True,
-            "can_edit": True,
+            "is_owner": row.Collection.owner_id == user_id,
+            "can_edit": row.Collection.owner_id == user_id
+            or member_roles.get(row.Collection.id) == "editor",
+            "can_manage_access": row.Collection.owner_id == user_id,
         }
         for row in rows
     ]
@@ -75,7 +62,6 @@ async def create_collection(
         owner_id=user_id,
         name=data.name,
         description=data.description,
-        visibility=data.visibility.value,
     )
     db.add(coll)
     await db.flush()
@@ -86,12 +72,9 @@ async def create_collection(
 
 
 async def get_collection_detail(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None, token: str | None = None
 ) -> dict:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_view(coll, user_id, roles):
-        raise ForbiddenError()
+    coll, permissions = await authorize(db, collection_id, user_id, token=token)
 
     paper_count_result = await db.execute(
         select(func.count()).where(CollectionPaper.collection_id == collection_id)
@@ -101,44 +84,37 @@ async def get_collection_detail(
     return {
         **coll.__dict__,
         "paper_count": paper_count,
-        "is_owner": coll.owner_id == user_id,
-        "can_edit": user_id is not None and _can_edit(coll, user_id, roles),
+        **permissions,
     }
 
 
 async def update_collection(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, data: CollectionUpdate
 ) -> Collection:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
+    coll, _ = await authorize(db, collection_id, user_id, permission="edit")
 
+    if coll.revision != data.revision:
+        raise HTTPException(status_code=409, detail="Collection was modified; reload before saving")
+    coll.revision += 1
+    coll.updated_at = func.now()
     if data.name is not None:
         coll.name = data.name
-    if data.description is not None:
+    if "description" in data.model_fields_set:
         coll.description = data.description
-    if data.visibility is not None:
-        coll.visibility = data.visibility.value
     db.add(coll)
     await db.flush()
     return coll
 
 
 async def delete_collection(db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID) -> None:
-    coll = await get_collection_or_404(db, collection_id)
-    if coll.owner_id != user_id:
-        raise ForbiddenError("Only the owner can delete a collection")
+    coll, _ = await authorize(db, collection_id, user_id, permission="manage")
     await db.delete(coll)
 
 
 async def add_paper(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, paper_key: str
 ) -> CollectionPaper:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
+    await authorize(db, collection_id, user_id, permission="edit")
 
     existing = await db.execute(
         select(CollectionPaper).where(
@@ -157,7 +133,7 @@ async def add_paper(
             CollectionPaper.collection_id == collection_id
         )
     )
-    next_pos = (max_pos.scalar() or 0) + 1
+    next_pos = max_pos.scalar_one() + 1
 
     # Library invariant — every paper in a collection must have a Library
     # entry + version pin behind it, so notes/tags/states can anchor on
@@ -196,10 +172,7 @@ async def add_paper(
 async def remove_paper(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, paper_key: str
 ) -> None:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_edit(coll, user_id, roles):
-        raise ForbiddenError()
+    await authorize(db, collection_id, user_id, permission="edit")
 
     result = await db.execute(
         select(CollectionPaper).where(
@@ -214,12 +187,9 @@ async def remove_paper(
 
 
 async def list_papers(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None
+    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None, token: str | None = None
 ) -> list[dict]:
-    coll = await get_collection_or_404(db, collection_id)
-    roles = await _member_roles(db, collection_id)
-    if not _can_view(coll, user_id, roles):
-        raise ForbiddenError()
+    await authorize(db, collection_id, user_id, token=token)
 
     from app.papers.models import CachedPaperMetadata
     from app.papers.service import cached_paper_to_read
@@ -248,36 +218,61 @@ async def list_papers(
     ]
 
 
-async def add_member(
-    db: AsyncSession, collection_id: uuid.UUID, owner_id: uuid.UUID, member_id: uuid.UUID, role: str
-) -> CollectionMember:
-    coll = await get_collection_or_404(db, collection_id)
-    if coll.owner_id != owner_id:
-        raise ForbiddenError("Only the owner can manage members")
+async def list_members(
+    db: AsyncSession, collection_id: uuid.UUID, owner_id: uuid.UUID
+) -> list[dict]:
+    from app.users.models import User
 
-    member = CollectionMember(collection_id=collection_id, user_id=member_id, role=role)
-    db.add(member)
+    await authorize(db, collection_id, owner_id, permission="manage")
+    rows = (
+        await db.execute(
+            select(CollectionMember, User)
+            .join(User, User.id == CollectionMember.user_id)
+            .where(
+                CollectionMember.collection_id == collection_id,
+                CollectionMember.user_id != owner_id,
+            )
+            .order_by(User.email)
+        )
+    ).all()
+    return [
+        {"user_id": u.id, "email": u.email, "display_name": u.display_name, "role": m.role}
+        for m, u in rows
+    ]
+
+
+async def add_member(
+    db: AsyncSession, collection_id: uuid.UUID, owner_id: uuid.UUID, email: str
+) -> None:
+    from app.users.models import User
+
+    await authorize(db, collection_id, owner_id, permission="manage")
+    user = (
+        await db.execute(
+            select(User).where(User.email == email, User.email_verified_at.is_not(None))
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Verified account unavailable")
+    if user.id == owner_id:
+        return
+    member = await db.get(CollectionMember, (collection_id, user.id))
+    if member is None:
+        db.add(CollectionMember(collection_id=collection_id, user_id=user.id, role="editor"))
+    else:
+        member.role = "editor"
     await db.flush()
-    return member
 
 
 async def remove_member(
     db: AsyncSession, collection_id: uuid.UUID, owner_id: uuid.UUID, member_id: uuid.UUID
 ) -> None:
-    coll = await get_collection_or_404(db, collection_id)
-    if coll.owner_id != owner_id:
-        raise ForbiddenError("Only the owner can manage members")
-
-    result = await db.execute(
-        select(CollectionMember).where(
-            CollectionMember.collection_id == collection_id,
-            CollectionMember.user_id == member_id,
-        )
-    )
-    member = result.scalar_one_or_none()
-    if member is None:
-        raise NotFoundError("Member not found")
-    await db.delete(member)
+    await authorize(db, collection_id, owner_id, permission="manage")
+    if member_id == owner_id:
+        raise ForbiddenError("Cannot remove the owner")
+    member = await db.get(CollectionMember, (collection_id, member_id))
+    if member is not None:
+        await db.delete(member)
 
 
 async def get_paper_memberships(db: AsyncSession, user_id: uuid.UUID) -> dict[str, list[str]]:
@@ -285,7 +280,7 @@ async def get_paper_memberships(db: AsyncSession, user_id: uuid.UUID) -> dict[st
     stmt = (
         select(CollectionPaper.paper_canonical_key, CollectionPaper.collection_id)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
     )
     result = await db.execute(stmt)
     memberships: dict[str, list[str]] = {}
@@ -301,14 +296,14 @@ async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]
     from app.library.service import count_entries
 
     # Total collections
-    coll_count_result = await db.execute(select(func.count()).where(Collection.owner_id == user_id))
+    coll_count_result = await db.execute(select(func.count()).where(accessible_to(user_id)))
     total_collections = coll_count_result.scalar() or 0
 
     # Total papers (with duplicates across collections)
     total_papers_result = await db.execute(
         select(func.count(CollectionPaper.paper_canonical_key))
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
     )
     total_papers = total_papers_result.scalar() or 0
 
@@ -316,7 +311,7 @@ async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]
     distinct_papers_result = await db.execute(
         select(func.count(func.distinct(CollectionPaper.paper_canonical_key)))
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
     )
     distinct_papers = distinct_papers_result.scalar() or 0
 

@@ -33,7 +33,7 @@ export default function AddToCollectionMenu({
     queryKey: ["collections"],
     queryFn: async () => {
       const { data } = await api.get<Collection[]>("/collections");
-      return data;
+      return data.filter((collection) => collection.can_edit);
     },
     enabled,
   });

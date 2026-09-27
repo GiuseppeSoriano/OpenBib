@@ -23,3 +23,7 @@ Sensitive authentication, search, graph and Zotero routes fail closed when Redis
 CI uses frozen Python/npm dependencies, PostgreSQL/Redis tests, migration tests, dependency audits, CodeQL, full-history Gitleaks, image vulnerability gates and SBOMs. Scanner archives are version- and checksum-pinned; do not replace them with an unverified “latest” installer. Image audit failures of medium severity or above block release; any proposed exception needs a recorded human risk decision.
 
 For a suspected leak, restrict traffic, preserve sanitized evidence, revoke affected sessions, rotate the relevant credentials and review the complete Git history. Removing a secret from a file does not revoke it or remove it from existing clones. Report privately using [SECURITY.md](../SECURITY.md). Assess notification obligations with the operator's legal/security adviser; this repository does not automate breach notifications.
+
+## Collection read capabilities
+
+See [Collection sharing](Architecture/CollectionSharing.md) for the authorization matrix, encrypted link storage, revocation and transport. Read links never grant write access. Existing verified accounts receive editor permissions by stable user ID; all access management is owner-only. Links are excluded from personal-data exports and logs.

@@ -1,6 +1,8 @@
+import api, { refreshAccessToken } from "@/lib/api";
+import { focusManager } from "@tanstack/react-query";
 import { testAuth, mockRefresh } from "@/test/auth-mock";
-import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { Routes, Route } from "react-router-dom";
 import CollectionDetailPage from "@/pages/CollectionDetailPage";
 import { renderWithProviders } from "@/test/utils";
@@ -10,7 +12,7 @@ const collection = {
   owner_id: "u1",
   name: "Deep Learning Classics",
   description: "Foundational papers",
-  visibility: "private",
+  revision: 1, is_owner: true, can_edit: true, can_manage_access: true,
   created_at: "2026-01-15T10:00:00Z",
   paper_count: 1,
 };
@@ -80,14 +82,14 @@ vi.mock("@/lib/api", () => {
   };
 });
 
-function renderPage() {
+function renderPage(authenticated = true, hash = "") {
   // Simulate an authenticated session: AuthProvider hydrates from /users/me.
-  testAuth.authenticated = true;
+  testAuth.authenticated = authenticated;
   return renderWithProviders(
     <Routes>
       <Route path="/collections/:id" element={<CollectionDetailPage />} />
     </Routes>,
-    { route: "/collections/c1" },
+    { route: "/collections/c1" + hash },
   );
 }
 
@@ -106,7 +108,7 @@ describe("CollectionDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Deep Learning Classics")).toBeInTheDocument();
-    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText(/1 paper ·/)).toBeInTheDocument();
   });
 
@@ -115,4 +117,72 @@ describe("CollectionDetailPage", () => {
     await screen.findByText("Attention Is All You Need");
     expect(screen.getByTestId("reading-state-select")).toBeInTheDocument();
   });
+});
+
+
+afterEach(() => { collection.revision = 1; collection.can_edit = true; collection.can_manage_access = true; collection.is_owner = true; focusManager.setFocused(undefined); });
+
+it("offers no collection edits to authenticated readers", async () => {
+  collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
+  renderPage(); await screen.findByText("Attention Is All You Need");
+  expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  expect(screen.queryByTitle("Edit collection")).toBeNull();
+  expect(screen.queryByTitle("Remove from collection")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Import DOIs" })).toBeNull();
+});
+
+it("forwards the read capability only to scoped reads and preserves it for the graph", async () => {
+  collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
+  const token = "a".repeat(43);
+  renderPage(false, "#share=" + token);
+  await screen.findByText("Attention Is All You Need");
+  expect(api.get).toHaveBeenCalledWith("/collections/c1", { headers: { "X-Collection-Share-Token": token } });
+  expect(api.get).toHaveBeenCalledWith("/collections/c1/papers", { headers: { "X-Collection-Share-Token": token } });
+  expect(screen.getByRole("link", { name: /View citation graph/i })).toHaveAttribute("href", "/graph/collection/c1#share=" + token);
+  expect(localStorage.getItem("share")).toBeNull();
+});
+
+it("sends the current revision when saving metadata", async () => {
+  vi.mocked(api.patch).mockResolvedValue({ data: {} });
+  renderPage(); await screen.findByText("Deep Learning Classics");
+  fireEvent.click(screen.getByTitle("Edit collection"));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/collections/c1", { name: collection.name, description: collection.description, revision: 1 }));
+});
+
+it("removes displayed content on refocus after link revocation", async () => {
+  renderPage(false, "#share=" + "a".repeat(43));
+  await screen.findByText("Attention Is All You Need");
+  const previous = vi.mocked(api.get).getMockImplementation()!;
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url?.startsWith("/collections/")) throw { response: { status: 404 } };
+    return previous(url, config);
+  });
+  focusManager.setFocused(false); focusManager.setFocused(true);
+  expect(await screen.findByText("Collection unavailable or access no longer granted.")).toBeInTheDocument();
+  expect(screen.queryByText("Attention Is All You Need")).toBeNull();
+  vi.mocked(api.get).mockImplementation(previous);
+});
+
+
+it("keeps the editing revision even when a focus refresh discovers another writer", async () => {
+  vi.mocked(api.patch).mockResolvedValue({ data: {} });
+  renderPage(); await screen.findByText("Deep Learning Classics");
+  fireEvent.click(screen.getByTitle("Edit collection"));
+  collection.revision = 2;
+  focusManager.setFocused(false); focusManager.setFocused(true);
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith("/collections/c1", expect.anything()));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith("/collections/c1", { name: collection.name, description: collection.description, revision: 1 }));
+});
+
+
+it("waits for anonymous session hydration before starting protected reads", async () => {
+  let rejectRefresh: (reason: Error) => void = () => {};
+  vi.mocked(refreshAccessToken).mockReturnValueOnce(new Promise((_, reject) => { rejectRefresh = reject; }));
+  const before = vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1").length;
+  renderPage(false, "#share=" + "a".repeat(43));
+  expect(vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1")).toHaveLength(before);
+  await act(async () => { rejectRefresh(new Error("No session")); });
+  expect(await screen.findByText("Attention Is All You Need")).toBeInTheDocument();
 });

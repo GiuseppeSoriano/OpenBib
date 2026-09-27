@@ -113,7 +113,10 @@ async def export_user_data(db: AsyncSession, user: User) -> dict:
             "terms_version": user.terms_version,
             "privacy_version": user.privacy_version,
         },
-        "collections_owned": [_columns(row) for row in owned],
+        "collections_owned": [
+            {k: v for k, v in _columns(row).items() if not k.startswith("read_link_")}
+            for row in owned
+        ],
         "collection_memberships": [_columns(row) for row in member_rows],
         "collection_papers": [_columns(row) for row in collection_papers],
         "library": [_columns(row) for row in library],

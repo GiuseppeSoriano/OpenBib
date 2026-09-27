@@ -78,7 +78,7 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Collection-Share-Token"],
     )
 
     @app.middleware("http")
@@ -191,7 +191,14 @@ def create_app() -> FastAPI:
                 response.headers[name] = value
         response.headers["Cache-Control"] = (
             "no-store"
-            if request.url.path.startswith("/api/v1/auth")
+            if request.url.path.startswith(
+                (
+                    "/api/v1/auth",
+                    "/api/v1/collections",
+                    "/api/v1/graph/collection",
+                    "/api/v1/zotero/sync/collection",
+                )
+            )
             else response.headers.get("Cache-Control", "no-cache")
         )
         response.headers["X-Content-Type-Options"] = "nosniff"

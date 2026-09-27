@@ -168,3 +168,5 @@ The MVP targets < 100 users, but the architecture enables future scaling:
 | **Local development** | Single `docker compose up` starts the entire stack. Hot-reload enabled for both backend and frontend. |
 | **Production readiness** | Dockerfile uses multi-stage builds. Non-root container user. No dev dependencies in production image. |
 | **Backup** | PostgreSQL data persisted on Docker volume. Backup script included for `pg_dump`. |
+
+Current implemented sharing contract: [Collection sharing](../Architecture/CollectionSharing.md).
