@@ -265,7 +265,7 @@ class SemanticScholarProvider(BaseProvider):
         if filters.paper_type:
             params["publicationTypes"] = filters.paper_type
         data = await self._get("/paper/search", params)
-        rows, _ = self._page(data)
+        rows, next_offset = self._page(data)
         papers = deduplicate([map_paper(row) for row in rows])
         # No upstream author-name filter exists. This filters the requested ranked
         # page only; it is deliberately not an expensive author search/join.
@@ -278,6 +278,7 @@ class SemanticScholarProvider(BaseProvider):
             page=page,
             page_size=size,
             provider=self.name,
+            has_more=next_offset is not None and offset < next_offset < 1000,
         )
 
     async def _graph_rows(self, paper_id: str, direction: str, fields: str) -> list[dict]:

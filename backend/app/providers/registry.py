@@ -20,7 +20,7 @@ PROVIDER_FACTORIES = {
 ENABLED_PROVIDERS = ("semantic_scholar",)
 PRIMARY_PROVIDER = ENABLED_PROVIDERS[0]
 # Version all derived caches to avoid serving pre-refactor fanout/graph results.
-CACHE_NAMESPACE = "papers-v2:" + "+".join(ENABLED_PROVIDERS)
+CACHE_NAMESPACE = "papers-v3:" + "+".join(ENABLED_PROVIDERS)
 _instances: dict[str, BaseProvider] = {}
 
 

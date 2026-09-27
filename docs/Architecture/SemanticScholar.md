@@ -250,3 +250,9 @@ run, a graph error-display fix with three additional frontend tests (94 total),
 and recurring upstream 429 failures. That later live run was **not fully green**:
 graph/authentication passed, while direct arXiv discovery exhausted retries twice.
 See that report for the current operational result and local database isolation.
+
+### Incremental result lists
+
+`GET /papers/search` exposes `has_more`, derived from the provider continuation before filtering or deduplication. The UI appends 20-result pages with “Show more”, merges canonical paper groups across pages, and preserves selected versions. Continuation stops at the relevance endpoint’s first 1,000 results. The search cache namespace is `papers-v3` to exclude older payloads without continuation metadata.
+
+The personal library appends 25-entry pages, without a 100-entry UI ceiling. Its ordering uses creation time plus the stable group key to avoid ambiguous page boundaries when imports share timestamps. An additional empty page can be requested when the total is an exact multiple of 25. These are offset-based pages, not a snapshot: concurrent changes can move boundaries; the UI removes overlaps and refreshes after its own writes.

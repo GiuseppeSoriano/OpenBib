@@ -8,10 +8,14 @@
 
 OpenBib is an open-source academic reference manager for searching across public bibliographic providers, building a personal research library, and exploring the citation graph around a paper or collection. This repository contains the source of official releases and everything needed to run and develop the application locally.
 
-Search, paper details, public collections, and citation graphs work without an account. Signing in unlocks persistent collections, notes, tags, reading states, version pins, and one-way Zotero sync.
+Search, paper details, collections shared through read-only links, and citation graphs work without an account. Signing in unlocks persistent collections, notes, tags, reading states, version pins, and one-way Zotero sync.
 
 > [!IMPORTANT]
 > OpenBib is currently an **alpha project**. The core workflows are usable, but APIs, data migrations, and user-facing behavior may change before the first stable release. Please back up important data.
+
+## Try OpenBib online
+
+Want to try or use OpenBib without installing it locally? Visit the hosted version at **[www.open-bib.com](https://www.open-bib.com)**. No local setup is needed. To self-host or contribute to the open-source project, follow the instructions below.
 
 ## Why OpenBib?
 
@@ -19,7 +23,7 @@ Academic discovery is spread across search engines, reference managers, and grap
 
 - **Discover papers with Semantic Scholar** — one authenticated source for search, metadata, references and citations, normalized and deduplicated before display.
 - **Explore citation networks visually** — expand citers or references, preserve node positions, and move directly from discovery to a paper's details.
-- **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and public or collaborative collections.
+- **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and collections with read-only links and authorized collaborators.
 - **Keep Zotero in the workflow** — push a collection or the whole library to Zotero with an idempotent one-way sync.
 - **Use it comfortably anywhere** — responsive UI, light and dark themes, and bundled English and Italian translations.
 - **Stay useful during provider outages** — Redis caching, retries and explicit upstream errors keep the application responsive when an upstream API is slow.
@@ -59,7 +63,7 @@ cd OpenBib
 
 cp .env.example .env
 # Replace JWT_SECRET_KEY in .env with a strong, random secret.
-# OPENALEX_EMAIL and CROSSREF_MAILTO should identify your API requests.
+# Set SEMANTIC_SCHOLAR_API_KEY to your Semantic Scholar API key.
 
 docker compose up --build -d
 ```

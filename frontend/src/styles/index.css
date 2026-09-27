@@ -687,3 +687,5 @@
 .skeleton[data-height="1.1rem"] { height: 1.1rem; }
 .skeleton[data-height="1.5rem"] { height: 1.5rem; }
 .skeleton[data-height="4rem"] { height: 4rem; }
+
+.query-feedback, .load-more { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--space-md); margin-block: var(--space-lg); }

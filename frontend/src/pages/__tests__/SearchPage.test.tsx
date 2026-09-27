@@ -117,3 +117,60 @@ describe("SearchPage", () => {
     expect(screen.queryByText("Save to Library")).toBeNull();
   });
 });
+
+it("appends pages, deduplicates overlapping papers, and resets for a new query", async () => {
+  const api = (await import("@/lib/api")).default;
+  const { fireEvent } = await import("@testing-library/react");
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url !== "/papers/search") return { data: [] };
+    const page = config?.params?.page ?? 1;
+    if (config?.params?.q === "different") return { data: { ...searchResponse, has_more: false, items: [{ kind: "paper", paper: paper("new", "New query paper") }] } };
+    return { data: { ...searchResponse, page, has_more: page === 1, items: page === 1 ? searchResponse.items : [searchResponse.items[0], { kind: "paper", paper: paper("later", "Later paper") }] } };
+  });
+  renderWithProviders(<SearchPage />, { route: "/search?q=databases" });
+  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+  expect(await screen.findByText("Later paper")).toBeInTheDocument();
+  expect(screen.getAllByText("Solo Paper")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "different" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(await screen.findByText("New query paper")).toBeInTheDocument();
+  expect(screen.queryByText("Later paper")).toBeNull();
+});
+
+it("preserves earlier results and retries a failed next page", async () => {
+  const api = (await import("@/lib/api")).default;
+  const { fireEvent } = await import("@testing-library/react");
+  let fail = true;
+  vi.mocked(api.get).mockImplementation(async (_url, config) => {
+    const page = config?.params?.page ?? 1;
+    if (page === 2 && fail) throw new Error("offline");
+    return { data: { ...searchResponse, page, has_more: page === 1, items: page === 1 ? searchResponse.items : [{ kind: "paper", paper: paper("last", "Final paper") }] } };
+  });
+  renderWithProviders(<SearchPage />, { route: "/search?q=databases" });
+  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  expect(screen.getByText("Solo Paper")).toBeInTheDocument();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Final paper")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("merges versions split across pages without using title similarity", async () => {
+  const { mergeSearchPages } = await import("@/lib/search-pages");
+  const version = paper("hash:v3", "Grouped Paper", { paper_group_key: "group:g" });
+  const first = { ...searchResponse, has_more: true } as import("@/types").SearchResult;
+  const second: import("@/types").SearchResult = { ...first, page: 2, has_more: false, items: [
+    { kind: "paper", paper: groupV1 }, { kind: "paper", paper: version },
+    { kind: "paper", paper: paper("different", "Grouped Paper") },
+  ] };
+  const items = mergeSearchPages([first, second]);
+  expect(items).toHaveLength(3);
+  const group = items[1]!;
+  expect(group.kind).toBe("paper_group");
+  if (group.kind === "paper_group") {
+    expect(group.versions).toHaveLength(3);
+    expect(group.selected_version.canonical_key).toBe(groupV2.canonical_key);
+  }
+});

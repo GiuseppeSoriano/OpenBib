@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 import type { Collection } from "@/types";
 import { Plus, Trash2, FolderOpen } from "lucide-react";
+import QueryError from "@/components/ui/QueryError";
+import { useToast } from "@/components/ui/Toast";
 import ConfirmModal from "@/components/ConfirmModal";
 import Modal from "@/components/ui/Modal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -14,12 +16,13 @@ import "./CollectionsPage.css";
 export default function CollectionsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Collection | null>(null);
 
-  const { data: collections, isLoading } = useQuery({
+  const { data: collections, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["collections"],
     queryFn: async () => {
       const { data } = await api.get<Collection[]>("/collections");
@@ -37,6 +40,7 @@ export default function CollectionsPage() {
       setName("");
       setDescription("");
     },
+    onError: () => toast(t("collections.createFailed"), "error"),
   });
 
   const deleteMutation = useMutation({
@@ -48,6 +52,7 @@ export default function CollectionsPage() {
       void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
       void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
     },
+    onError: () => toast(t("collections.deleteFailed"), "error"),
   });
 
   const handleCreate = (e: FormEvent) => {
@@ -66,6 +71,7 @@ export default function CollectionsPage() {
       </div>
 
       {isLoading && <SkeletonCard count={3} />}
+      {isError && <QueryError onRetry={() => void refetch()} busy={isFetching} />}
 
       <div className="collection-grid">
         {collections?.map((c) => (
@@ -127,7 +133,7 @@ export default function CollectionsPage() {
             >
               {t("common.cancel")}
             </button>
-            <button type="submit" className="btn btn-primary" disabled={!name.trim()}>
+            <button type="submit" className="btn btn-primary" disabled={!name.trim() || createMutation.isPending}>
               {t("collections.create")}
             </button>
           </div>

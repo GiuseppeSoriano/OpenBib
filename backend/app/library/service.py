@@ -72,7 +72,7 @@ async def list_entries(
     entries_q = (
         select(UserLibraryEntry)
         .where(UserLibraryEntry.user_id == user_id)
-        .order_by(UserLibraryEntry.created_at.desc())
+        .order_by(UserLibraryEntry.created_at.desc(), UserLibraryEntry.paper_group_key)
         .offset(offset)
         .limit(size)
     )
@@ -342,7 +342,7 @@ async def list_group_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     q = (
         select(UserLibraryEntry.paper_group_key)
         .where(UserLibraryEntry.user_id == user_id)
-        .order_by(UserLibraryEntry.created_at.desc())
+        .order_by(UserLibraryEntry.created_at.desc(), UserLibraryEntry.paper_group_key)
     )
     return [row[0] for row in (await db.execute(q)).all()]
 

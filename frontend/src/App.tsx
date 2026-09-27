@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
@@ -17,16 +17,18 @@ import { CheckEmailPage, ConfirmEmailPage, ForgotPasswordPage, LegalReviewPage, 
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <div className="container auth-loading" />;
-  if (!user) return <Navigate to="/login" />;
+  if (!user) return <Navigate to="/login" replace state={{ returnTo: location.pathname + location.search + location.hash }} />;
   if (user.legal_acceptance_required) return <Navigate to="/legal-review" />;
   return <>{children}</>;
 }
 
 function RequireBasicAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <div className="container auth-loading" />;
-  return user ? <>{children}</> : <Navigate to="/login" />;
+  return user ? <>{children}</> : <Navigate to="/login" replace state={{ returnTo: location.pathname + location.search + location.hash }} />;
 }
 
 /** Authenticated users land on the dashboard; visitors get the search-first landing. */

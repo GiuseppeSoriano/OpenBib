@@ -279,6 +279,7 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         page_size=results[0].page_size,
         provider="+".join(provider_names),
         providers=provider_names,
+        has_more=any(result.has_more for result in results),
     )
 
 
@@ -333,6 +334,7 @@ def build_search_response(result: ProviderSearchResult) -> dict:
         "items": items,
         "total_count": len(items),
         "raw_total_count": result.total_count,
+        "has_more": result.has_more,
         "page": result.page,
         "page_size": result.page_size,
         "providers": providers_list,
