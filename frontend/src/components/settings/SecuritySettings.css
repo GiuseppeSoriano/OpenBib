@@ -1,0 +1,68 @@
+@layer pages {
+  .settings-security-header h2 {
+    font-family: var(--font-serif);
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+  }
+
+  .settings-security-list { margin: var(--space-md) 0 0; }
+  .settings-security-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px var(--space-md);
+    padding: 20px 0;
+    border-top: 1px solid var(--color-border);
+  }
+  .settings-security-row:last-child { padding-bottom: 0; }
+  .settings-security-row dt {
+    grid-column: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.88rem;
+    font-weight: 500;
+  }
+  .settings-security-row dt svg { flex-shrink: 0; color: var(--color-text-secondary); }
+  .settings-security-description {
+    grid-column: 1;
+    grid-row: 2;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .settings-security-verified {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: var(--space-sm);
+    color: var(--color-success);
+    white-space: nowrap;
+  }
+  .settings-security-action { margin: 0; grid-column: 2; grid-row: 1 / span 2; }
+  .settings-security-notice {
+    margin-top: var(--space-md);
+    font-size: 0.84rem;
+    color: var(--color-success);
+  }
+  .settings-security-editor {
+    border-top: 1px solid var(--color-border);
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+  }
+  .settings-security-back { display: inline-flex; align-items: center; gap: var(--space-xs); margin-bottom: var(--space-md); }
+  .settings-security-editor h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: var(--space-xs); }
+  .settings-security-form { display: flex; flex-direction: column; gap: var(--space-md); margin-top: var(--space-lg); }
+  .settings-security-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-top: var(--space-xs); }
+  .settings-security-error { color: var(--color-danger); font-size: 0.84rem; line-height: 1.5; }
+
+  @media (max-width: 540px) {
+    .settings-security-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
+    .settings-security-action { grid-column: 1; grid-row: 3; }
+    .settings-security .btn, .settings-security-back { min-height: 44px; }
+    .settings-security input { font-size: 16px; }
+  }
+}
