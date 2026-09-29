@@ -1,7 +1,7 @@
 """Graph router — citation graphs for a paper, a collection, or the library,
-plus related-paper ranges, pinned top-ups and one-level citation expansion.
+plus related-paper ranges and pinned top-ups.
 
-Single-paper graphs, public-collection graphs, related ranges and expansion
+Single-paper graphs, public-collection graphs, related ranges and top-ups
 are usable without an account (anonymous exploration); only the library graph
 is inherently user-scoped and requires auth.
 """
@@ -19,8 +19,6 @@ from app.config import settings
 from app.dependencies import DB, CurrentUser, OptionalUser, Redis
 from app.graph import related, service
 from app.graph.schemas import (
-    ExpandRequest,
-    ExpandResponse,
     GraphResponse,
     RelatedRangeRequest,
     RelatedRangeResponse,
@@ -125,47 +123,6 @@ async def related_top_up(
         return await related.related_top_up(db, redis, body, sources, saved)
     except related.RelatedProviderError as exc:
         raise _provider_unavailable() from exc
-
-
-@router.post("/expand", response_model=ExpandResponse)
-async def expand_graph(
-    body: ExpandRequest,
-    request: Request,
-    response: Response,
-    user: OptionalUser,
-    db: DB,
-    redis: Redis,
-):
-    """Add papers that cite the chosen node(s) as new leaves (focused if
-    ``focus_key`` is set, otherwise global over ``from_keys``).
-
-    Anonymous callers get the same expansion but with no saved-paper set,
-    so no user-scoped edges are persisted."""
-    identity = f"user:{user.id}" if user else client_ip(request)
-    await enforce_rate_limit(
-        redis,
-        request,
-        response,
-        scope="graph-expand",
-        identity=identity,
-        limit=30 if user else 10,
-        window_seconds=60,
-        fail_closed=True,
-    )
-    saved = await service.saved_canonical_keys(db, user.id) if user else set()
-    # Release the per-user row lock before the provider calls.
-    await db.commit()
-    return await service.expand_graph(
-        db,
-        redis,
-        from_keys=body.from_keys,
-        focus_key=body.focus_key,
-        existing_group_keys=body.existing_group_keys,
-        direction=body.direction,
-        order=body.order,
-        limit_per_node=body.limit_per_node,
-        saved_keys=saved,
-    )
 
 
 @router.get("/library", response_model=GraphResponse)

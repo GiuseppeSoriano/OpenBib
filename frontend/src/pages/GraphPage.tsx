@@ -1,394 +1,401 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { GitFork } from "lucide-react";
 import { graph as graphApi, library } from "@/lib/api";
+import { apiStatus } from "@/lib/apiError";
+import { COMPACT_QUERY, PHONE_MAX } from "@/lib/breakpoints";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAuth } from "@/contexts/AuthContext";
 import CitationGraph, { type CitationGraphHandle } from "@/components/graph/CitationGraph";
+import GraphBaseState from "@/components/graph/GraphBaseState";
+import GraphBottomBar from "@/components/graph/GraphBottomBar";
+import GraphControlsSheet, { GraphSheetControls, type GraphSheetTab } from "@/components/graph/GraphControlsSheet";
+import GraphHeader from "@/components/graph/GraphHeader";
+import GraphLegend from "@/components/graph/GraphLegend";
+import GraphNodePopup from "@/components/graph/GraphNodePopup";
+import GraphPaperList from "@/components/graph/GraphPaperList";
+import GraphSelectionSummary from "@/components/graph/GraphSelectionSummary";
+import { errorText, noticeText } from "@/components/graph/GraphStatus";
+import type { RangeSelection } from "@/components/graph/RangeNavigator";
+import { GraphCatalog, syncForceData } from "@/components/graph/graphCatalog";
 import {
-  EMPTY_GRAPH,
-  mergeGraph,
-  type ForceGraphData,
-} from "@/components/graph/mergeGraph";
+  currentBranch,
+  modeSwitchAutoLoad,
+  planTopUp,
+  rangeControls,
+  type ExplorationError,
+  type Notice,
+} from "@/components/graph/graphExploration";
+import { EMPTY_GRAPH, type ForceGraphData } from "@/components/graph/mergeGraph";
+import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
+import { useGraphExploration } from "@/components/graph/useGraphExploration";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import EmptyState from "@/components/ui/EmptyState";
-import VersionPicker from "@/components/search/VersionPicker";
-import type {
-  CitingOrder,
-  ExpandRequest,
-  GraphResponse,
-  PaperMetadata,
-  RelationDirection,
-} from "@/types";
-import {
-  ArrowLeft,
-  FileText,
-  GitFork,
-  Loader2,
-  Maximize2,
-  Plus,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import type { CitingOrder, GraphNode, GraphResponse, RelationDirection } from "@/types";
+import "@/components/graph/graph.css";
 import "./GraphPage.css";
 
 export type GraphMode = "manual" | "paper" | "collection" | "library";
+type SeededMode = Exclude<GraphMode, "manual">;
 
 export default function GraphPage({ mode }: { mode: GraphMode }) {
+  const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
+  if (mode === "manual") return <ManualGraph />;
+  const paramKey =
+    mode === "paper" ? (paperKey ? decodeURIComponent(paperKey) : "") : mode === "collection" ? collectionId ?? "" : "";
+  // A new seed is a new session: exploration state, pins and layout reset.
+  return <GraphExplorer key={`${mode}:${paramKey}`} mode={mode} paramKey={paramKey} />;
+}
+
+/** The /graph route has no seed: point the user at the entry points. */
+function ManualGraph() {
+  const { t } = useTranslation();
+  return (
+    <div className="graph-empty">
+      <h1 className="sr-only">{t("graph.title")}</h1>
+      <EmptyState
+        icon={GitFork}
+        title={t("graph.title")}
+        description={t("graph.manualHint")}
+        action={
+          <Link to="/search" className="btn btn-primary">
+            {t("nav.search")}
+          </Link>
+        }
+      />
+    </div>
+  );
+}
+
+/** The seed's title for the page heading; a DOI (never a raw key) when unresolved. */
+function seedHeading(node: GraphNode | undefined): string | null {
+  if (!node) return null;
+  const paper = node.selected_version;
+  if (!isUnresolved(paper)) return paper.title || null;
+  const doi = paperDoi(paper);
+  return doi ? `DOI ${doi}` : null;
+}
+
+function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string }) {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
   const navigate = useNavigate();
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const phone = useMediaQuery(`(max-width: ${PHONE_MAX}px)`);
+  const { toast } = useToast();
+  const baseEnabled = mode === "library" || !!paramKey;
 
-  const paramKey =
-    mode === "paper"
-      ? paperKey
-        ? decodeURIComponent(paperKey)
-        : ""
-      : mode === "collection"
-        ? collectionId ?? ""
-        : "";
-
-  const [direction, setDirection] = useState<RelationDirection>("cited_by");
-  const [order, setOrder] = useState<CitingOrder>("cited_by_count");
-  const [limitPerNode, setLimitPerNode] = useState(25);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [detailsKey, setDetailsKey] = useState<string | null>(null);
-
-  // The force-graph data lives in a ref: d3 mutates node objects in place
-  // (positions, pins) and mergeGraph reuses them, so existing nodes never
-  // jump on expansion. A version counter triggers React re-renders.
-  const dataRef = useRef<ForceGraphData>(EMPTY_GRAPH);
-  const [dataVersion, setDataVersion] = useState(0);
-  const graphRef = useRef<CitationGraphHandle>(null);
-
-  // ── Base graph load (paper / collection / library) ───────
-  const baseEnabled =
-    (mode === "paper" && !!paramKey) ||
-    (mode === "collection" && !!paramKey) ||
-    mode === "library";
-
+  // The base graph is the seeds and the edges among them; ordering only
+  // applies to related ranges, so switching it never refetches this.
   const baseQuery = useQuery<GraphResponse>({
-    queryKey: ["graph-base", mode, paramKey, order],
+    queryKey: ["graph-base", mode, paramKey],
     queryFn: () => {
-      if (mode === "paper") return graphApi.buildPaper(paramKey, order);
-      if (mode === "collection") return graphApi.buildCollection(paramKey, order);
-      return graphApi.buildLibrary(order);
+      if (mode === "paper") return graphApi.buildPaper(paramKey);
+      if (mode === "collection") return graphApi.buildCollection(paramKey);
+      return graphApi.buildLibrary();
     },
     enabled: baseEnabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error) => (apiStatus(error) ?? 0) >= 500 && failureCount < 1,
   });
+  const base = baseQuery.data;
 
-  // Library membership colors saved nodes green (authed only).
+  // Library membership colors saved nodes (signed-in users only).
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
     queryFn: () => library.listKeys(),
     enabled: !!user,
     staleTime: 30_000,
   });
-  const savedGroupKeys = new Set(libraryKeys ?? []);
+  const savedGroupKeys = useMemo(() => new Set(libraryKeys ?? []), [libraryKeys]);
 
-  // Reset the accumulated graph whenever a fresh base arrives (also on
-  // order change). Seeds load un-expanded — the user picks a direction.
+  const [catalog] = useState(() => new GraphCatalog());
+  const exploration = useGraphExploration(base, catalog);
+  const { state, catalogRevision } = exploration;
+
+  // The force-graph data lives in a ref: d3 mutates node objects in place
+  // (positions, pins) and syncForceData keeps surviving objects, so nodes
+  // never jump when ranges change.
+  const dataRef = useRef<ForceGraphData>(EMPTY_GRAPH);
+  const forceData = useMemo(() => {
+    void catalogRevision;
+    dataRef.current = syncForceData(dataRef.current, state, catalog, state.anchorId);
+    return dataRef.current;
+  }, [state, catalogRevision, catalog]);
+
+  const graphRef = useRef<CitationGraphHandle>(null);
+  const nodeCountRef = useRef(0);
   useEffect(() => {
-    if (!baseQuery.data) return;
-    dataRef.current = mergeGraph(EMPTY_GRAPH, {
-      nodes: baseQuery.data.nodes,
-      edges: baseQuery.data.edges,
-    });
-    setDataVersion((v) => v + 1);
-    setSelectedNodeId(null);
-  }, [baseQuery.data]);
+    // Gentle local relaxation when papers arrive; the rest stays put.
+    if (nodeCountRef.current > 0 && forceData.nodes.length > nodeCountRef.current) graphRef.current?.reheat();
+    nodeCountRef.current = forceData.nodes.length;
+  }, [forceData]);
 
-  // ── Expansion (from selection, or the whole graph) ───────
-  const expandMutation = useMutation({
-    mutationFn: (body: ExpandRequest) => graphApi.expand(body),
-    onSuccess: (data, body) => {
-      const anchorGroup = body.focus_key
-        ? dataRef.current.nodes.find(
-            (n) => n.node.selected_version.canonical_key === body.focus_key,
-          )?.id
-        : null;
-      dataRef.current = mergeGraph(dataRef.current, data, anchorGroup);
-      setDataVersion((v) => v + 1);
-      // Gentle local relaxation only — the rest of the map stays put.
-      graphRef.current?.reheat();
-    },
+  const [papersOpen, setPapersOpen] = useState(false);
+  // Compact "Graph controls" sheet. Its tab and every choice made in it live
+  // here (or in the exploration), so reopening shows them unchanged.
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState<GraphSheetTab>("controls");
+  const controlsTriggerRef = useRef<HTMLButtonElement>(null);
+  const summaryTitleRef = useRef<HTMLButtonElement>(null);
+  const sheetReturnRef = useRef<HTMLElement | null>(null);
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
+  const papersListId = useId();
+
+  const selectedId = state.selectedId;
+  const selectedNode = selectedId ? catalog.getNode(selectedId) ?? null : null;
+  const selectedTitle = selectedNode ? paperTitle(selectedNode.selected_version, t) : null;
+  const controls = selectedId ? rangeControls(state, selectedId) : null;
+  const branch = selectedId ? currentBranch(state, selectedId) : undefined;
+  const currentRangeIds = branch && branch.rangeIndex !== null ? branch.memberIds : [];
+  const visibleNodes = forceData.nodes.map((forceNode) => forceNode.node);
+  const nodeCount = forceData.nodes.length;
+  const edgeCount = forceData.links.length;
+  const baseHasNodes = !!base && base.nodes.length > 0;
+  // The exploration adopts the base in an effect: wait for it so pins and
+  // counts never flash empty.
+  const hasGraph = baseHasNodes && state.baseIds.size > 0;
+
+  // The selection, plus the pins while there are few, keep their labels at
+  // every zoom level (small screens rarely zoom in far enough otherwise).
+  const alwaysLabelIds = useMemo(() => {
+    const ids = new Set<string>(state.pinned.size <= 5 ? state.pinned : []);
+    if (selectedId) ids.add(selectedId);
+    return ids;
+  }, [state.pinned, selectedId]);
+
+  const seedNode = mode === "paper" && base ? base.nodes.find((node) => node.is_seed) ?? base.nodes[0] : undefined;
+  const seedTitle = seedHeading(seedNode ? catalog.getNode(seedNode.id) ?? seedNode : undefined);
+  const canvasLabel = seedTitle
+    ? t("graph.canvasLabelSeed", { title: seedTitle, nodes: nodeCount, edges: edgeCount })
+    : t("graph.canvasLabel", { nodes: nodeCount, edges: edgeCount });
+
+  // Pins are fixed in place on the canvas as well as in the state.
+  const togglePin = (id: string) => {
+    const wasPinned = state.pinned.has(id);
+    exploration.togglePin(id);
+    if (wasPinned) graphRef.current?.unpinNode(id);
+    else graphRef.current?.pinNode(id);
+  };
+
+  const selectFromList = (id: string) => {
+    exploration.select(id);
+    graphRef.current?.focusNode(id);
+  };
+
+  const sheetOpen = compact && controlsOpen;
+  const openSheet = (opener: HTMLElement | null, tab?: GraphSheetTab) => {
+    sheetReturnRef.current = opener;
+    if (tab) setSheetTab(tab);
+    setControlsOpen(true);
+  };
+  const closeSheet = () => setControlsOpen(false);
+
+  // Anything that loads data closes the sheet, so the canvas gets its space
+  // back while the results arrive; the summary row shows the status.
+  const loadRange = (selection: RangeSelection) => {
+    closeSheet();
+    exploration.loadRange(selection);
+  };
+  const setDirection = (direction: RelationDirection) => {
+    if (direction !== state.mode.direction && modeSwitchAutoLoad(state)) closeSheet();
+    exploration.setDirection(direction);
+  };
+  const setOrder = (order: CitingOrder) => {
+    if (order !== state.mode.order && modeSwitchAutoLoad(state)) closeSheet();
+    exploration.setOrder(order);
+  };
+  const expandPinned = () => {
+    // A large run asks first, inside the sheet.
+    if (!planTopUp(state).needsConfirmation) closeSheet();
+    exploration.expandPinned();
+  };
+  const confirmExpand = () => {
+    closeSheet();
+    exploration.confirmExpand();
+  };
+
+  // The page behind an open sheet is inert, so the summary's live status is
+  // not announced there: report new errors and notices as toasts instead.
+  const lastStatusRef = useRef<{ error: ExplorationError | null; notice: Notice | null }>({
+    error: null,
+    notice: null,
   });
+  useEffect(() => {
+    const { error, notice } = state;
+    const last = lastStatusRef.current;
+    lastStatusRef.current = { error, notice };
+    if (!sheetOpen) return;
+    if (error && error !== last.error) toast(errorText(error, t, error.retryAfter ?? 0), "error");
+    else if (notice && notice !== last.notice) toast(noticeText(notice, t), "info");
+  }, [state, sheetOpen, toast, t]);
 
-  const expandFromKeys = useCallback(
-    (fromKeys: string[], focusKey: string | null, dir: RelationDirection) => {
-      if (fromKeys.length === 0) return;
-      expandMutation.mutate({
-        from_keys: fromKeys,
-        focus_key: focusKey,
-        existing_group_keys: dataRef.current.nodes.map((n) => n.id),
-        direction: dir,
-        order,
-        limit_per_node: limitPerNode,
-      });
-    },
-    [expandMutation, order, limitPerNode],
-  );
+  const expandActive = !!state.expand && state.expand.phase !== "confirm";
+  const showSummary = !!selectedNode || !!state.pending || !!state.error || !!state.notice || expandActive;
 
-  const nodes = dataRef.current.nodes;
-  const links = dataRef.current.links;
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId)?.node ?? null;
-  const isExpanding = expandMutation.isPending;
-  const hasGraph = nodes.length > 0;
-  void dataVersion; // re-render trigger
-
-  const handleExpand = () => {
-    if (selectedNode) {
-      const key = selectedNode.selected_version.canonical_key;
-      expandFromKeys([key], key, direction);
-    } else {
-      expandFromKeys(
-        nodes.map((n) => n.node.selected_version.canonical_key),
-        null,
-        direction,
-      );
-    }
-  };
-
-  const handleSelectVersion = (groupKey: string, version: PaperMetadata) => {
-    const node = dataRef.current.nodes.find((n) => n.id === groupKey);
-    if (node) {
-      node.node = { ...node.node, selected_version: version };
-      setDataVersion((v) => v + 1);
-    }
-  };
-
-  const modeLabel =
-    mode === "paper"
-      ? t("graph.modePaper")
-      : mode === "collection"
-        ? t("graph.modeCollection")
-        : mode === "library"
-          ? t("graph.modeLibrary")
-          : "";
-
-  // Manual /graph route: no seed — point the user at the entry points.
-  if (mode === "manual") {
-    return (
-      <div className="graph-empty">
-        <EmptyState
-          icon={GitFork}
-          title={t("graph.title")}
-          description={t("graph.manualHint")}
-          action={
-            <Link to="/search" className="btn btn-primary">
-              {t("nav.search")}
-            </Link>
-          }
-        />
-      </div>
+  let baseState = null;
+  if (baseQuery.isError) {
+    baseState = (
+      <GraphBaseState
+        status="error"
+        error={baseQuery.error}
+        retrying={baseQuery.isFetching}
+        onRetry={() => void baseQuery.refetch()}
+      />
+    );
+  } else if (!base || (baseHasNodes && !hasGraph)) {
+    baseState = baseEnabled ? <GraphBaseState status="loading" /> : null;
+  } else if (!hasGraph) {
+    baseState = (
+      <GraphBaseState
+        status="empty"
+        description={mode === "paper" ? t("graph.emptyPaper") : t("graph.emptyCollection")}
+      />
     );
   }
 
   return (
     <div className="graph-screen" data-testid="graph-screen">
-      {hasGraph && (
-        <CitationGraph
-          ref={graphRef}
-          data={dataRef.current}
-          selectedId={selectedNodeId}
-          savedGroupKeys={savedGroupKeys}
-          onNodeClick={setSelectedNodeId}
-          onNodeDoubleClick={(id) => {
-            const node = dataRef.current.nodes.find((n) => n.id === id);
-            if (node) {
-              const key = node.node.selected_version.canonical_key;
-              expandFromKeys([key], key, direction);
-            }
-          }}
-          onBackgroundClick={() => setSelectedNodeId(null)}
+      <GraphHeader
+        mode={mode}
+        seedTitle={seedTitle}
+        hasGraph={hasGraph}
+        nodeCount={nodeCount}
+        edgeCount={edgeCount}
+        pinnedCount={state.pinned.size}
+        compact={compact}
+        onBack={() => navigate(-1)}
+        onZoomIn={() => graphRef.current?.zoomIn()}
+        onZoomOut={() => graphRef.current?.zoomOut()}
+        onFit={() => graphRef.current?.fit()}
+        papersOpen={papersOpen}
+        papersListId={papersListId}
+        onTogglePapers={() => setPapersOpen((open) => !open)}
+        controlsOpen={sheetOpen}
+        controlsTriggerRef={controlsTriggerRef}
+        onOpenControls={() => openSheet(controlsTriggerRef.current)}
+      />
+
+      <div className="graph-stage">
+        {!compact && hasGraph && papersOpen && (
+          <GraphPaperList
+            id={papersListId}
+            className="graph-drawer"
+            nodes={visibleNodes}
+            pinOrder={state.pinOrder}
+            pinned={state.pinned}
+            currentRangeIds={currentRangeIds}
+            selectedId={selectedId}
+            onSelect={selectFromList}
+            onTogglePin={togglePin}
+          />
+        )}
+        <div className="graph-canvas-wrap">
+          {hasGraph && (
+            <CitationGraph
+              ref={graphRef}
+              data={forceData}
+              selectedId={selectedId}
+              savedGroupKeys={savedGroupKeys}
+              pinnedIds={state.pinned}
+              alwaysLabelIds={alwaysLabelIds}
+              ariaLabel={canvasLabel}
+              onNodeClick={exploration.select}
+              onNodeDoubleClick={exploration.loadFirstRangeFor}
+              onBackgroundClick={() => exploration.select(null)}
+              onNodeDragPin={exploration.pinFromDrag}
+            />
+          )}
+          {baseState}
+          {!compact && selectedNode && (
+            <GraphNodePopup
+              node={selectedNode}
+              pinned={state.pinned.has(selectedNode.id)}
+              onTogglePin={() => togglePin(selectedNode.id)}
+              onSelectVersion={(version) => exploration.versionChanged(selectedNode.id, version.canonical_key)}
+              onViewDetails={() => setDetailsKey(selectedNode.selected_version.canonical_key)}
+            />
+          )}
+          {!compact && hasGraph && <GraphLegend />}
+        </div>
+      </div>
+
+      {!compact && hasGraph && (
+        <GraphBottomBar
+          state={state}
+          selectedTitle={selectedTitle}
+          rangeControls={controls}
+          onDirection={exploration.setDirection}
+          onOrder={exploration.setOrder}
+          onRange={exploration.loadRange}
+          onExpand={exploration.expandPinned}
+          onConfirmExpand={exploration.confirmExpand}
+          onCancelExpand={exploration.cancelExpand}
+          onRetry={exploration.retry}
+          onDismiss={exploration.dismissNotice}
         />
       )}
 
-      {baseQuery.isLoading && (
-        <div className="graph-center-status">
-          <Loader2 size={18} className="spin" /> {t("graph.loading")}
-        </div>
+      {compact && hasGraph && showSummary && (
+        <GraphSelectionSummary
+          state={state}
+          node={selectedNode}
+          rangeControls={controls}
+          titleRef={summaryTitleRef}
+          onTogglePin={() => selectedNode && togglePin(selectedNode.id)}
+          onOpenPaper={() => openSheet(summaryTitleRef.current, "controls")}
+          onRange={exploration.loadRange}
+          onViewDetails={() => selectedNode && setDetailsKey(selectedNode.selected_version.canonical_key)}
+          onRetry={exploration.retry}
+          onDismiss={exploration.dismissNotice}
+          onCancelExpand={exploration.cancelExpand}
+        />
       )}
 
-      {baseQuery.data && !hasGraph && !baseQuery.isLoading && (
-        <div className="graph-empty">
-          <EmptyState
-            icon={GitFork}
-            title={t("graph.title")}
-            description={
-              mode === "collection" || mode === "library"
-                ? t("graph.emptyCollection")
-                : t("graph.emptyPaper")
-            }
-          />
-        </div>
-      )}
-
-      {/* Top-left: back + context */}
-      <div className="graph-overlay graph-overlay--tl">
-        <button
-          type="button"
-          className="btn-ghost graph-back"
-          onClick={() => navigate(-1)}
-          title={t("graph.back")}
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <span className="graph-chip">
-          {t("graph.title")}
-          {modeLabel && <span className="graph-chip-mode">{modeLabel}</span>}
-        </span>
-        {hasGraph && (
-          <span className="graph-counts">
-            {t("graph.nodesEdges", { nodes: nodes.length, edges: links.length })}
-          </span>
-        )}
-      </div>
-
-      {/* Top-right: view controls */}
-      {hasGraph && (
-        <div className="graph-overlay graph-overlay--tr">
-          <button onClick={() => graphRef.current?.zoomIn()} title={t("graph.zoomIn")}>
-            <ZoomIn size={15} />
-          </button>
-          <button onClick={() => graphRef.current?.zoomOut()} title={t("graph.zoomOut")}>
-            <ZoomOut size={15} />
-          </button>
-          <button onClick={() => graphRef.current?.fit()} title={t("graph.fit")}>
-            <Maximize2 size={15} />
-          </button>
-        </div>
-      )}
-
-      {/* Bottom-center: expansion bar */}
-      {hasGraph && (
-        <div className="graph-expandbar" data-testid="expand-bar">
-          <div className="segmented" role="group" aria-label={t("graph.expandCiters")}>
-            <button
-              type="button"
-              className={direction === "cited_by" ? "active" : ""}
-              onClick={() => setDirection("cited_by")}
-              title={t("graph.citersTitle")}
-            >
-              {t("graph.citers")}
-            </button>
-            <button
-              type="button"
-              className={direction === "cites" ? "active" : ""}
-              onClick={() => setDirection("cites")}
-              title={t("graph.referencesTitle")}
-            >
-              {t("graph.references")}
-            </button>
-          </div>
-
-          <div className="segmented" role="group" aria-label={t("graph.topCited")}>
-            <button
-              type="button"
-              className={order === "cited_by_count" ? "active" : ""}
-              onClick={() => setOrder("cited_by_count")}
-              title={t("graph.topCitedTitle")}
-            >
-              {t("graph.topCited")}
-            </button>
-            <button
-              type="button"
-              className={order === "recent" ? "active" : ""}
-              onClick={() => setOrder("recent")}
-              title={t("graph.mostRecentTitle")}
-            >
-              {t("graph.mostRecent")}
-            </button>
-          </div>
-
-          <select
-            className="input graph-limit"
-            value={limitPerNode}
-            onChange={(e) => setLimitPerNode(Number(e.target.value))}
-            aria-label={t("graph.perExpansion")}
-          >
-            {[10, 25, 50].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            className="btn btn-primary graph-expand-btn"
-            onClick={handleExpand}
-            disabled={isExpanding}
-          >
-            {isExpanding ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
-            {selectedNode ? t("graph.expandSelection") : t("graph.expandAll")}
-          </button>
-        </div>
-      )}
-
-      {/* Right: selected node card */}
-      {selectedNode && (
-        <div className="graph-node-card card">
-          <h4>{selectedNode.selected_version.title}</h4>
-          <p className="graph-node-authors">
-            {selectedNode.selected_version.authors.map((a) => a.name).join(", ")}
-          </p>
-          <p className="graph-node-meta">
-            {[
-              selectedNode.selected_version.venue,
-              selectedNode.selected_version.publication_date?.slice(0, 4),
-              typeof selectedNode.selected_version.cited_by_count === "number"
-                ? t("paper.citations", { count: selectedNode.selected_version.cited_by_count })
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-
-          {selectedNode.versions.length > 1 && (
-            <VersionPicker
-              versions={selectedNode.versions}
-              selectedKey={selectedNode.selected_version.canonical_key}
-              onSelect={(version) =>
-                handleSelectVersion(selectedNode.paper_group_key, version)
-              }
+      {compact && hasGraph && (
+        <GraphControlsSheet
+          open={controlsOpen}
+          onClose={closeSheet}
+          placement={phone ? "bottom" : "auto"}
+          returnFocusRef={sheetReturnRef}
+          tab={sheetTab}
+          onTabChange={setSheetTab}
+          papersCount={nodeCount}
+          controls={
+            <GraphSheetControls
+              state={state}
+              node={selectedNode}
+              rangeControls={controls}
+              onTogglePin={() => selectedNode && togglePin(selectedNode.id)}
+              onSelectVersion={(version) => selectedNode && exploration.versionChanged(selectedNode.id, version.canonical_key)}
+              onViewDetails={() => selectedNode && setDetailsKey(selectedNode.selected_version.canonical_key)}
+              onDirection={setDirection}
+              onOrder={setOrder}
+              onRange={loadRange}
+              onExpand={expandPinned}
+              onConfirmExpand={confirmExpand}
+              onCancelExpand={exploration.cancelExpand}
+              onZoomIn={() => graphRef.current?.zoomIn()}
+              onZoomOut={() => graphRef.current?.zoomOut()}
             />
-          )}
-
-          <div className="graph-node-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setDetailsKey(selectedNode.selected_version.canonical_key)}
-            >
-              <FileText size={13} />
-              {t("paper.viewDetails")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom-left: collapsible legend */}
-      {hasGraph && (
-        <details className="graph-legend">
-          <summary>{t("graph.legend")}</summary>
-          <div className="graph-legend-body">
-            <span>
-              <span className="legend-dot seed" /> {t("graph.legendSeed")}
-            </span>
-            <span>
-              <span className="legend-dot saved" /> {t("graph.legendSaved")}
-            </span>
-            <span>
-              <span className="legend-dot" /> {t("graph.legendPaper")}
-            </span>
-            <span>
-              <span className="legend-line" /> {t("graph.legendEdge")}
-            </span>
-            <span className="legend-hint">{t("graph.dragHint")}</span>
-          </div>
-        </details>
+          }
+          papers={
+            <GraphPaperList
+              className="graph-sheet-papers"
+              nodes={visibleNodes}
+              pinOrder={state.pinOrder}
+              pinned={state.pinned}
+              currentRangeIds={currentRangeIds}
+              selectedId={selectedId}
+              onSelect={selectFromList}
+              onTogglePin={togglePin}
+            />
+          }
+        />
       )}
 
       <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />

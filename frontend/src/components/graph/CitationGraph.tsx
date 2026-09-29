@@ -9,36 +9,50 @@ import {
 } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
+import { nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
+import { paperTitle, truncateLabel } from "@/components/graph/paperText";
 
 export interface CitationGraphHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   fit: () => void;
   reheat: () => void;
+  /** Center the view on a node (the list's keyboard path to the canvas). */
+  focusNode: (id: string) => void;
+  /** Fix a node where it currently is. */
+  pinNode: (id: string) => void;
+  /** Release a node's fixed position and let the layout settle again. */
+  unpinNode: (id: string) => void;
 }
 
 interface CitationGraphProps {
   data: ForceGraphData;
   selectedId: string | null;
-  /** paper_group_keys saved in the user's library (colored green). */
-  savedGroupKeys?: Set<string>;
+  /** paper_group_keys saved in the user's library. */
+  savedGroupKeys?: ReadonlySet<string>;
+  pinnedIds?: ReadonlySet<string>;
+  /** Nodes labelled at every zoom level, over a background halo. */
+  alwaysLabelIds?: ReadonlySet<string>;
+  /** Accessible name of the canvas (it is exposed as one image). */
+  ariaLabel: string;
   onNodeClick: (id: string) => void;
   onNodeDoubleClick?: (id: string) => void;
   onBackgroundClick: () => void;
+  /** A drag ended: the node is now fixed where it was dropped. */
+  onNodeDragPin?: (id: string) => void;
 }
 
-interface ThemeStyle {
-  node: string;
-  seed: string;
-  saved: string;
+interface ThemeStyle extends NodeStyleColors {
   edge: string;
   label: string;
-  halo: string;
   /** Canvas has no var() support, so the label stack is resolved up front. */
   labelFont: string;
 }
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -51,19 +65,38 @@ function nodeRadius(node: ForceNode): number {
 
 /**
  * Obsidian-style force-directed citation graph: a continuous d3-force
- * simulation on canvas. Existing nodes keep their positions across
- * expansions (object identity in mergeGraph); dragging pins a node.
+ * simulation on canvas. Existing nodes keep their positions across range
+ * loads (object identity in mergeGraph). Pinned nodes are fixed in place:
+ * dragging pins a node, and seeds freeze once the first layout settles.
  */
 const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(function CitationGraph(
-  { data, selectedId, savedGroupKeys, onNodeClick, onNodeDoubleClick, onBackgroundClick },
+  {
+    data,
+    selectedId,
+    savedGroupKeys = EMPTY_IDS,
+    pinnedIds = EMPTY_IDS,
+    alwaysLabelIds = EMPTY_IDS,
+    ariaLabel,
+    onNodeClick,
+    onNodeDoubleClick,
+    onBackgroundClick,
+    onNodeDragPin,
+  },
   ref,
 ) {
+  const { t } = useTranslation();
   const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<ForceGraphMethods<any, any>>(undefined);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const lastClickRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
+  // Latest data and pins for the stable handle and engine callbacks.
+  const dataRef = useRef(data);
+  const pinnedRef = useRef(pinnedIds);
+  const frozenRef = useRef(false);
+  dataRef.current = data;
+  pinnedRef.current = pinnedIds;
 
   // Track the container size so the canvas always fills it.
   useEffect(() => {
@@ -78,7 +111,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   }, []);
 
   // Physics: collision keeps nodes from heaping; a stronger (but
-  // range-limited) charge and short links spread expansions readably.
+  // range-limited) charge and short links spread new ranges readably.
   // Forces persist across data updates — force-graph re-initializes them
   // with the new node array on every graphData change.
   useEffect(() => {
@@ -96,7 +129,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     if (link) {
       // Weak long links: d3's default link strength (1/min-degree) yanks
       // leaf nodes onto a tiny ring around hubs; letting charge dominate
-      // spaces big expansions readably.
+      // spaces big ranges readably.
       link.distance?.(90);
       link.strength?.(0.25);
     }
@@ -109,14 +142,18 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     void resolved;
     return {
       node: cssVar("--graph-node") || "#a0a8a4",
-      seed: cssVar("--graph-node-seed") || cssVar("--color-accent") || "#33695f",
+      pinned: cssVar("--graph-node-pinned") || cssVar("--color-accent") || "#33695f",
       saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
+      selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
+      background: cssVar("--color-bg") || "#f8faf9",
+      surface: cssVar("--color-surface") || "#ffffff",
       edge: cssVar("--graph-edge") || "#d6dcd8",
       label: cssVar("--color-text-secondary") || "#5f6b67",
-      halo: cssVar("--color-accent") || "#33695f",
       labelFont: cssVar("--font-sans") || "system-ui, sans-serif",
     };
   }, [resolved]);
+
+  const findNode = (id: string) => dataRef.current.nodes.find((node) => node.id === id);
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
@@ -129,7 +166,49 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     },
     fit: () => fgRef.current?.zoomToFit(400, 60),
     reheat: () => fgRef.current?.d3ReheatSimulation(),
+    focusNode: (id: string) => {
+      const fg = fgRef.current;
+      const node = findNode(id);
+      if (!fg || node?.x === undefined || node.y === undefined) return;
+      fg.centerAt(node.x, node.y, 400);
+      if (fg.zoom() < 1.5) fg.zoom(2, 400);
+    },
+    pinNode: (id: string) => {
+      const node = findNode(id);
+      if (!node) return;
+      node.fx = node.x;
+      node.fy = node.y;
+    },
+    unpinNode: (id: string) => {
+      const node = findNode(id);
+      if (!node) return;
+      delete node.fx;
+      delete node.fy;
+      fgRef.current?.d3ReheatSimulation();
+    },
   }));
+
+  // Seeds start pinned but unplaced: fix every node that is still pinned
+  // where the first layout left it. Later settles never move pins again.
+  const handleEngineStop = useCallback(() => {
+    if (frozenRef.current) return;
+    frozenRef.current = true;
+    for (const node of dataRef.current.nodes) {
+      if (!pinnedRef.current.has(node.id) || node.fx !== undefined || node.fy !== undefined) continue;
+      node.fx = node.x;
+      node.fy = node.y;
+    }
+  }, []);
+
+  // The current view, as rounded data attributes (CSP-safe, no styles), so
+  // tests and audits can check that overlays never move the graph.
+  const recordView = useCallback((view: { k: number; x: number; y: number }) => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.dataset.zoom = view.k.toFixed(2);
+    el.dataset.cx = String(Math.round(view.x));
+    el.dataset.cy = String(Math.round(view.y));
+  }, []);
 
   // Dev-only: expose live graph data for in-browser physics verification.
   useEffect(() => {
@@ -140,58 +219,77 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     }
   }, [data]);
 
-  const nodeColor = useCallback(
-    (node: ForceNode): string => {
-      if (node.node.is_seed) return colors.seed;
-      if (savedGroupKeys?.has(node.id)) return colors.saved;
-      return colors.node;
-    },
-    [colors, savedGroupKeys],
-  );
-
   const drawNode = useCallback(
     (node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const x = node.x ?? 0;
       const y = node.y ?? 0;
       const r = nodeRadius(node);
-
-      // Selection halo
-      if (node.id === selectedId) {
-        ctx.beginPath();
-        ctx.arc(x, y, r + 3 / globalScale + 1.5, 0, 2 * Math.PI);
-        ctx.strokeStyle = colors.halo;
-        ctx.lineWidth = 2 / globalScale;
-        ctx.stroke();
-      }
+      const px = 1 / globalScale;
+      const style = nodeStyle(
+        node.node,
+        { pinned: pinnedIds.has(node.id), saved: savedGroupKeys.has(node.id), selected: node.id === selectedId },
+        colors,
+      );
 
       ctx.beginPath();
       ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = nodeColor(node);
+      ctx.fillStyle = style.fill;
       ctx.fill();
 
+      // A thin inner stroke marks pins without relying on color alone.
+      if (style.innerStroke) {
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(r - 1.5 * px, r * 0.5), 0, 2 * Math.PI);
+        ctx.strokeStyle = style.innerStroke;
+        ctx.lineWidth = px;
+        ctx.stroke();
+      }
+
       // Dashed ring marks multi-version groups.
-      if (node.node.version_count > 1) {
+      if (style.versionRing) {
         ctx.beginPath();
         ctx.setLineDash([2, 2]);
         ctx.arc(x, y, r + 1.5, 0, 2 * Math.PI);
-        ctx.strokeStyle = nodeColor(node);
+        ctx.strokeStyle = style.fill;
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      // Titles fade in as the user zooms.
-      if (globalScale > 1.3) {
-        const title = node.node.selected_version.title || node.id;
-        const label = title.length > 40 ? `${title.slice(0, 40)}…` : title;
-        ctx.font = `${Math.max(10 / globalScale, 2.6)}px ${colors.labelFont}`;
+      // Selection: an outer ring over a background-colored gap ring.
+      if (style.selectedRing) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4.5 * px, 0, 2 * Math.PI);
+        ctx.strokeStyle = style.selectedRing.color;
+        ctx.lineWidth = 3 * px;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, r + 2 * px, 0, 2 * Math.PI);
+        ctx.strokeStyle = style.selectedRing.gapColor;
+        ctx.lineWidth = 2 * px;
+        ctx.stroke();
+      }
+
+      // Titles fade in as the user zooms; the selection and a few pins are
+      // always labelled, over a halo so they read on top of edges.
+      const always = alwaysLabelIds.has(node.id);
+      if (always || globalScale > 1.3) {
+        const label = truncateLabel(paperTitle(node.node.selected_version, t));
+        ctx.font = `${Math.max(10 * px, 2.6)}px ${colors.labelFont}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
+        const labelY = y + r + (style.selectedRing ? 6 * px : 2);
+        if (always) {
+          ctx.lineJoin = "round";
+          ctx.lineWidth = 3 * px;
+          ctx.strokeStyle = colors.background;
+          ctx.strokeText(label, x, labelY);
+        }
         ctx.fillStyle = colors.label;
-        ctx.fillText(label, x, y + r + 2);
+        ctx.fillText(label, x, labelY);
       }
     },
-    [colors, nodeColor, selectedId],
+    [alwaysLabelIds, colors, pinnedIds, savedGroupKeys, selectedId, t],
   );
 
   const handleNodeClick = useCallback(
@@ -209,8 +307,24 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     [onNodeClick, onNodeDoubleClick],
   );
 
+  const handleDragEnd = useCallback(
+    (node: ForceNode) => {
+      // Dragging pins the node exactly where the user dropped it.
+      node.fx = node.x;
+      node.fy = node.y;
+      onNodeDragPin?.(node.id);
+    },
+    [onNodeDragPin],
+  );
+
   return (
-    <div ref={containerRef} className="graph-canvas-container" data-testid="citation-graph">
+    <div
+      ref={containerRef}
+      className="graph-canvas-container"
+      data-testid="citation-graph"
+      role="img"
+      aria-label={ariaLabel}
+    >
       <ForceGraph2D
         ref={fgRef}
         graphData={data}
@@ -219,7 +333,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         backgroundColor="rgba(0,0,0,0)"
         nodeId="id"
         nodeVal={(node: ForceNode) => nodeRadius(node) ** 2 / 4}
-        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = node.node.selected_version.title || node.id; return label.outerHTML; }}
+        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = paperTitle(node.node.selected_version, t); return label.outerHTML; }}
         nodeCanvasObject={drawNode}
         nodePointerAreaPaint={(node: ForceNode, color, ctx) => {
           ctx.beginPath();
@@ -237,11 +351,9 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         cooldownTime={5000}
         onNodeClick={handleNodeClick}
         onBackgroundClick={onBackgroundClick}
-        onNodeDragEnd={(node: ForceNode) => {
-          // Dragging pins the node exactly where the user dropped it.
-          node.fx = node.x;
-          node.fy = node.y;
-        }}
+        onNodeDragEnd={handleDragEnd}
+        onEngineStop={handleEngineStop}
+        onZoomEnd={recordView}
         enableNodeDrag
       />
     </div>

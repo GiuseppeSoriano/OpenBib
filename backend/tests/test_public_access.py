@@ -11,6 +11,7 @@ from app.auth.service import create_access_token, create_session, hash_password,
 from app.collections import service as collections_service
 from app.collections.schemas import CollectionCreate, Visibility
 from app.dependencies import get_db
+from app.graph.schemas import RelatedRangeRequest, RelatedRangeResponse
 from app.main import create_app
 from app.papers.service import cache_papers
 from app.providers.base import Author, PaperMetadata, SearchResult
@@ -96,8 +97,43 @@ async def test_paper_detail_and_paper_graph_are_public(db):
     assert payload["nodes"][0]["selected_version"]["title"] == "Free Paper"
 
 
+def _related_response(body: RelatedRangeRequest) -> RelatedRangeResponse:
+    return RelatedRangeResponse(
+        source_key=body.source_key,
+        source_group_key=body.source_group_key,
+        direction=body.direction,
+        order=body.order,
+        nodes=[],
+        edges=[],
+        group_keys=[],
+        range_start=0,
+        range_end=0,
+        range_size=30,
+        max_results=10000,
+        total_available=0,
+        total_exact=True,
+        total_capped=False,
+        provider_total=0,
+        scanned=0,
+        has_more=False,
+        exhausted=True,
+        clamped=False,
+        scan_incomplete=False,
+        snapshot_id=None,
+    )
+
+
+_RELATED_BODY = {
+    "source_key": "hash:free",
+    "source_group_key": "group:free",
+    "direction": "cited_by",
+    "order": "cited_by_count",
+    "range_start": 0,
+}
+
+
 @pytest.mark.asyncio
-async def test_graph_expand_is_public_and_skips_user_scoped_persistence(db, monkeypatch):
+async def test_graph_related_is_public_and_skips_user_scoped_persistence(db, monkeypatch):
     saved_lookup = {"called": False}
 
     async def fake_saved(db_, user_id):
@@ -106,29 +142,24 @@ async def test_graph_expand_is_public_and_skips_user_scoped_persistence(db, monk
 
     captured: dict = {}
 
-    async def fake_expand(db_, redis_, **kwargs):
-        captured.update(kwargs)
-        from app.graph.schemas import ExpandResponse
-
-        return ExpandResponse(nodes=[], edges=[])
+    async def fake_related(db_, redis_, body, source, saved):
+        captured["saved"] = saved
+        return _related_response(body)
 
     monkeypatch.setattr("app.graph.service.saved_canonical_keys", fake_saved)
-    monkeypatch.setattr("app.graph.service.expand_graph", fake_expand)
+    monkeypatch.setattr("app.graph.related.related_range", fake_related)
 
     app = _make_app(db)
     async with _client(app) as client:
-        response = await client.post(
-            "/api/v1/graph/expand",
-            json={"from_keys": ["hash:free"], "existing_group_keys": []},
-        )
+        response = await client.post("/api/v1/graph/related", json=_RELATED_BODY)
 
     assert response.status_code == 200
-    assert saved_lookup["called"] is False, "anonymous expand must not look up saved keys"
-    assert captured["saved_keys"] == set()
+    assert saved_lookup["called"] is False, "anonymous ranges must not look up saved keys"
+    assert captured["saved"] == set()
 
 
 @pytest.mark.asyncio
-async def test_graph_expand_uses_saved_keys_when_authenticated(db, monkeypatch):
+async def test_graph_related_uses_saved_keys_when_authenticated(db, monkeypatch):
     user = await _make_user(db, "grapher@example.com")
 
     async def fake_saved(db_, user_id):
@@ -137,27 +168,34 @@ async def test_graph_expand_uses_saved_keys_when_authenticated(db, monkeypatch):
 
     captured: dict = {}
 
-    async def fake_expand(db_, redis_, **kwargs):
-        captured.update(kwargs)
-        from app.graph.schemas import ExpandResponse
-
-        return ExpandResponse(nodes=[], edges=[])
+    async def fake_related(db_, redis_, body, source, saved):
+        captured["saved"] = saved
+        return _related_response(body)
 
     monkeypatch.setattr("app.graph.service.saved_canonical_keys", fake_saved)
-    monkeypatch.setattr("app.graph.service.expand_graph", fake_expand)
+    monkeypatch.setattr("app.graph.related.related_range", fake_related)
 
     app = _make_app(db)
     session, _ = await create_session(db, user.id)
     token = create_access_token(user.id, session.id)
     async with _client(app) as client:
         response = await client.post(
-            "/api/v1/graph/expand",
-            json={"from_keys": ["hash:free"], "existing_group_keys": []},
+            "/api/v1/graph/related",
+            json=_RELATED_BODY,
             headers={"Authorization": f"Bearer {token}"},
         )
 
     assert response.status_code == 200
-    assert captured["saved_keys"] == {"doi:10.1/saved"}
+    assert captured["saved"] == {"doi:10.1/saved"}
+
+
+@pytest.mark.asyncio
+async def test_graph_expand_endpoint_is_removed(db):
+    app = _make_app(db)
+    async with _client(app) as client:
+        response = await client.post("/api/v1/graph/expand", json={"from_keys": ["hash:free"]})
+
+    assert response.status_code in (404, 405)
 
 
 @pytest.mark.asyncio

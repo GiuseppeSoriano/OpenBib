@@ -45,8 +45,9 @@
 
     /* Citation graph */
     --graph-node: #a0a8a4;
-    --graph-node-seed: var(--color-accent);
+    --graph-node-pinned: var(--color-accent);
     --graph-node-saved: var(--color-success);
+    --graph-node-selected: var(--color-warning);
     --graph-edge: #d6dcd8;
 
     /* Typography — Fontsource registers the variable family under the
@@ -138,6 +139,8 @@
     --color-overlay: rgba(4, 8, 7, 0.62);
 
     --graph-node: #71807a;
+    --graph-node-pinned: var(--color-accent);
+    --graph-node-selected: var(--color-warning);
     --graph-edge: #35413c;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

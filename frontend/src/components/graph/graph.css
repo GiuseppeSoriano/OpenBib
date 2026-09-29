@@ -1,0 +1,730 @@
+@layer components {
+  /* ── Shared ─────────────────────────────────────────────── */
+
+  @keyframes graph-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .spin {
+    animation: graph-spin 0.8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation-duration: 2.4s;
+    }
+  }
+
+  .graph-canvas-container {
+    position: absolute;
+    inset: 0;
+  }
+
+  .graph-btn {
+    min-height: var(--control-min);
+    font-size: 0.82rem;
+    padding-block: 0;
+  }
+
+  .graph-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: var(--control-min);
+    height: var(--control-min);
+    padding: 0;
+  }
+
+  .graph-view-btn {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    transition: color 0.1s ease, border-color 0.1s ease;
+  }
+  .graph-view-btn:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-secondary);
+  }
+  .graph-view-btn:focus-visible,
+  .graph-range-btn:focus-visible,
+  .graph-pin-toggle:focus-visible,
+  .graph-list-select:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .graph-segmented button {
+    min-height: var(--control-min);
+  }
+
+  .graph-hint {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+
+  .graph-header {
+    container: graph-header / inline-size;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-xs) var(--space-md);
+  }
+
+  .graph-header-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+
+  .graph-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    min-width: 0;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .graph-title-main {
+    flex-shrink: 0;
+  }
+  .graph-title-seed {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-left: var(--space-sm);
+    border-left: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-weight: 500;
+  }
+
+  .graph-mode-badge {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
+    border-radius: var(--radius-full);
+    padding: 1px 8px;
+  }
+
+  .graph-counts {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+
+  .graph-pinned-badge {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .graph-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  @container graph-header (max-width: 759px) {
+    .graph-counts {
+      display: none;
+    }
+  }
+  @container graph-header (max-width: 399px) {
+    .graph-mode-badge {
+      display: none;
+    }
+  }
+  @container graph-header (max-width: 359px) {
+    .graph-controls-label {
+      display: none;
+    }
+  }
+
+  /* ── Bottom bar (desktop) ───────────────────────────────── */
+
+  .graph-bottombar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    max-height: 45dvh;
+    overflow-y: auto;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .graph-bar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    min-width: 0;
+  }
+
+  .graph-source {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    flex: 1 1 16rem;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.85rem;
+  }
+  .graph-source-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .graph-source-pins {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+
+  .graph-bar-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  /* Ranges */
+  .graph-ranges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .graph-range-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  .graph-range-btn {
+    min-height: var(--control-min);
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .graph-range-btn:hover {
+    background: var(--color-surface-hover);
+  }
+  .graph-range-btn.is-current {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  /* Current but not loaded yet: the first tap loads it. */
+  .graph-range-btn.is-unloaded {
+    border-style: dashed;
+    background: transparent;
+  }
+
+  .graph-range-gap {
+    color: var(--color-text-secondary);
+  }
+
+  .graph-range-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Expand pinned nodes */
+  .graph-expand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .graph-expand-text {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin: 0;
+    font-size: 0.85rem;
+  }
+  .graph-expand-actions {
+    display: flex;
+    gap: var(--space-sm);
+  }
+  .graph-expand-progress {
+    width: 8rem;
+    accent-color: var(--color-accent);
+  }
+
+  /* Live status */
+  .graph-status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    flex: 1 1 14rem;
+    min-width: 0;
+    font-size: 0.8rem;
+  }
+  .graph-status-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0;
+  }
+  .graph-status-line--error {
+    color: var(--color-danger);
+  }
+  .graph-status-line--warning {
+    color: var(--color-warning);
+  }
+
+  /* ── Selected paper ─────────────────────────────────────── */
+
+  .graph-popup {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+  .graph-popup--card {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+    z-index: 10;
+    width: min(320px, calc(100% - 2 * var(--space-md)));
+    max-height: calc(100% - 2 * var(--space-md));
+    overflow-y: auto;
+    padding: var(--space-md);
+  }
+
+  .graph-popup-head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+  .graph-popup-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .graph-popup-authors {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .graph-popup-meta {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .graph-popup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  /* Pin toggle: the name stays constant; pressed is a filled accent. */
+  .graph-pin-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: var(--control-min);
+    height: var(--control-min);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .graph-pin-toggle:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-secondary);
+  }
+  .graph-pin-toggle[aria-pressed="true"] {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  .graph-pin-toggle[aria-pressed="true"]:hover {
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+
+  /* ── Paper list ─────────────────────────────────────────── */
+
+  .graph-paper-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+    background: var(--color-surface);
+  }
+  .graph-drawer {
+    border-right: 1px solid var(--color-border);
+  }
+  .graph-paper-list-title {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .graph-list-heading {
+    margin: var(--space-sm) 0 var(--space-xs);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+  }
+  .graph-list-count {
+    font-weight: 500;
+  }
+  .graph-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .graph-list-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+  .graph-list-select {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    min-height: var(--control-min);
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    text-align: left;
+  }
+  .graph-list-select:hover {
+    background: var(--color-surface-hover);
+  }
+  .graph-list-select[aria-current="true"] {
+    border-color: var(--graph-node-selected);
+    background: var(--color-accent-soft);
+  }
+  .graph-list-name {
+    font-size: 0.82rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .graph-list-meta {
+    font-size: 0.72rem;
+    color: var(--color-text-secondary);
+  }
+
+  /* ── Legend ─────────────────────────────────────────────── */
+
+  .graph-legend {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+  .graph-legend--overlay {
+    position: absolute;
+    left: var(--space-md);
+    bottom: var(--space-md);
+    z-index: 10;
+    max-width: 240px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+  .graph-legend--overlay summary {
+    cursor: pointer;
+    padding: var(--space-xs) var(--space-sm);
+    font-weight: 500;
+    user-select: none;
+  }
+  .graph-legend-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin: 0;
+    padding: 0 var(--space-sm) var(--space-sm);
+    list-style: none;
+  }
+  .graph-legend--inline .graph-legend-body {
+    padding: 0;
+  }
+  .graph-legend-body > li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legend-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--graph-node);
+  }
+  .legend-dot--pinned {
+    background: var(--graph-node-pinned);
+    box-shadow: inset 0 0 0 1.5px var(--color-surface);
+    outline: 1px solid var(--graph-node-pinned);
+  }
+  .legend-dot--selected {
+    background: var(--graph-node);
+    box-shadow:
+      0 0 0 1.5px var(--color-bg),
+      0 0 0 3px var(--graph-node-selected);
+  }
+  .legend-dot--saved {
+    background: var(--graph-node-saved);
+  }
+  .legend-line {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 20px;
+    height: 0;
+    border-top: 2px solid var(--graph-edge);
+  }
+  .legend-hint {
+    font-style: italic;
+  }
+
+  /* ── Base graph states ──────────────────────────────────── */
+
+  .graph-base-state {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-md);
+    overflow-y: auto;
+  }
+  .graph-base-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+  }
+
+  /* ── Compact: selection summary row ─────────────────────── */
+
+  /* In flow below the canvas, so it never covers the graph. */
+  .graph-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    max-height: 40dvh;
+    overflow-y: auto;
+    padding: var(--space-xs) var(--space-md);
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+  }
+  .graph-summary .graph-status {
+    flex: none;
+  }
+  .graph-summary-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+  }
+  .graph-summary-title {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    min-height: var(--control-min);
+    padding: 0 var(--space-xs);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .graph-summary-title:hover {
+    background: var(--color-surface-hover);
+  }
+  .graph-summary-title:focus-visible,
+  .graph-sheet-tab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .graph-range-chip {
+    flex-shrink: 0;
+  }
+
+  /* ── Compact: "Graph controls" sheet ────────────────────── */
+
+  .graph-sheet-tabs {
+    display: flex;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-md);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .graph-sheet-tab {
+    flex: 1;
+    min-height: var(--control-min);
+    padding: 0 var(--space-sm);
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+  .graph-sheet-tab:hover {
+    color: var(--color-text);
+  }
+  .graph-sheet-tab[aria-selected="true"] {
+    border-bottom-color: var(--color-accent);
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  .graph-sheet-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    min-width: 0;
+  }
+  .graph-sheet-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+  .graph-sheet-label {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+  }
+  .graph-sheet-section .graph-source {
+    flex: none;
+  }
+  .graph-sheet-section .graph-source-text {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .graph-popup--sheet {
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
+  }
+  .graph-sheet-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  .graph-sheet-field .graph-segmented button {
+    flex: 1;
+  }
+  .graph-sheet-view {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+  .graph-sheet-papers {
+    padding: 0;
+    overflow: visible;
+    background: transparent;
+  }
+  .graph-sheet-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-lg);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--color-border);
+  }
+
+  /* The last row sits on the screen edge where no bottom tab bar clears the
+     home indicator (desktop widths and short landscape). */
+  .graph-bottombar,
+  .graph-summary {
+    padding-bottom: calc(var(--space-sm) + var(--safe-area-bottom));
+  }
+  /* Mirror of PHONE_MAX: the tab bar's clearance already includes the inset. */
+  @media (max-width: 639px) {
+    .graph-summary {
+      padding-bottom: var(--space-xs);
+    }
+  }
+
+  /* ── Touch sizes (mirror of TOUCH_QUERY in lib/breakpoints.ts) ── */
+
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    .graph-segmented,
+    .graph-range-nav,
+    .graph-header-actions,
+    .graph-list,
+    .graph-list-row,
+    .graph-popup-actions,
+    .graph-summary-row,
+    .graph-sheet-tabs {
+      gap: var(--space-sm);
+    }
+  }
+}

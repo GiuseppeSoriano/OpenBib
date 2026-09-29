@@ -261,52 +261,6 @@ _CITING_SORTS = {
 }
 
 
-async def list_citing_papers(
-    openalex_id: str | None,
-    *,
-    order: str = "cited_by_count",
-    limit: int = 25,
-) -> list[PaperMetadata]:
-    """Papers that cite the given work, as fully-mapped metadata.
-
-    Targets OpenAlex (the citation authority with sortable results). Returns
-    ``[]`` gracefully when no OpenAlex id is known — for example for papers
-    that only exist as a ``hash:`` canonical key. ``order`` is one of
-    ``cited_by_count`` (default) or ``recent``.
-
-    NOTE: EuropePMC also exposes citations but keyed by PMID/PMCID (a different
-    native id) with no sort support, so it is intentionally not chained here
-    for v1; pmid-based fallback is future work.
-    """
-    if not openalex_id:
-        return []
-    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
-    try:
-        return await _openalex.list_citing_papers(openalex_id, sort=sort, per_page=limit)
-    except Exception:
-        logger.warning("OpenAlex failed citing-papers for %s", openalex_id, exc_info=True)
-        return []
-
-
-async def list_referenced_papers(
-    openalex_id: str | None,
-    *,
-    order: str = "cited_by_count",
-    limit: int = 25,
-) -> list[PaperMetadata]:
-    """Papers that the given work cites — its references — as fully-mapped
-    metadata (mirror of ``list_citing_papers``). OpenAlex-only; returns ``[]``
-    gracefully when no OpenAlex id is known."""
-    if not openalex_id:
-        return []
-    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
-    try:
-        return await _openalex.list_referenced_papers(openalex_id, sort=sort, per_page=limit)
-    except Exception:
-        logger.warning("OpenAlex failed referenced-papers for %s", openalex_id, exc_info=True)
-        return []
-
-
 async def related_page(
     openalex_id: str,
     *,
@@ -316,9 +270,8 @@ async def related_page(
     per_page: int = 200,
 ) -> RelatedPage:
     """One cursor page of a work's citers (``direction="cited_by"``) or
-    references (``"cites"``) for the graph's related-paper ranges. Unlike
-    ``list_citing_papers``, failures propagate: an outage must never read as
-    "no related papers"."""
+    references (``"cites"``) for the graph's related-paper ranges. Failures
+    propagate: an outage must never read as "no related papers"."""
     sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
     filter_key = "cited_by" if direction == "cites" else "cites"
     return await _openalex.related_page(

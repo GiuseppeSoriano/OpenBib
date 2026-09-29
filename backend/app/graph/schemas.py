@@ -2,11 +2,11 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.common.identifiers import PaperKey
 from app.config import settings
-from app.papers.schemas import PaperMetadataRead
+from app.papers.schemas import PaperMetadataRead, clean_title_value
 
 
 class GraphNode(BaseModel):
@@ -18,6 +18,8 @@ class GraphNode(BaseModel):
     selected_version: PaperMetadataRead
     versions: list[PaperMetadataRead] = []
     is_seed: bool = False
+
+    _clean_label = field_validator("label", mode="before")(clean_title_value)
 
 
 class GraphEdge(BaseModel):
@@ -41,7 +43,7 @@ class GraphQuery(BaseModel):
     max_nodes: int = Field(50, ge=1, le=200)
 
 
-# ── Expansion ───────────────────────────────────────────────
+# ── Ordering and direction ──────────────────────────────────
 
 CitingOrder = Literal["cited_by_count", "recent"]
 
@@ -49,32 +51,6 @@ CitingOrder = Literal["cited_by_count", "recent"]
 #   cited_by → add papers that CITE them (citers; edge citer → node)
 #   cites    → add papers they CITE (references; edge node → reference)
 RelationDirection = Literal["cited_by", "cites"]
-
-
-class ExpandRequest(BaseModel):
-    """Grow the graph by one citation level.
-
-    Adds related papers as new nodes. ``direction`` chooses citers vs.
-    references. ``focus_key`` set → expand only that node (focused); ``None`` →
-    expand every node in ``from_keys`` (global). ``existing_group_keys`` are the
-    groups already on screen, so only genuinely new nodes are returned.
-    """
-
-    from_keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=20
-    )
-    focus_key: str | None = Field(None, min_length=1, max_length=512)
-    existing_group_keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=200
-    )
-    direction: RelationDirection = "cited_by"
-    order: CitingOrder = "cited_by_count"
-    limit_per_node: int = Field(25, ge=1, le=50)
-
-
-class ExpandResponse(BaseModel):
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
 
 
 # ── Related-paper ranges ────────────────────────────────────
