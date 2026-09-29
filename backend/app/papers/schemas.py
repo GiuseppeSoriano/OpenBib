@@ -3,7 +3,19 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.common.text import clean_inline_text, normalize_abstract
+
+
+def clean_title_value(value: object) -> object:
+    """``mode="before"`` validator body: clean provider markup out of a title.
+    Rows cached before normalization existed (DB, Redis) are fixed on read."""
+    return clean_inline_text(value) if isinstance(value, str) else value
+
+
+def normalize_abstract_value(value: object) -> object:
+    return normalize_abstract(value) if isinstance(value, str) else value
 
 
 class AuthorRead(BaseModel):
@@ -43,6 +55,9 @@ class PaperMetadataRead(BaseModel):
     provider_source: str | None = None
     provider_sources: list[str] = []
 
+    _clean_title = field_validator("title", mode="before")(clean_title_value)
+    _clean_abstract = field_validator("abstract", mode="before")(normalize_abstract_value)
+
 
 class PaperDetailRead(PaperMetadataRead):
     """Full paper detail: primary metadata plus sibling versions of the
@@ -65,6 +80,8 @@ class SearchPaperGroupItemRead(BaseModel):
     selected_version: PaperMetadataRead
     versions: list[PaperMetadataRead] = []
     provider_sources: list[str] = []
+
+    _clean_title = field_validator("title", mode="before")(clean_title_value)
 
 
 class SearchResultRead(BaseModel):

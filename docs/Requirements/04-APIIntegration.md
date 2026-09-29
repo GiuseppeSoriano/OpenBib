@@ -175,7 +175,8 @@ class SearchFilters:
 | `topics[].display_name` | `topics` |
 | `keywords[].keyword` | `keywords` |
 | `open_access.is_oa` | `open_access` |
-| `open_access.oa_url` | `pdf_url` |
+| `best_oa_location.pdf_url` (else `primary_location.pdf_url` when that location is OA) | `pdf_url` |
+| `best_oa_location.landing_page_url` (else `open_access.oa_url`), when it is not the PDF | `abstract_url` |
 | `cited_by_count` | `cited_by_count` |
 | `referenced_works` | list of OpenAlex IDs → resolve to canonical keys |
 
@@ -307,9 +308,10 @@ Does **not** provide: citations (only reference lists), author profiles, version
 | `author[].given` + `author[].family` | `authors[].name`, `given_name`, `family_name` |
 | `author[].ORCID` | `authors[].orcid` |
 | `author[].affiliation[].name` | `authors[].affiliations` |
-| `abstract` | `abstract` (may contain JATS XML tags — strip them) |
-| `published-print.date-parts` or `published-online.date-parts` | `publication_date` |
-| `container-title[0]` | `venue` |
+| `abstract` | `abstract` (JATS XML, normalized to plain-text paragraphs) |
+| `published-print`, then `published-online`, `posted`, `issued` (`date-parts`) | `publication_date` |
+| `container-title[0]` (posted content: else `institution[0].name`, else `group-title`) | `venue` |
+| DOI suffix `.vN` / `/vN` (posted content and preprints only) | `version` |
 | `volume` | `volume` |
 | `issue` | `issue` |
 | `page` | `pages` |
@@ -317,13 +319,13 @@ Does **not** provide: citations (only reference lists), author profiles, version
 | `subject` | `topics` |
 | `is-referenced-by-count` | `cited_by_count` |
 | `references-count` | `reference_count` |
-| `link[].URL` (content-type: application/pdf) | `pdf_url` |
+| `link[].URL` (`application/pdf`, not `intended-application: text-mining`, CC `license` only) | `pdf_url` |
 | `reference[]` | list of references (may have DOI, title, author) |
 
 ### 4.6 Implementation notes
 
 - **Polite pool**: Always include `mailto` parameter with the configured email. This provides better rate limits and priority.
-- **Abstract formatting**: Crossref abstracts may contain JATS XML tags (`<jats:p>`, `<jats:italic>`, etc.). Strip all XML tags to produce plain text.
+- **Abstract formatting**: Crossref abstracts may contain JATS XML tags (`<jats:p>`, `<jats:italic>`, etc.). Every provider's titles and abstracts go through `app/common/text.py`: known tags are unwrapped, section titles become a `Heading: ` prefix, paragraphs are separated by a blank line, entities are decoded, and text such as `p < 0.05` is kept. Keys are still computed from the raw provider title.
 - **References**: The `reference` field contains a list of references, but many entries have incomplete metadata (often just `unstructured` text). When a DOI is present in a reference, use it for resolution; otherwise skip.
 - **Date parsing**: Crossref dates are arrays `[[year, month, day]]`. Month and day may be missing.
 - **Pagination**: Use `offset` and `rows` (max 1000 per page).
@@ -389,7 +391,7 @@ Europe PMC uses a Lucene-like query syntax:
 | `meshHeadingList.meshHeading[].descriptorName` | `topics` |
 | `keywordList.keyword[]` | `keywords` |
 | `isOpenAccess` | `open_access` |
-| `fullTextUrlList.fullTextUrl[]` | `pdf_url`, `abstract_url` |
+| `fullTextUrlList.fullTextUrl[]` | `pdf_url` (OA PDF), `abstract_url` (HTML with `availabilityCode` `OA` or `F` only) |
 | `citedByCount` | `cited_by_count` |
 
 ### 5.6 Implementation notes

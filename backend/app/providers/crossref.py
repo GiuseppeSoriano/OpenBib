@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from app.common.identifiers import strip_doi_prefixes
+from app.common.text import clean_inline_text, normalize_abstract
 from app.config import settings
 from app.providers.base import (
     Author,
@@ -27,14 +28,8 @@ from app.providers.rate_limiter import ProviderRateLimiter
 
 _BASE = "https://api.crossref.org"
 
-# Strip JATS XML tags from Crossref abstracts
-_JATS_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def _strip_jats(text: str | None) -> str | None:
-    if not text:
-        return None
-    return _JATS_TAG_RE.sub("", text).strip()
+# Preprint servers encode the version in the DOI suffix: ``….v2`` or ``…/v2``.
+_DOI_VERSION_RE = re.compile(r"[./]v(\d+)$", re.IGNORECASE)
 
 
 def _parse_date(raw: dict | None) -> date | None:
@@ -60,8 +55,32 @@ def _params() -> dict:
     return p
 
 
+def _pdf_link(raw: dict) -> str | None:
+    """A PDF link only when it is openly licensed and meant for readers:
+    publisher text-mining feeds and paywalled PDFs are not full text for users."""
+    licenses = raw.get("license") or []
+    if not any("creativecommons.org" in (lic.get("URL") or "").lower() for lic in licenses):
+        return None
+    for link in raw.get("link") or []:
+        if (link.get("content-type") or "").lower() != "application/pdf":
+            continue
+        if (link.get("intended-application") or "").lower() == "text-mining":
+            continue
+        if link.get("URL"):
+            return link["URL"]
+    return None
+
+
+def _preprint_server(raw: dict) -> str | None:
+    institutions = raw.get("institution") or []
+    if isinstance(institutions, list) and institutions and institutions[0].get("name"):
+        return institutions[0]["name"]
+    return raw.get("group-title") or None
+
+
 def _map_work(raw: dict) -> PaperMetadata:
     doi = raw.get("DOI")
+    # Keys are computed from the raw title; the stored title is cleaned.
     title = (raw.get("title") or [""])[0]
 
     authors: list[Author] = []
@@ -84,30 +103,34 @@ def _map_work(raw: dict) -> PaperMetadata:
             )
         )
 
-    pub_date = _parse_date(raw.get("published-print")) or _parse_date(raw.get("published-online"))
+    # Hash keys keep using the print/online year so they stay byte-identical;
+    # the displayed date also falls back to the posted and issued dates.
+    key_date = _parse_date(raw.get("published-print")) or _parse_date(raw.get("published-online"))
+    pub_date = key_date or _parse_date(raw.get("posted")) or _parse_date(raw.get("issued"))
 
-    pdf_url = None
-    for link in raw.get("link", []):
-        if "pdf" in (link.get("content-type") or ""):
-            pdf_url = link.get("URL")
-            break
+    venue = (raw.get("container-title") or [""])[0] or None
+    version = None
+    if raw.get("type") == "posted-content" or raw.get("subtype") == "preprint":
+        match = _DOI_VERSION_RE.search(doi or "")
+        version = f"v{int(match.group(1))}" if match else None
+        venue = venue or _preprint_server(raw)
 
     key = build_canonical_key(
         doi=doi,
         title=title,
         authors=[a.name for a in authors],
-        year=pub_date.year if pub_date else None,
+        year=key_date.year if key_date else None,
     )
 
     return PaperMetadata(
         canonical_key=key,
         paper_group_key=build_paper_group_key(title, [a.name for a in authors]),
-        title=title,
+        title=clean_inline_text(title),
         authors=authors,
-        abstract=_strip_jats(raw.get("abstract")),
+        abstract=normalize_abstract(raw.get("abstract")),
         publication_date=pub_date,
         doi=doi,
-        venue=(raw.get("container-title") or [""])[0] or None,
+        venue=venue,
         volume=raw.get("volume"),
         issue=raw.get("issue"),
         pages=raw.get("page"),
@@ -115,7 +138,8 @@ def _map_work(raw: dict) -> PaperMetadata:
         topics=raw.get("subject", []),
         cited_by_count=raw.get("is-referenced-by-count"),
         reference_count=raw.get("references-count"),
-        pdf_url=pdf_url,
+        pdf_url=_pdf_link(raw),
+        version=version,
         provider_source="crossref",
         raw_response=raw,
     )

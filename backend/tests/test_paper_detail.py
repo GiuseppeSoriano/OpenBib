@@ -193,3 +193,23 @@ async def test_detail_route_does_not_shadow_sibling_routes(db):
     assert dismissed.status_code == 401
     # /search validates q → 422 (not 404 from the detail route)
     assert search.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_detail_normalizes_legacy_markup_in_cached_rows(db):
+    # Rows cached before provider text normalization still hold raw markup.
+    legacy = _paper("doi:10.1/legacy", "group:legacy", "Odor <i>coding</i>")
+    legacy.abstract = "<h4>Background</h4>Old &amp; raw.<h4>Results</h4>Still works."
+    await cache_papers(db, [legacy])
+    app = _make_app(db)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/papers/doi:10.1/legacy")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["title"] == "Odor coding"
+    assert payload["abstract"] == "Background: Old & raw.\n\nResults: Still works."
+    assert payload["versions"][0]["abstract"] == payload["abstract"]
+    assert payload["paper_group_key"] == "group:legacy"

@@ -1,5 +1,6 @@
 """Redis-backed caching of the multi-provider search fan-out."""
 
+import json
 from datetime import date
 
 import pytest
@@ -134,3 +135,46 @@ async def test_total_provider_failure_is_not_cached(db, monkeypatch):
 
     assert calls["count"] == 2, "empty (all-providers-down) responses must not be cached"
     assert fake_redis.store == {}
+
+
+@pytest.mark.asyncio
+async def test_cached_legacy_markup_is_normalized_on_read(db, monkeypatch):
+    async def fake_search_all(*args, **kwargs):
+        return [
+            SearchResult(
+                papers=[
+                    _paper("doi:10.1/v1", "group:legacy", "Legacy Paper"),
+                    _paper("doi:10.1/v2", "group:legacy", "Legacy Paper"),
+                ],
+                total_count=2,
+                page=1,
+                page_size=20,
+                provider="openalex",
+            )
+        ]
+
+    fake_redis = FakeRedis()
+    app = _make_app(db, fake_redis)
+    monkeypatch.setattr("app.providers.registry.search_all", fake_search_all)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        await client.get("/api/v1/papers/search", params={"q": "legacy"})
+        # Simulate an entry cached before provider text was normalized.
+        key, value = next(iter(fake_redis.store.items()))
+        payload = json.loads(value)
+        group = payload["items"][0]
+        assert group["kind"] == "paper_group"
+        group["title"] = "Legacy <i>Paper</i>"
+        group["selected_version"]["title"] = "Legacy <i>Paper</i>"
+        group["selected_version"]["abstract"] = "<h4>Background</h4>Raw.<h4>Results</h4>Done."
+        group["versions"][1]["abstract"] = "Plain &amp; <b>bold</b>"
+        fake_redis.store[key] = json.dumps(payload)
+
+        response = await client.get("/api/v1/papers/search", params={"q": "legacy"})
+
+    group = response.json()["items"][0]
+    assert group["title"] == "Legacy Paper"
+    assert group["selected_version"]["title"] == "Legacy Paper"
+    assert group["selected_version"]["abstract"] == "Background: Raw.\n\nResults: Done."
+    assert group["versions"][1]["abstract"] == "Plain & bold"

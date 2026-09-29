@@ -1,6 +1,6 @@
 import { mockRefresh } from "@/test/auth-mock";
-import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, screen, within } from "@testing-library/react";
 import SearchPage from "@/pages/SearchPage";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperMetadata } from "@/types";
@@ -69,13 +69,16 @@ const searchResponse = {
   providers: ["openalex", "crossref"],
 };
 
+// Tests that need a different payload swap this and restore it afterwards.
+const responseState = { current: searchResponse };
+
 vi.mock("@/lib/api", () => ({
   refreshAccessToken: vi.fn(() => mockRefresh()),
   setAccessToken: vi.fn(),
   setAuthFailureHandler: vi.fn(),
   default: {
     get: vi.fn((url: string) => {
-      if (url === "/papers/search") return Promise.resolve({ data: searchResponse });
+      if (url === "/papers/search") return Promise.resolve({ data: responseState.current });
       return Promise.resolve({ data: [] });
     }),
     post: vi.fn(),
@@ -115,5 +118,51 @@ describe("SearchPage", () => {
     expect(screen.queryByText("Hide dismissed")).toBeNull();
     // Anonymous cards expose exploration only — no save/dismiss actions.
     expect(screen.queryByText("Save to Library")).toBeNull();
+  });
+});
+
+describe("SearchPage — version picker", () => {
+  afterEach(() => {
+    responseState.current = searchResponse;
+  });
+
+  it("exposes versions as radios with unique names and a checked selection", async () => {
+    const preprint = { paper_group_key: "group:p", provider_source: "crossref", paper_type: "posted-content" };
+    const first = paper("doi:10.20944/p.v1", "Same Year", { ...preprint, publication_date: "2021-01-04" });
+    const second = paper("doi:10.20944/p.v2", "Same Year", { ...preprint, publication_date: "2021-03-09" });
+    responseState.current = {
+      ...searchResponse,
+      items: [
+        {
+          kind: "paper_group",
+          paper_group_key: "group:p",
+          title: "Same Year",
+          authors: [],
+          version_count: 2,
+          selected_version: second,
+          versions: [second, first],
+          provider_sources: ["crossref"],
+        },
+      ],
+    } as typeof searchResponse;
+    renderWithProviders(<SearchPage />, { route: "/search?q=same" });
+    await screen.findByText("Same Year");
+
+    const group = screen.getByRole("radiogroup", { name: "Versions of this paper" });
+    const radios = within(group).getAllByRole("radio");
+    const names = radios.map((radio) => radio.getAttribute("aria-label") ?? "");
+    expect(new Set(names).size).toBe(2);
+    expect(names.join(" ")).not.toMatch(/10\.20944|doi:/);
+    expect(radios[0]).toHaveTextContent("Preprint 2021 · Crossref · Posted Mar 9, 2021");
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[1]).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(radios[1]!);
+    expect(radios[1]).toHaveAttribute("aria-checked", "true");
+    expect(radios[0]).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.keyDown(radios[1]!, { key: "ArrowRight" });
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[0]).toHaveFocus();
   });
 });

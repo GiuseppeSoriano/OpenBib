@@ -10,6 +10,7 @@ from typing import ClassVar
 
 import httpx
 
+from app.common.text import clean_inline_text, normalize_abstract
 from app.providers.base import (
     Author,
     AuthorMetadata,
@@ -53,10 +54,11 @@ def _parse_entry(entry: ET.Element) -> PaperMetadata:
     id_url = _text(entry.find("atom:id", _NS)) or ""
     arxiv_id = _extract_arxiv_id(id_url)
 
+    # Keys are computed from this title; the stored title is cleaned.
     title = _text(entry.find("atom:title", _NS)) or ""
     title = re.sub(r"\s+", " ", title)  # normalize whitespace
 
-    abstract = _text(entry.find("atom:summary", _NS))
+    abstract = normalize_abstract(_text(entry.find("atom:summary", _NS)))
 
     authors: list[Author] = []
     for a in entry.findall("atom:author", _NS):
@@ -109,7 +111,7 @@ def _parse_entry(entry: ET.Element) -> PaperMetadata:
     return PaperMetadata(
         canonical_key=key,
         paper_group_key=build_paper_group_key(title, [a.name for a in authors]),
-        title=title,
+        title=clean_inline_text(title),
         authors=authors,
         abstract=abstract,
         publication_date=pub_date,

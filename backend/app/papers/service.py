@@ -27,12 +27,20 @@ from app.providers.base import PaperMetadata
 from app.providers.base import SearchResult as ProviderSearchResult
 
 
-def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, str]:
+def _version_number(version: str | None) -> int:
+    """``"v10"`` -> 10, so v10 sorts after v9; anything unparseable is 0."""
+    try:
+        return int((version or "").strip().lower().lstrip("v"))
+    except ValueError:
+        return 0
+
+
+def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, int]:
     publication_date = paper.publication_date or date.min
     return (
         1 if paper.publication_date else 0,
         publication_date,
-        paper.version or "",
+        _version_number(paper.version),
     )
 
 

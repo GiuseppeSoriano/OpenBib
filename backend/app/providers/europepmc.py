@@ -8,6 +8,7 @@ from typing import ClassVar
 import httpx
 
 from app.common.identifiers import strip_doi_prefixes
+from app.common.text import clean_inline_text, normalize_abstract
 from app.providers.base import (
     Author,
     AuthorMetadata,
@@ -69,8 +70,14 @@ def _parse_authors(raw: dict) -> list[Author]:
     return []
 
 
+# Full-text links a reader can open without a subscription (open access or
+# free to read).
+_OPEN_AVAILABILITY = ("OA", "F")
+
+
 def _map_result(raw: dict) -> PaperMetadata:
     doi = raw.get("doi")
+    # Keys are computed from the raw title; the stored title is cleaned.
     title = raw.get("title", "")
     authors = _parse_authors(raw)
     pub_date = _parse_date(raw.get("firstPublicationDate"))
@@ -90,7 +97,7 @@ def _map_result(raw: dict) -> PaperMetadata:
         doc_style = ft.get("documentStyle", "")
         if doc_style == "pdf" and availability == "OA":
             pdf_url = ft.get("url")
-        elif doc_style == "html":
+        elif doc_style == "html" and availability in _OPEN_AVAILABILITY and not abstract_url:
             abstract_url = ft.get("url")
 
     topics: list[str] = []
@@ -104,9 +111,9 @@ def _map_result(raw: dict) -> PaperMetadata:
     return PaperMetadata(
         canonical_key=key,
         paper_group_key=build_paper_group_key(title, [a.name for a in authors]),
-        title=title,
+        title=clean_inline_text(title),
         authors=authors,
-        abstract=raw.get("abstractText"),
+        abstract=normalize_abstract(raw.get("abstractText")),
         publication_date=pub_date,
         doi=doi,
         pmid=raw.get("pmid"),

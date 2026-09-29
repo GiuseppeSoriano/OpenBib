@@ -39,6 +39,12 @@
     font-weight: 500;
   }
 
+  .pd-count-source {
+    margin-top: calc(-1 * var(--space-sm));
+    font-size: 0.76rem;
+    color: var(--color-text-secondary);
+  }
+
   .pd-section {
     display: flex;
     flex-direction: column;
@@ -56,12 +62,22 @@
   .pd-abstract {
     font-size: 0.88rem;
     line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .pd-abstract p + p {
+    margin-top: var(--space-sm);
+  }
+  .pd-abstract strong {
+    font-weight: 600;
   }
 
   .pd-links {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-xs);
+  }
+  .pd-links .link-chip {
+    min-height: var(--control-min);
   }
 
   .pd-topics {
@@ -90,6 +106,17 @@
   .pd-version.active {
     border-color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+
+  .pd-version-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .pd-version-details {
+    font-size: 0.74rem;
+    color: var(--color-text-secondary);
   }
 
   .pd-version-actions {

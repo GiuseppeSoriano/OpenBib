@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { PaperMetadata } from "@/types";
+import { abstractPreview } from "@/lib/abstract";
 import { providerLabel } from "@/components/paper/versionLabel";
 import "./PaperCard.css";
 
@@ -44,9 +45,12 @@ export default function PaperCard({
   const meta: string[] = [];
   if (paper.venue) meta.push(paper.venue);
   if (paper.publication_date) meta.push(paper.publication_date.slice(0, 4));
-  if (paper.cited_by_count != null) {
-    meta.push(t("paper.citations", { count: paper.cited_by_count }));
-  }
+  // Citation counts differ by provider, so the card says whose count it shows.
+  const citationProvider = paper.provider_source ? providerLabel(paper.provider_source) : null;
+  const citationsFrom = citationProvider
+    ? t("paper.citationsFrom", { provider: citationProvider })
+    : undefined;
+  const preview = showAbstract ? abstractPreview(paper.abstract) : "";
 
   return (
     <article className={`card paper-card ${className}`.trim()}>
@@ -73,14 +77,26 @@ export default function PaperCard({
 
       <p className="paper-meta">
         {meta.join(" · ")}
+        {paper.cited_by_count != null && (
+          <span className="paper-citations" title={citationsFrom}>
+            {meta.length > 0 && " · "}
+            {t("paper.citations", { count: paper.cited_by_count })}
+            {citationProvider && (
+              <>
+                <span className="paper-citations-source" aria-hidden="true">
+                  {` (${citationProvider})`}
+                </span>
+                <span className="sr-only">{`, ${citationsFrom}`}</span>
+              </>
+            )}
+          </span>
+        )}
         {sources.length > 0 && (
           <span className="paper-sources"> — {sources.map(providerLabel).join(", ")}</span>
         )}
       </p>
 
-      {showAbstract && paper.abstract && (
-        <p className="paper-abstract">{paper.abstract}</p>
-      )}
+      {preview && <p className="paper-abstract">{preview}</p>}
 
       {showTopics && paper.topics.length > 0 && (
         <div className="paper-topics">

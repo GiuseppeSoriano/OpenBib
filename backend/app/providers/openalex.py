@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from app.common.identifiers import strip_doi_prefixes
+from app.common.text import clean_inline_text, normalize_abstract
 from app.config import settings
 from app.providers.base import (
     Author,
@@ -107,6 +108,18 @@ class RelatedPage:
     next_cursor: str | None
 
 
+def _full_text_links(raw: dict) -> tuple[str | None, str | None]:
+    """``(pdf_url, abstract_url)``. A PDF only from an open-access location;
+    the OA landing page is the full-text link when it is not that PDF."""
+    best = raw.get("best_oa_location") or {}
+    primary = raw.get("primary_location") or {}
+    oa = raw.get("open_access") or {}
+    pdf_url = best.get("pdf_url") or (primary.get("pdf_url") if primary.get("is_oa") else None)
+    candidates = (best.get("landing_page_url"), oa.get("oa_url"))
+    abstract_url = next((url for url in candidates if url and url != pdf_url), None)
+    return pdf_url or None, abstract_url
+
+
 def _map_work(raw: dict) -> PaperMetadata:
     doi_raw = raw.get("doi") or ""
     doi = doi_raw.removeprefix("https://doi.org/") if doi_raw else None
@@ -137,15 +150,19 @@ def _map_work(raw: dict) -> PaperMetadata:
     source = primary_loc.get("source") or {}
 
     oa = raw.get("open_access") or {}
+    pdf_url, abstract_url = _full_text_links(raw)
 
+    # Keys come from the raw title (``_work_keys``); the stored title is cleaned.
+    # A missing title stays ``None`` so callers can still skip untitled works.
     key, group_key = _work_keys(raw)
+    raw_title = raw.get("title")
 
     return PaperMetadata(
         canonical_key=key,
         paper_group_key=group_key,
-        title=raw.get("title", ""),
+        title=raw_title if raw_title is None else clean_inline_text(raw_title),
         authors=authors,
-        abstract=_reconstruct_abstract(raw.get("abstract_inverted_index")),
+        abstract=normalize_abstract(_reconstruct_abstract(raw.get("abstract_inverted_index"))),
         publication_date=_parse_date(raw.get("publication_date")),
         doi=doi,
         openalex_id=raw.get("id"),
@@ -157,7 +174,8 @@ def _map_work(raw: dict) -> PaperMetadata:
         topics=[t.get("display_name", "") for t in raw.get("topics", []) if t.get("display_name")],
         keywords=[k.get("keyword", "") for k in raw.get("keywords", []) if k.get("keyword")],
         open_access=oa.get("is_oa"),
-        pdf_url=oa.get("oa_url"),
+        pdf_url=pdf_url,
+        abstract_url=abstract_url,
         cited_by_count=raw.get("cited_by_count"),
         reference_count=raw.get("referenced_works_count"),
         provider_source="openalex",
@@ -272,42 +290,6 @@ class OpenAlexProvider(BaseProvider):
             )
             for w in data.get("results", [])
         ]
-
-    async def _related_works(
-        self, paper_id: str, *, filter_key: str, sort: str, per_page: int
-    ) -> list[PaperMetadata]:
-        """Fully-mapped works related to ``paper_id`` via an OpenAlex filter
-        (``cites`` → citing papers, ``cited_by`` → references). Each result
-        carries canonical/group keys and ``cited_by_count`` so it can become a
-        graph node directly. ``sort`` is an OpenAlex sort expression
-        (``cited_by_count:desc`` for most influential, ``publication_date:desc``
-        for most recent)."""
-        await self._limiter.acquire()
-        work_id = paper_id.rsplit("/", 1)[-1]
-        params = _params()
-        params["filter"] = f"{filter_key}:{work_id}"
-        params["sort"] = sort
-        params["per_page"] = str(max(1, min(per_page, 200)))
-        resp = await self._client.get("/works", params=params)
-        if resp.status_code == 404:
-            return []
-        resp.raise_for_status()
-        data = resp.json()
-        return [_map_work(w) for w in data.get("results", [])]
-
-    async def list_citing_papers(
-        self, paper_id: str, *, sort: str = "cited_by_count:desc", per_page: int = 25
-    ) -> list[PaperMetadata]:
-        """Papers that cite ``paper_id`` (``filter=cites:{id}``)."""
-        return await self._related_works(paper_id, filter_key="cites", sort=sort, per_page=per_page)
-
-    async def list_referenced_papers(
-        self, paper_id: str, *, sort: str = "cited_by_count:desc", per_page: int = 25
-    ) -> list[PaperMetadata]:
-        """Papers that ``paper_id`` cites — its references (``filter=cited_by:{id}``)."""
-        return await self._related_works(
-            paper_id, filter_key="cited_by", sort=sort, per_page=per_page
-        )
 
     async def related_page(
         self,

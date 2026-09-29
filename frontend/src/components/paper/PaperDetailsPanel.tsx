@@ -1,9 +1,10 @@
-import { useId } from "react";
+import { useId, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, ExternalLink, FileText, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
+import { BookMarked, FileDown, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
 import api, { library, papers } from "@/lib/api";
+import { abstractParagraphs } from "@/lib/abstract";
 import { apiStatus } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
@@ -13,8 +14,14 @@ import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
-import { providerLabel, versionLabel } from "@/components/paper/versionLabel";
-import type { LibraryVersionPin, PaperDetail, PaperMemberships } from "@/types";
+import ExternalLinkChip from "@/components/paper/ExternalLinkChip";
+import { fullTextLinks } from "@/components/paper/links";
+import {
+  providerLabel,
+  versionLabels,
+  type VersionLabel,
+} from "@/components/paper/versionLabel";
+import type { LibraryVersionPin, PaperMemberships } from "@/types";
 import "./PaperDetailsPanel.css";
 
 interface PaperDetailsPanelProps {
@@ -26,14 +33,23 @@ interface PaperDetailsPanelProps {
 }
 
 /** Human label for a pinned version — metadata match first, provider fallback. */
-function pinLabel(
-  pin: LibraryVersionPin,
-  paper: PaperDetail,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  const match = paper.versions.find((v) => v.canonical_key === pin.paper_canonical_key);
-  if (match) return versionLabel(match, t as never);
-  return providerLabel(pin.source_provider);
+function pinLabel(pin: LibraryVersionPin, labels: Map<string, VersionLabel>): VersionLabel {
+  const match = labels.get(pin.paper_canonical_key);
+  if (match) return match;
+  const label = providerLabel(pin.source_provider);
+  return { label, accessibleName: label, details: "" };
+}
+
+/** A version row's text: the distinct label plus a quieter details line. */
+function VersionText({ info, id }: { info: VersionLabel; id?: string }) {
+  return (
+    <span className="pd-version-text">
+      <span className="pd-version-label" id={id}>
+        {info.label}
+      </span>
+      {info.details && <span className="pd-version-details">{info.details}</span>}
+    </span>
+  );
 }
 
 /**
@@ -126,6 +142,13 @@ export default function PaperDetailsPanel({
       ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }).format(new Date(value))
       : null;
 
+  const labels = useMemo(
+    () => versionLabels(paper?.versions ?? [], t, i18n.language),
+    [paper, t, i18n.language],
+  );
+  const paragraphs = useMemo(() => abstractParagraphs(paper?.abstract), [paper]);
+  const fullText = useMemo(() => (paper ? fullTextLinks(paper) : []), [paper]);
+
   return (
     <Panel
       open={!!paperKey}
@@ -169,6 +192,11 @@ export default function PaperDetailsPanel({
               <span>{t("paper.referencesCount", { count: paper.reference_count })}</span>
             )}
           </div>
+          {paper.cited_by_count != null && paper.provider_source && (
+            <p className="pd-count-source">
+              {t("paper.citationsFrom", { provider: providerLabel(paper.provider_source) })}
+            </p>
+          )}
 
           <div className="pd-actions">
             <Link
@@ -198,50 +226,43 @@ export default function PaperDetailsPanel({
             )}
           </div>
 
-          {paper.abstract && (
+          {paragraphs.length > 0 && (
             <section className="pd-section">
               <h3>{t("paper.abstractHeading")}</h3>
-              <p className="pd-abstract">{paper.abstract}</p>
+              <div className="pd-abstract">
+                {paragraphs.map((paragraph, index) => (
+                  <p key={index}>
+                    {paragraph.label && <strong>{`${paragraph.label}: `}</strong>}
+                    {paragraph.text}
+                  </p>
+                ))}
+              </div>
             </section>
           )}
 
-          {(paper.doi || paper.arxiv_id || paper.pdf_url) && (
+          {(paper.doi || paper.arxiv_id || fullText.length > 0) && (
             <section className="pd-section">
               <h3>{t("paper.linksHeading")}</h3>
               <div className="pd-links">
                 {paper.doi && (
-                  <a
-                    className="link-chip"
-                    href={`https://doi.org/${paper.doi}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <ExternalLinkChip href={`https://doi.org/${paper.doi}`}>
                     {t("paper.publisherLink")}
-                    <ExternalLink size={12} />
-                  </a>
+                  </ExternalLinkChip>
                 )}
                 {paper.arxiv_id && (
-                  <a
-                    className="link-chip"
-                    href={`https://arxiv.org/abs/${paper.arxiv_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <ExternalLinkChip href={`https://arxiv.org/abs/${paper.arxiv_id}`}>
                     arXiv
-                    <ExternalLink size={12} />
-                  </a>
+                  </ExternalLinkChip>
                 )}
-                {paper.pdf_url && (
-                  <a
-                    className="link-chip"
-                    href={paper.pdf_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {fullText.map((link) => (
+                  <ExternalLinkChip
+                    key={link.url}
+                    href={link.url}
+                    icon={link.kind === "pdf" ? <FileDown size={12} aria-hidden="true" /> : undefined}
                   >
-                    <FileText size={12} />
-                    {t("paper.pdf")}
-                  </a>
-                )}
+                    {link.kind === "pdf" ? t("paper.downloadPdf") : t("paper.fullText")}
+                  </ExternalLinkChip>
+                ))}
               </div>
             </section>
           )}
@@ -260,14 +281,15 @@ export default function PaperDetailsPanel({
             <section className="pd-section" data-testid="managed-versions">
               <h3>{t("library.pinnedVersions")}</h3>
               <ul className="pd-versions">
-                {entry.pinned_versions.map((pin) => {
+                {entry.pinned_versions.map((pin, index) => {
                   const isPrimary = pin.paper_canonical_key === entry.primary_canonical_key;
+                  const labelId = `${titleId}-pin-${index}`;
                   return (
                     <li
                       key={pin.paper_canonical_key}
                       className={isPrimary ? "pd-version active" : "pd-version"}
                     >
-                      <span>{pinLabel(pin, paper, t)}</span>
+                      <VersionText id={labelId} info={pinLabel(pin, labels)} />
                       <span className="pd-version-actions">
                         {isPrimary ? (
                           <span className="badge">{t("library.primary")}</span>
@@ -280,6 +302,7 @@ export default function PaperDetailsPanel({
                               onClick={() => repinMutation.mutate(pin.paper_canonical_key)}
                               title={t("library.repinTitle")}
                               aria-label={t("library.repinTitle")}
+                              aria-describedby={labelId}
                             >
                               <Pin size={13} />
                             </button>
@@ -292,6 +315,7 @@ export default function PaperDetailsPanel({
                               }
                               title={t("library.removeVersionTitle")}
                               aria-label={t("library.removeVersionTitle")}
+                              aria-describedby={labelId}
                             >
                               <Trash2 size={13} />
                             </button>
@@ -308,18 +332,21 @@ export default function PaperDetailsPanel({
               <section className="pd-section">
                 <h3>{t("paper.versionsHeading")}</h3>
                 <ul className="pd-versions">
-                  {paper.versions.map((version) => (
-                    <li
-                      key={version.canonical_key}
-                      className={
-                        version.canonical_key === paper.canonical_key
-                          ? "pd-version active"
-                          : "pd-version"
-                      }
-                    >
-                      <span>{versionLabel(version, t)}</span>
-                    </li>
-                  ))}
+                  {paper.versions.map((version) => {
+                    const info = labels.get(version.canonical_key);
+                    return (
+                      <li
+                        key={version.canonical_key}
+                        className={
+                          version.canonical_key === paper.canonical_key
+                            ? "pd-version active"
+                            : "pd-version"
+                        }
+                      >
+                        {info && <VersionText info={info} />}
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             )

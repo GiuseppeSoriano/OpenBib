@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.crypto import EncryptedValue, keyring
 from app.common.exceptions import ConflictError, NotFoundError
+from app.common.text import clean_inline_text, normalize_abstract
 from app.papers.models import CachedPaperMetadata
 from app.papers.service import get_cached_papers_by_keys
 from app.zotero.client import MAX_BATCH, ZoteroClient, ZoteroError
@@ -136,9 +137,9 @@ def item_from_cached(row: CachedPaperMetadata, collection_key: str) -> dict:
 
     item: dict = {
         "itemType": item_type,
-        "title": row.title,
+        "title": clean_inline_text(row.title),
         "creators": _creators(row.authors_json),
-        "abstractNote": row.abstract or "",
+        "abstractNote": normalize_abstract(row.abstract) or "",
         "date": row.publication_date.isoformat() if row.publication_date else "",
         "url": row.abstract_url or (f"https://doi.org/{row.doi}" if row.doi else ""),
         "extra": "\n".join(extra_parts),

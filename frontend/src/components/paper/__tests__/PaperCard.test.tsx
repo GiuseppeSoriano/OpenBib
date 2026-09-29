@@ -50,8 +50,31 @@ describe("PaperCard", () => {
     renderCard();
     expect(screen.getByText("A Very Important Paper")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith, Bob Jones")).toBeInTheDocument();
-    expect(screen.getByText(/Journal of Tests · 2024 · 12 citations/)).toBeInTheDocument();
-    expect(screen.getByText(/OpenAlex/)).toBeInTheDocument();
+    expect(screen.getByText(/Journal of Tests · 2024/)).toHaveTextContent(
+      "Journal of Tests · 2024 · 12 citations (OpenAlex)",
+    );
+    expect(screen.getByText(/— OpenAlex/)).toBeInTheDocument();
+  });
+
+  it("shows which provider the citation count comes from as visible text", () => {
+    renderCard();
+    expect(screen.getByText("(OpenAlex)")).toBeVisible();
+    expect(screen.getByText(/Citation count from OpenAlex/)).toHaveClass("sr-only");
+    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("12 citations");
+  });
+
+  it("previews a structured abstract without leaking markup", () => {
+    renderCard({
+      paper: {
+        ...paper,
+        title: "Clean title",
+        abstract: "<h4>Background</h4>Odor <i>coding</i><h4>Results</h4>p < 0.05<script>x()</script>",
+      },
+    });
+    const preview = document.querySelector(".paper-abstract");
+    expect(preview).toHaveTextContent("Background: Odor coding Results: p < 0.05");
+    expect(preview?.textContent).not.toMatch(/<\/?[a-z]/i);
+    expect(preview?.textContent).not.toContain("x()");
   });
 
   it("never shows the raw DOI or canonical key", () => {

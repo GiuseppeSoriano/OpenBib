@@ -68,18 +68,6 @@
     font-size: 0.88rem;
   }
 
-  .version-picker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-    margin-top: var(--space-xs);
-  }
-
-  .pill--sm {
-    font-size: 0.72rem;
-    padding: 0.15rem 0.6rem;
-  }
-
   .dismiss-btn {
     font-size: 0.78rem;
     margin-left: auto;

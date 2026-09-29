@@ -1,5 +1,5 @@
 import { testAuth, mockRefresh } from "@/test/auth-mock";
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "@/i18n";
@@ -37,6 +37,9 @@ const detail: PaperDetail = {
   versions: [],
 };
 
+// Tests that need other metadata swap this and restore `detail` afterwards.
+const detailState: { current: PaperDetail } = { current: detail };
+
 const libState: {
   keys: string[];
   entry: unknown;
@@ -61,7 +64,7 @@ vi.mock("@/lib/api", () => ({
     put: vi.fn(),
     delete: vi.fn(),
   },
-  papers: { getDetail: vi.fn(() => Promise.resolve(detail)) },
+  papers: { getDetail: vi.fn(() => Promise.resolve(detailState.current)) },
   library: {
     listKeys: vi.fn(() => Promise.resolve(libState.keys)),
     getEntry: vi.fn(() => Promise.resolve(libState.entry)),
@@ -261,5 +264,95 @@ describe("PaperDetailsPanel — managed library versions", () => {
     await waitFor(() =>
       expect(removeVersion).toHaveBeenCalledWith("group:panel", "hash:preprint1"),
     );
+  });
+});
+
+describe("PaperDetailsPanel — provider text, links and versions", () => {
+  afterEach(() => {
+    detailState.current = detail;
+  });
+
+  function renderDetail(overrides: Partial<PaperDetail>) {
+    detailState.current = { ...detail, ...overrides };
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+  }
+
+  it("renders a structured abstract as paragraphs with bold labels", async () => {
+    renderDetail({ abstract: "Background: Odor coding.\n\nResults: It works <i>well</i>." });
+    const details = await screen.findByTestId("paper-details");
+
+    const paragraphs = details.querySelectorAll(".pd-abstract p");
+    expect(paragraphs).toHaveLength(2);
+    expect(within(paragraphs[0] as HTMLElement).getByText("Background:").tagName).toBe("STRONG");
+    expect(paragraphs[0]).toHaveTextContent("Background: Odor coding.");
+    expect(within(paragraphs[1] as HTMLElement).getByText("Results:").tagName).toBe("STRONG");
+    expect(paragraphs[1]).toHaveTextContent("Results: It works well.");
+    expect(details.textContent).not.toMatch(/<h4|<i>|<\/?[a-z]+>/);
+  });
+
+  it("labels a real PDF as a download and a repository page as full text", async () => {
+    renderDetail({
+      pdf_url: "https://figshare.com/articles/journal_contribution/Panel/123",
+      abstract_url: "https://europepmc.org/articles/PMC1?pdf=render",
+    });
+    await screen.findByText("Panel Paper");
+
+    const pdf = screen.getByRole("link", { name: /Download PDF/ });
+    expect(pdf).toHaveAttribute("href", "https://europepmc.org/articles/PMC1?pdf=render");
+    const fullText = screen.getByRole("link", { name: /Full text \/ Repository/ });
+    expect(fullText).toHaveAttribute(
+      "href",
+      "https://figshare.com/articles/journal_contribution/Panel/123",
+    );
+    expect(fullText).toHaveAttribute("title", "figshare.com");
+  });
+
+  it("marks every external chip as opening in a new tab", async () => {
+    renderDetail({});
+    await screen.findByText("Panel Paper");
+
+    const links = within(screen.getByTestId("paper-details"))
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("target") === "_blank");
+    expect(links).toHaveLength(3);
+    for (const link of links) {
+      expect(link).toHaveAccessibleName(/\(opens in a new tab\)$/);
+      expect(link.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      expect(link.getAttribute("title")).toBeTruthy();
+    }
+  });
+
+  it("says which provider the citation count comes from", async () => {
+    renderDetail({});
+    expect(await screen.findByText("Citation count from OpenAlex")).toBeVisible();
+  });
+
+  it("distinguishes same-year versions without showing identifiers", async () => {
+    const preprint = {
+      ...detail,
+      doi: null,
+      arxiv_id: null,
+      paper_type: "posted-content",
+      provider_source: "crossref",
+      publication_date: null,
+      cited_by_count: null,
+      venue: null,
+      versions: undefined,
+    };
+    renderDetail({
+      versions: [
+        { ...preprint, canonical_key: "doi:10.20944/p.v1" },
+        { ...preprint, canonical_key: "doi:10.20944/p.v2" },
+      ],
+    });
+    await screen.findByText("Panel Paper");
+
+    const items = screen.getAllByRole("listitem").filter((li) => li.className.includes("pd-version"));
+    expect(items.map((li) => li.textContent)).toEqual([
+      "Preprint · Crossref · 1 of 2Crossref",
+      "Preprint · Crossref · 2 of 2Crossref",
+    ]);
+    expect(screen.getByTestId("paper-details").textContent).not.toMatch(/10\.20944|doi:/);
   });
 });

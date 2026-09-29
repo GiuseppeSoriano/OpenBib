@@ -67,6 +67,27 @@ def test_build_search_response_groups_versions_and_keeps_singletons():
     assert payload["items"][1]["paper"]["canonical_key"] == "hash:single"
 
 
+def test_build_search_response_compares_versions_numerically():
+    same_day = date(2024, 1, 1)
+    result = SearchResult(
+        papers=[
+            make_paper("hash:v9", "group:paper", "Grouped Paper", same_day, "v9"),
+            make_paper("hash:v10", "group:paper", "Grouped Paper", same_day, "v10"),
+            make_paper("hash:v2", "group:paper", "Grouped Paper", same_day, "v2"),
+        ],
+        total_count=3,
+        page=1,
+        page_size=20,
+        provider="crossref",
+    )
+
+    payload = service.build_search_response(result)
+
+    group = payload["items"][0]
+    assert group["selected_version"]["canonical_key"] == "hash:v10"
+    assert [v["canonical_key"] for v in group["versions"]] == ["hash:v10", "hash:v9", "hash:v2"]
+
+
 @pytest.mark.asyncio
 async def test_cache_papers_roundtrip(db):
     papers = [

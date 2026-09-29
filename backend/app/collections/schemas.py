@@ -5,9 +5,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from app.papers.schemas import PaperMetadataRead
+from app.papers.schemas import PaperMetadataRead, clean_title_value
 
 
 class Visibility(str, Enum):
@@ -87,6 +87,8 @@ class ImportLineResult(BaseModel):
     status: Literal["added", "duplicate", "invalid", "not_found", "unresolved"]
     canonical_key: str | None = None
     title: str | None = None
+
+    _clean_title = field_validator("title", mode="before")(clean_title_value)
 
 
 class ImportResult(BaseModel):
