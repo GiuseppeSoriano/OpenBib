@@ -228,8 +228,29 @@ export interface LibraryEntryListItem {
   primary_canonical_key: string;
   created_at: string;
   primary_version: PaperMetadata | null;
+  /** False while the primary version has no cached metadata. */
+  resolved: boolean;
   version_count: number;
   tags: string[];
+}
+
+export type LibrarySort = "added" | "title" | "year" | "citations";
+
+export interface LibraryListParams {
+  q?: string;
+  state?: ReadingState;
+  tag?: string;
+  collection_id?: string;
+  sort?: LibrarySort;
+  page?: number;
+  size?: number;
+}
+
+export interface LibraryFacets {
+  tags: { tag: string; count: number }[];
+  states: { state: ReadingState; count: number }[];
+  total: number;
+  unresolved: number;
 }
 
 export interface LibraryEntry {
@@ -262,22 +283,8 @@ export interface GraphResponse {
 
 export type CitingOrder = "cited_by_count" | "recent";
 
-// "cited_by" → add papers that cite the node; "cites" → add its references.
+// "cited_by" → papers that cite the node; "cites" → its references.
 export type RelationDirection = "cited_by" | "cites";
-
-export interface ExpandRequest {
-  from_keys: string[];
-  focus_key?: string | null;
-  existing_group_keys: string[];
-  direction: RelationDirection;
-  order: CitingOrder;
-  limit_per_node: number;
-}
-
-export interface ExpandResponse {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
 
 export interface RelatedRangeRequest {
   source_key: string;

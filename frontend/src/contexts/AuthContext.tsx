@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useQueryClient } from "@tanstack/react-query";
 import api, { refreshAccessToken, setAccessToken, setAuthFailureHandler } from "@/lib/api";
 import { assertSession, changeSession, listenForSessionChanges, sessionGeneration } from "@/lib/session";
+import { clearScrollPositions } from "@/hooks/useScrollRestore";
 import type { TokenResponse, User } from "@/types";
 
 interface RegistrationInput { email: string; password: string; displayName: string; locale: "en" | "it"; termsVersion: string; privacyVersion: string; }
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback(() => {
     setAccessToken(null); setUser(null);
     if (activeUserId.current !== null) queryClient.clear();
+    clearScrollPositions();
     activeUserId.current = null;
   }, [queryClient]);
 
@@ -34,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const expected = sessionGeneration();
     const { data } = await api.get<User>("/users/me");
     assertSession(expected);
-    if (activeUserId.current !== null && activeUserId.current !== data.id) queryClient.clear();
+    if (activeUserId.current !== null && activeUserId.current !== data.id) { queryClient.clear(); clearScrollPositions(); }
     activeUserId.current = data.id;
     setUser(data);
   }, [queryClient]);

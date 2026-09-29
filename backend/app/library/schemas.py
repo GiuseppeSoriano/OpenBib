@@ -55,8 +55,34 @@ class LibraryEntryListItem(BaseModel):
     primary_canonical_key: str
     created_at: datetime
     primary_version: PaperMetadataRead | None = None
+    # False while the primary version has no cached metadata.
+    resolved: bool
     version_count: int = 1
     tags: list[str] = []
+
+
+class LibraryEntryPage(BaseModel):
+    items: list[LibraryEntryListItem]
+    total: int
+    page: int
+    size: int
+
+
+class TagFacet(BaseModel):
+    tag: str
+    count: int
+
+
+class StateFacet(BaseModel):
+    state: str
+    count: int
+
+
+class LibraryFacets(BaseModel):
+    tags: list[TagFacet] = []
+    states: list[StateFacet] = []
+    total: int
+    unresolved: int
 
 
 class LibraryKeysResponse(BaseModel):

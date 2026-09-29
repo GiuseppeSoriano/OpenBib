@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collections.models import Collection, CollectionMember, CollectionPaper
+from app.collections.service import _can_view, _member_roles
 from app.common.exceptions import ApiError, ConflictError, InvalidIdentifierError, NotFoundError
 from app.common.identifiers import (
     ParsedIdentifier,
@@ -19,7 +20,7 @@ from app.common.identifiers import (
 from app.common.key_repair import rekey_user_paper
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
-from app.papers.models import CachedPaperMetadata, UserPaperState, UserPaperTag
+from app.papers.models import READING_STATES, CachedPaperMetadata, UserPaperState, UserPaperTag
 from app.papers.service import cache_papers, cached_paper_to_read, get_cached_paper
 from app.providers import registry
 
@@ -172,30 +173,143 @@ async def ensure_entry_and_version(
     return entry, version
 
 
+LIBRARY_SORTS = {
+    "added": (UserLibraryEntry.created_at.desc(),),
+    "title": (func.lower(CachedPaperMetadata.title).asc().nulls_last(),),
+    "year": (CachedPaperMetadata.publication_date.desc().nulls_last(),),
+    "citations": (CachedPaperMetadata.cited_by_count.desc().nulls_last(),),
+}
+
+_PRIMARY_METADATA = CachedPaperMetadata.canonical_key == UserLibraryEntry.primary_canonical_key
+
+
+def _like_pattern(q: str) -> str:
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _author_name_matches(dialect: str, pattern: str):
+    """EXISTS over the decoded author names. ``authors_json`` is plain JSON
+    stored with escaped non-ASCII, so matching its text would miss "Müller"
+    and match key names such as "name" in every row."""
+    authors = CachedPaperMetadata.authors_json
+    if dialect == "postgresql":
+        elements = case(
+            (func.json_typeof(authors) == "array", authors),
+            else_=literal_column("'[]'::json"),
+        )
+        author = func.json_array_elements(elements).table_valued("value").alias("author")
+        name = func.json_extract_path_text(author.c.value, "name")
+    else:
+        author = func.json_each(authors).table_valued("value", "type").alias("author")
+        name = case((author.c.type == "object", func.json_extract(author.c.value, "$.name")))
+    return select(literal(1)).select_from(author).where(name.ilike(pattern, escape="\\")).exists()
+
+
+async def _entry_filters(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    q: str | None,
+    state: str | None,
+    tag: str | None,
+    collection_id: uuid.UUID | None,
+) -> list:
+    filters = [UserLibraryEntry.user_id == user_id]
+    if q and q.strip():
+        pattern = _like_pattern(q.strip())
+        filters.append(
+            or_(
+                CachedPaperMetadata.title.ilike(pattern, escape="\\"),
+                CachedPaperMetadata.venue.ilike(pattern, escape="\\"),
+                _author_name_matches(db.get_bind().dialect.name, pattern),
+            )
+        )
+    if state is not None:
+        filters.append(
+            select(UserPaperState.paper_canonical_key)
+            .join(
+                UserLibraryVersion,
+                and_(
+                    UserLibraryVersion.user_id == UserPaperState.user_id,
+                    UserLibraryVersion.paper_canonical_key == UserPaperState.paper_canonical_key,
+                ),
+            )
+            .where(
+                UserPaperState.user_id == user_id,
+                UserPaperState.state == state,
+                UserLibraryVersion.paper_group_key == UserLibraryEntry.paper_group_key,
+            )
+            .exists()
+        )
+    if tag is not None:
+        filters.append(
+            select(UserPaperTag.tag)
+            .where(
+                UserPaperTag.user_id == user_id,
+                UserPaperTag.paper_group_key == UserLibraryEntry.paper_group_key,
+                UserPaperTag.tag == tag,
+            )
+            .exists()
+        )
+    if collection_id is not None:
+        coll = await db.get(Collection, collection_id)
+        if coll is None or not _can_view(coll, user_id, await _member_roles(db, collection_id)):
+            raise NotFoundError("Collection not found")
+        filters.append(
+            select(CollectionPaper.paper_canonical_key)
+            .join(
+                UserLibraryVersion,
+                UserLibraryVersion.paper_canonical_key == CollectionPaper.paper_canonical_key,
+            )
+            .where(
+                CollectionPaper.collection_id == collection_id,
+                UserLibraryVersion.user_id == user_id,
+                UserLibraryVersion.paper_group_key == UserLibraryEntry.paper_group_key,
+            )
+            .exists()
+        )
+    return filters
+
+
 async def list_entries(
-    db: AsyncSession, user_id: uuid.UUID, *, page: int = 1, size: int = 25
-) -> list[dict]:
-    offset = (page - 1) * size
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    q: str | None = None,
+    state: str | None = None,
+    tag: str | None = None,
+    collection_id: uuid.UUID | None = None,
+    sort: str = "added",
+    page: int = 1,
+    size: int = 25,
+) -> tuple[list[dict], int]:
+    """One page of the user's Library plus the total matching the filters.
+    Raises 404 when ``collection_id`` is not a collection the user can view."""
+    filters = await _entry_filters(
+        db, user_id, q=q, state=state, tag=tag, collection_id=collection_id
+    )
+    count_q = (
+        select(func.count())
+        .select_from(UserLibraryEntry)
+        .outerjoin(CachedPaperMetadata, _PRIMARY_METADATA)
+        .where(*filters)
+    )
+    total = (await db.execute(count_q)).scalar() or 0
 
     entries_q = (
-        select(UserLibraryEntry)
-        .where(UserLibraryEntry.user_id == user_id)
-        .order_by(UserLibraryEntry.created_at.desc())
-        .offset(offset)
+        select(UserLibraryEntry, CachedPaperMetadata)
+        .outerjoin(CachedPaperMetadata, _PRIMARY_METADATA)
+        .where(*filters)
+        .order_by(*LIBRARY_SORTS[sort], UserLibraryEntry.paper_group_key)
+        .offset((page - 1) * size)
         .limit(size)
     )
-    entries = list((await db.execute(entries_q)).scalars().all())
-    if not entries:
-        return []
+    rows = (await db.execute(entries_q)).all()
+    if not rows:
+        return [], total
 
-    group_keys = [e.paper_group_key for e in entries]
-    primary_keys = [e.primary_canonical_key for e in entries]
-
-    cached_q = select(CachedPaperMetadata).where(
-        CachedPaperMetadata.canonical_key.in_(primary_keys)
-    )
-    cached_rows = (await db.execute(cached_q)).scalars().all()
-    cached_by_key = {row.canonical_key: row for row in cached_rows}
+    group_keys = [entry.paper_group_key for entry, _ in rows]
 
     counts_q = (
         select(
@@ -219,8 +333,7 @@ async def list_entries(
         tags_by_group.setdefault(row[0], []).append(row[1])
 
     items: list[dict] = []
-    for entry in entries:
-        primary_cached = cached_by_key.get(entry.primary_canonical_key)
+    for entry, primary_cached in rows:
         primary_view = (
             cached_paper_to_read(primary_cached).model_dump(mode="json") if primary_cached else None
         )
@@ -230,11 +343,59 @@ async def list_entries(
                 "primary_canonical_key": entry.primary_canonical_key,
                 "created_at": entry.created_at,
                 "primary_version": primary_view,
+                "resolved": primary_cached is not None,
                 "version_count": counts_by_group.get(entry.paper_group_key, 0),
                 "tags": sorted(tags_by_group.get(entry.paper_group_key, [])),
             }
         )
-    return items
+    return items, total
+
+
+async def library_facets(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Filter options with the number of Library entries behind each."""
+    tags_q = (
+        select(UserPaperTag.tag, func.count(func.distinct(UserPaperTag.paper_group_key)))
+        .join(
+            UserLibraryEntry,
+            and_(
+                UserLibraryEntry.user_id == UserPaperTag.user_id,
+                UserLibraryEntry.paper_group_key == UserPaperTag.paper_group_key,
+            ),
+        )
+        .where(UserPaperTag.user_id == user_id)
+        .group_by(UserPaperTag.tag)
+        .order_by(func.lower(UserPaperTag.tag), UserPaperTag.tag)
+    )
+    states_q = (
+        select(UserPaperState.state, func.count(func.distinct(UserLibraryVersion.paper_group_key)))
+        .join(
+            UserLibraryVersion,
+            and_(
+                UserLibraryVersion.user_id == UserPaperState.user_id,
+                UserLibraryVersion.paper_canonical_key == UserPaperState.paper_canonical_key,
+            ),
+        )
+        .where(UserPaperState.user_id == user_id)
+        .group_by(UserPaperState.state)
+    )
+    totals_q = (
+        select(func.count(), func.count(CachedPaperMetadata.canonical_key))
+        .select_from(UserLibraryEntry)
+        .outerjoin(CachedPaperMetadata, _PRIMARY_METADATA)
+        .where(UserLibraryEntry.user_id == user_id)
+    )
+    state_counts = {row[0]: row[1] for row in (await db.execute(states_q)).all()}
+    total, resolved = (await db.execute(totals_q)).one()
+    return {
+        "tags": [{"tag": row[0], "count": row[1]} for row in (await db.execute(tags_q)).all()],
+        "states": [
+            {"state": state, "count": state_counts[state]}
+            for state in READING_STATES
+            if state in state_counts
+        ],
+        "total": total,
+        "unresolved": total - resolved,
+    }
 
 
 async def get_entry(db: AsyncSession, user_id: uuid.UUID, paper_group_key: str) -> dict:

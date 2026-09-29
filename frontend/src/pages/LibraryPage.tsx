@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { library, zotero } from "@/lib/api";
 import { apiErrorMessage, apiStatus } from "@/lib/apiError";
+import {
+  activeFilterCount,
+  parseLibraryParams,
+  serializeLibraryParams,
+  type LibraryFilterParams,
+} from "@/lib/libraryParams";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { useToast } from "@/components/ui/Toast";
 import type { LibraryEntryListItem, ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -12,8 +19,20 @@ import EmptyState from "@/components/ui/EmptyState";
 import PaperCard from "@/components/paper/PaperCard";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
-import { BookMarked, BookUp, GitFork, Layers3, Trash2 } from "lucide-react";
+import LibraryFilters from "@/components/library/LibraryFilters";
+import {
+  AlertTriangle,
+  BookMarked,
+  BookUp,
+  GitFork,
+  Layers3,
+  RotateCcw,
+  SearchX,
+  Trash2,
+} from "lucide-react";
 import "./LibraryPage.css";
+
+const PAGE_SIZE = 25;
 
 /**
  * The personal library: rich, human-readable entries. All low-level
@@ -24,23 +43,63 @@ export default function LibraryPage() {
   const { t } = useTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const focusKey = searchParams.get("focus");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  const { data: entries, isLoading } = useQuery({
-    queryKey: ["library-entries"],
-    queryFn: () => library.listEntries({ page: 1, size: 100 }),
-  });
+  // Keyed by the serialized filters so unrelated URL changes (?focus=) keep
+  // the same params object and query.
+  const filterKey = serializeLibraryParams(parseLibraryParams(searchParams)).toString();
+  const params = useMemo(() => parseLibraryParams(new URLSearchParams(filterKey)), [filterKey]);
+  const filtered = activeFilterCount(params) > 0;
 
-  // Deep link (?focus=<group_key>) opens the details panel.
+  const setParams = useCallback(
+    (next: LibraryFilterParams, options: { replace?: boolean } = {}) => {
+      setSearchParams((current) => serializeLibraryParams(next, current), options);
+    },
+    [setSearchParams],
+  );
+  const resetFilters = useCallback(() => setParams({}), [setParams]);
+
+  const entriesQuery = useInfiniteQuery({
+    queryKey: ["library-entries", params],
+    queryFn: ({ pageParam }) => library.listEntries({ ...params, page: pageParam, size: PAGE_SIZE }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page * last.size < last.total ? last.page + 1 : undefined),
+  });
+  const pages = entriesQuery.data?.pages;
+  const entries = useMemo(() => {
+    // An entry saved between two page loads shifts the offsets; never list one twice.
+    const seen = new Set<string>();
+    const items: LibraryEntryListItem[] = [];
+    for (const page of pages ?? []) {
+      for (const item of page.items) {
+        if (seen.has(item.paper_group_key)) continue;
+        seen.add(item.paper_group_key);
+        items.push(item);
+      }
+    }
+    return items;
+  }, [pages]);
+  const total = pages && pages.length > 0 ? pages[pages.length - 1]!.total : 0;
+
+  useScrollRestore(`library?${filterKey}`, !!pages);
+
+  // Deep link (?focus=<group_key>): look the entry up directly, since it may
+  // be far beyond the loaded pages, and open it once per link.
+  const { data: focusEntry } = useQuery({
+    queryKey: ["library-entry", focusKey],
+    queryFn: () => library.getEntry(focusKey!),
+    enabled: !!focusKey,
+  });
+  const openedFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusKey || !entries) return;
-    const entry = entries.find((e) => e.paper_group_key === focusKey);
-    if (entry) setDetailsKey(entry.primary_canonical_key);
-  }, [focusKey, entries]);
+    if (!focusKey || !focusEntry || openedFocus.current === focusKey) return;
+    openedFocus.current = focusKey;
+    setDetailsKey(focusEntry.primary_canonical_key);
+  }, [focusKey, focusEntry]);
 
   const { data: zoteroStatus } = useQuery({
     queryKey: ["zotero-status"],
@@ -79,6 +138,21 @@ export default function LibraryPage() {
     },
   });
 
+  const loaded = !!pages;
+  // A collection filter the user can no longer view answers 404, and a filter
+  // value the API rejects 422: offer the reset for both.
+  const listStatus = apiStatus(entriesQuery.error);
+  const filterRejected = filtered && (listStatus === 404 || listStatus === 422);
+  const noMatches = filtered && ((loaded && total === 0) || filterRejected);
+  const loadFailed = entriesQuery.isError && !loaded && !filterRejected;
+  let countText = "";
+  if (loaded && total > 0) {
+    countText =
+      entries.length < total
+        ? t("library.showingOf", { shown: entries.length, total })
+        : t("library.resultsCount", { count: total });
+  }
+
   return (
     <div className="library-page">
       <header className="library-header">
@@ -103,9 +177,15 @@ export default function LibraryPage() {
         </div>
       </header>
 
-      {isLoading && <SkeletonCard count={4} />}
+      <LibraryFilters params={params} onChange={setParams} onReset={resetFilters} />
 
-      {entries && entries.length === 0 && (
+      <p className="library-count" role="status">
+        {countText}
+      </p>
+
+      {entriesQuery.isLoading && <SkeletonCard count={4} />}
+
+      {loaded && total === 0 && !filtered && (
         <EmptyState
           icon={BookMarked}
           title={t("library.emptyTitle")}
@@ -118,8 +198,41 @@ export default function LibraryPage() {
         />
       )}
 
+      {loadFailed && (
+        <div role="alert">
+          <EmptyState
+            icon={AlertTriangle}
+            title={t("library.loadFailed")}
+            action={
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void entriesQuery.refetch()}
+                disabled={entriesQuery.isFetching}
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+                {entriesQuery.isFetching ? t("common.retrying") : t("common.retry")}
+              </button>
+            }
+          />
+        </div>
+      )}
+
+      {noMatches && (
+        <EmptyState
+          icon={SearchX}
+          title={t("library.noMatches")}
+          description={t("library.noMatchesDescription")}
+          action={
+            <button type="button" className="btn btn-secondary" onClick={resetFilters}>
+              {t("common.resetFilters")}
+            </button>
+          }
+        />
+      )}
+
       <div className="library-list">
-        {entries?.map((item) => (
+        {entries.map((item) => (
           <LibraryEntry
             key={item.paper_group_key}
             item={item}
@@ -128,6 +241,19 @@ export default function LibraryPage() {
           />
         ))}
       </div>
+
+      {entriesQuery.hasNextPage && (
+        <div className="library-more">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void entriesQuery.fetchNextPage()}
+            disabled={entriesQuery.isFetchingNextPage}
+          >
+            {entriesQuery.isFetchingNextPage ? t("common.loading") : t("common.loadMore")}
+          </button>
+        </div>
+      )}
 
       <PaperDetailsPanel
         paperKey={detailsKey}
@@ -165,7 +291,7 @@ function LibraryEntry({
 
   // Entries without a metadata snapshot degrade to a minimal card that
   // still opens the details panel (which can hydrate live).
-  if (!primary) {
+  if (!item.resolved || !primary) {
     return (
       <div className="card library-entry-fallback">
         <button

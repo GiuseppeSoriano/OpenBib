@@ -1,5 +1,8 @@
 """Library router — persistent personal archive endpoints."""
 
+import uuid
+from typing import Literal
+
 from fastapi import APIRouter, Query, Request, Response
 
 from app.common.rate_limit import enforce_rate_limit
@@ -7,27 +10,55 @@ from app.dependencies import DB, CurrentUser, Redis
 from app.library import service
 from app.library.schemas import (
     LibraryEntryEnsure,
-    LibraryEntryListItem,
+    LibraryEntryPage,
     LibraryEntryRead,
     LibraryEntryRepin,
+    LibraryFacets,
     LibraryResolve,
     LibraryResolveRead,
     LibraryVersionAdd,
     LibraryVersionPin,
 )
+from app.papers.models import READING_STATES
 from app.papers.service import get_cached_paper
 
 router = APIRouter(prefix="/library", tags=["library"])
 
 
-@router.get("/entries", response_model=list[LibraryEntryListItem])
+@router.get("/entries", response_model=LibraryEntryPage)
 async def list_entries(
     user: CurrentUser,
     db: DB,
+    q: str | None = Query(None, max_length=200),
+    state: Literal[READING_STATES] | None = None,
+    tag: str | None = Query(None, min_length=1, max_length=100),
+    collection_id: uuid.UUID | None = None,
+    sort: Literal["added", "title", "year", "citations"] = "added",
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
 ):
-    return await service.list_entries(db, user.id, page=page, size=size)
+    """``q`` matches title, venue and author names. ``state`` and ``tag``
+    keep entries with a pinned version in that reading state or carrying that
+    tag. 404 when ``collection_id`` is not a collection you can view."""
+    items, total = await service.list_entries(
+        db,
+        user.id,
+        q=q,
+        state=state,
+        tag=tag,
+        collection_id=collection_id,
+        sort=sort,
+        page=page,
+        size=size,
+    )
+    return {"items": items, "total": total, "page": page, "size": size}
+
+
+@router.get("/facets", response_model=LibraryFacets)
+async def get_facets(user: CurrentUser, db: DB):
+    """Tags and reading states with their entry counts, plus the Library
+    total and how many entries still lack metadata."""
+    return await service.library_facets(db, user.id)
 
 
 @router.get("/keys", response_model=list[str])

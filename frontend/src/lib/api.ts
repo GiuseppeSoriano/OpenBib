@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { CitingOrder, ExpandRequest, ExpandResponse, GraphResponse, LibraryEntry, LibraryEntryListItem, LibraryVersionPin, Note, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -84,7 +84,8 @@ export const notes = {
 };
 
 export const library = {
-  async listEntries(params: { page?: number; size?: number } = {}) { return (await api.get<LibraryEntryListItem[]>("/library/entries", { params: { page: params.page ?? 1, size: params.size ?? 25 } })).data; },
+  async listEntries(params: LibraryListParams = {}) { return (await api.get<PaginatedResponse<LibraryEntryListItem>>("/library/entries", { params: { ...params, page: params.page ?? 1, size: params.size ?? 25 } })).data; },
+  async getFacets() { return (await api.get<LibraryFacets>("/library/facets")).data; },
   async listKeys() { return (await api.get<string[]>("/library/keys")).data; },
   async getEntry(groupKey: string) { return (await api.get<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`)).data; },
   async ensureEntry(body: { paper_group_key: string; paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryEntry>("/library/entries", body)).data; },
@@ -103,10 +104,9 @@ export const zotero = {
 };
 
 export const graph = {
-  async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`, { params: { order } })).data; },
-  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order } })).data; },
-  async buildLibrary(order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>("/graph/library", { params: { order } })).data; },
-  async expand(body: ExpandRequest) { return (await api.post<ExpandResponse>("/graph/expand", body)).data; },
+  async buildPaper(paperKey: string) { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`)).data; },
+  async buildCollection(collectionId: string) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`)).data; },
+  async buildLibrary() { return (await api.get<GraphResponse>("/graph/library")).data; },
   async related(body: RelatedRangeRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<RelatedRangeResponse>("/graph/related", body, { signal: options.signal })).data; },
   async topUp(body: TopUpRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<TopUpResponse>("/graph/related/top-up", body, { signal: options.signal })).data; },
 };

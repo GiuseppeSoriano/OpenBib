@@ -17,6 +17,8 @@ export default function ReadingStateSelect({ paperKey }: { paperKey: string }) {
     mutationFn: (state: ReadingState) => papers.setState(paperKey, state),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["paper-states", paperKey] });
+      // State-filtered Library pages and the state facets.
+      void queryClient.invalidateQueries({ queryKey: ["library-entries"] });
     },
   });
 

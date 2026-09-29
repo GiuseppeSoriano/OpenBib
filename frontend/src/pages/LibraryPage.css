@@ -57,4 +57,23 @@
   .library-entry-fallback {
     padding: var(--space-md) var(--space-lg);
   }
+
+  /* Long unbroken titles (URLs, formulas) must not widen the page. */
+  .library-list .paper-title {
+    overflow-wrap: anywhere;
+  }
+
+  .library-count {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+
+  .library-more {
+    display: flex;
+    justify-content: center;
+  }
+
+  .library-more .btn {
+    min-height: var(--control-min);
+  }
 }
