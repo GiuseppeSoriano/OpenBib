@@ -16,6 +16,8 @@ interface PaperCardProps {
   providerSources?: string[];
   showAbstract?: boolean;
   showTopics?: boolean;
+  /** A note under the meta line (e.g. a possible other version). */
+  note?: ReactNode;
   /** Action buttons rendered at the bottom of the card. */
   actions?: ReactNode;
   /** Extra content rendered between metadata and actions (e.g. version picker). */
@@ -35,6 +37,7 @@ export default function PaperCard({
   providerSources,
   showAbstract = true,
   showTopics = false,
+  note,
   actions,
   children,
   className = "",
@@ -50,6 +53,10 @@ export default function PaperCard({
   const citationsFrom = citationProvider
     ? t("paper.citationsFrom", { provider: citationProvider })
     : undefined;
+  // The source list only adds information when it names more than the
+  // provider already credited with the citation count.
+  const credited = paper.cited_by_count != null ? paper.provider_source : null;
+  const showSources = sources.length > 0 && !(credited && sources.every((source) => source === credited));
   const preview = showAbstract ? abstractPreview(paper.abstract) : "";
 
   return (
@@ -80,21 +87,23 @@ export default function PaperCard({
         {paper.cited_by_count != null && (
           <span className="paper-citations" title={citationsFrom}>
             {meta.length > 0 && " · "}
-            {t("paper.citations", { count: paper.cited_by_count })}
+            {t("common.citedBy", { count: paper.cited_by_count })}
             {citationProvider && (
               <>
                 <span className="paper-citations-source" aria-hidden="true">
-                  {` (${citationProvider})`}
+                  {` · ${citationProvider}`}
                 </span>
                 <span className="sr-only">{`, ${citationsFrom}`}</span>
               </>
             )}
           </span>
         )}
-        {sources.length > 0 && (
+        {showSources && (
           <span className="paper-sources"> — {sources.map(providerLabel).join(", ")}</span>
         )}
       </p>
+
+      {note}
 
       {preview && <p className="paper-abstract">{preview}</p>}
 

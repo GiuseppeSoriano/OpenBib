@@ -16,6 +16,8 @@ interface SearchResultCardProps {
   isDismissed: boolean;
   inLibrary: boolean;
   onOpenDetails: (key: string) => void;
+  /** A note under the meta line (a possible other version). */
+  note?: ReactNode;
   /** Version picker for grouped results, rendered inside the card. */
   children?: ReactNode;
 }
@@ -28,6 +30,7 @@ export default function SearchResultCard({
   isDismissed,
   inLibrary,
   onOpenDetails,
+  note,
   children,
 }: SearchResultCardProps) {
   const { t } = useTranslation();
@@ -104,6 +107,7 @@ export default function SearchResultCard({
       providerSources={providerSources}
       onOpenDetails={() => onOpenDetails(paper.canonical_key)}
       className={isDismissed ? "paper-card--dismissed" : ""}
+      note={note}
       headerBadges={
         <>
           {isSaved && (

@@ -51,16 +51,33 @@ describe("PaperCard", () => {
     expect(screen.getByText("A Very Important Paper")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith, Bob Jones")).toBeInTheDocument();
     expect(screen.getByText(/Journal of Tests · 2024/)).toHaveTextContent(
-      "Journal of Tests · 2024 · 12 citations (OpenAlex)",
+      "Journal of Tests · 2024 · Cited by 12 · OpenAlex",
     );
-    expect(screen.getByText(/— OpenAlex/)).toBeInTheDocument();
+    // The source list would only repeat the provider credited with the count.
+    expect(screen.queryByText(/— OpenAlex/)).toBeNull();
   });
 
   it("shows which provider the citation count comes from as visible text", () => {
     renderCard();
-    expect(screen.getByText("(OpenAlex)")).toBeVisible();
+    expect(screen.getByText("· OpenAlex")).toBeVisible();
     expect(screen.getByText(/Citation count from OpenAlex/)).toHaveClass("sr-only");
-    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("12 citations");
+    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("Cited by 12");
+  });
+
+  it("lists the sources when they add to the citation provenance", () => {
+    renderCard({ providerSources: ["openalex", "crossref"] });
+    expect(screen.getByText(/— OpenAlex, Crossref/)).toBeInTheDocument();
+  });
+
+  it("names the source when there is no citation count", () => {
+    renderCard({ paper: { ...paper, cited_by_count: null } });
+    expect(document.querySelector(".paper-meta")).toHaveTextContent("Journal of Tests · 2024 — OpenAlex");
+  });
+
+  it("renders a note under the meta line", () => {
+    renderCard({ note: <p>Possible other version</p> });
+    const note = screen.getByText("Possible other version");
+    expect(document.querySelector(".paper-meta")?.nextElementSibling).toBe(note);
   });
 
   it("previews a structured abstract without leaking markup", () => {

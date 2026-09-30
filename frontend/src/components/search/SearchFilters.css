@@ -1,0 +1,121 @@
+@layer components {
+  .search-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .search-filters-toggle {
+    align-self: flex-start;
+    min-height: var(--control-min);
+  }
+
+  .search-filters-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-sm) var(--space-lg);
+  }
+
+  .search-filters-panel[hidden] {
+    display: none;
+  }
+
+  .search-filters-years fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .search-filters-years legend,
+  .search-filters-field label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+
+  .search-filters-years legend {
+    padding: 0;
+    margin-bottom: var(--space-xs);
+  }
+
+  .search-filters-year-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-sm);
+  }
+
+  .search-filters-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+  }
+
+  .search-filters-field .input,
+  .search-filters-apply,
+  .search-filters-oa {
+    min-height: var(--control-min);
+  }
+
+  .search-filters-year .input {
+    width: 6.5rem;
+  }
+
+  .search-filters-sort {
+    flex: 0 1 12rem;
+  }
+
+  .search-filters-error {
+    margin-top: var(--space-xs);
+    font-size: 0.78rem;
+    color: var(--color-danger);
+  }
+
+  .search-filters-hint {
+    flex-basis: 100%;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+
+  .search-filters-active {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+
+  .search-filters-reset {
+    min-height: var(--control-min);
+    padding-inline: var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--color-accent);
+  }
+
+  @media (max-width: 639px), (max-height: 500px) {
+    .search-filters-panel {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .search-filters-year {
+      flex: 1 1 6rem;
+    }
+
+    .search-filters-year .input {
+      width: 100%;
+    }
+
+    .search-filters-sort {
+      flex-basis: auto;
+    }
+
+    .search-filters-oa {
+      align-self: flex-start;
+    }
+  }
+}

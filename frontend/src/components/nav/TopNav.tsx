@@ -34,6 +34,9 @@ export default function TopNav() {
             key={to}
             to={to}
             end={end}
+            // From a search, Search reopens it (SearchPage restores the last
+            // search) without a duplicate history entry.
+            replace={(to === "/search" && location.pathname === "/search") || undefined}
             className={({ isActive }) =>
               `topnav-link ${isActive ? "topnav-link--active" : ""}`
             }

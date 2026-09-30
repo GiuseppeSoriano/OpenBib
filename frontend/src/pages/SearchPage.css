@@ -5,6 +5,17 @@
     gap: var(--space-md);
   }
 
+  .search-header h1 {
+    font-family: var(--font-serif);
+    font-size: 1.35rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .search-header h1:focus {
+    outline: none;
+  }
+
   /* Sticky compact search bar directly under the navbar */
   .search-bar {
     position: sticky;
@@ -33,22 +44,26 @@
 
   .search-input {
     padding-left: 38px;
+    padding-right: calc(var(--control-min) + var(--space-sm));
     padding-top: 0.55rem;
     padding-bottom: 0.55rem;
     font-size: 0.92rem;
   }
 
-  .search-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
+  .search-clear {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    padding: 0;
   }
 
-  .search-meta {
-    font-size: 0.8rem;
-    color: var(--color-text-secondary);
+  .search-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
   }
 
   .search-pills {
@@ -61,6 +76,35 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
+  }
+
+  /* The card wrapper takes focus when a possible other version is shown;
+     keep it clear of the sticky nav and search bar. */
+  .search-result {
+    border-radius: var(--radius-md);
+    scroll-margin-top: calc(var(--nav-height) + 4rem);
+  }
+
+  .search-result:focus {
+    outline: none;
+  }
+
+  .search-result:focus-visible > .card,
+  .search-result--highlight > .card {
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
+  }
+
+  .search-result > .card {
+    transition:
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .search-result > .card {
+      transition: none;
+    }
   }
 
   .dismiss-btn {

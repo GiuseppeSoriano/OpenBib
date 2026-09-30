@@ -1,0 +1,26 @@
+@layer components {
+  .search-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+  }
+
+  .search-status-text {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+
+  .search-status--error .search-status-text {
+    font-size: 0.875rem;
+    color: var(--color-danger);
+  }
+
+  .search-status-note {
+    color: var(--color-warning);
+  }
+
+  .search-status .btn {
+    min-height: var(--control-min);
+  }
+}

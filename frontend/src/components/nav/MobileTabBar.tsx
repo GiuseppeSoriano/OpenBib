@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BookMarked, FolderOpen, LayoutDashboard, Search } from "lucide-react";
 
@@ -12,6 +12,7 @@ const TABS = [
 /** Bottom tab bar — the primary navigation on phones (<640px). */
 export default function MobileTabBar() {
   const { t } = useTranslation();
+  const location = useLocation();
 
   return (
     <nav className="tabbar" aria-label={t("nav.primary")}>
@@ -20,6 +21,8 @@ export default function MobileTabBar() {
           key={to}
           to={to}
           end={end}
+          // From a search, Search reopens it without a duplicate history entry.
+          replace={(to === "/search" && location.pathname === "/search") || undefined}
           className={({ isActive }) => `tabbar-link ${isActive ? "tabbar-link--active" : ""}`}
         >
           <Icon size={20} />
