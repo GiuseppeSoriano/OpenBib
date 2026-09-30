@@ -125,5 +125,31 @@ services:
     depends_on:
       - api
 
+  # ── Database backups (opt-in: --profile backup) ────────
+  # Scheduled, verified pg_dump into the pgbackups volume with
+  # retention; local copies only. Encryption, off-host copies
+  # and restore: docs/Operations/Backups.md.
+  backup:
+    image: postgres:16-alpine
+    profiles: ["backup"]
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-openbib}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-openbib}
+      PGDATABASE: ${POSTGRES_DB:-openbib}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_ENCRYPTION_KEY_FILE: ${BACKUP_ENCRYPTION_KEY_FILE:-}
+      BACKUP_REQUIRE_ENCRYPTION: ${BACKUP_REQUIRE_ENCRYPTION:-false}
+    volumes:
+      - pgbackups:/backups
+      - ./tools/backup/pg_backup.sh:/usr/local/bin/pg_backup.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/pg_backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  pgbackups:
