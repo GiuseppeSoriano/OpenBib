@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { PaperMetadata } from "@/types";
 
 const PROVIDER_LABELS: Record<string, string> = {
+  semantic_scholar: "Semantic Scholar",
   openalex: "OpenAlex",
   crossref: "Crossref",
   arxiv: "arXiv",

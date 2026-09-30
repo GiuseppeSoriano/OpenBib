@@ -23,8 +23,9 @@ from app.papers.models import (
     UserPaperTag,
 )
 from app.papers.schemas import PaperMetadataRead
-from app.providers.base import PaperMetadata
+from app.providers.base import Author, PaperMetadata
 from app.providers.base import SearchResult as ProviderSearchResult
+from app.providers.identity import deduplicate, normalize_arxiv, normalize_doi
 
 
 def _version_number(version: str | None) -> int:
@@ -71,6 +72,7 @@ def cached_paper_to_read(row: CachedPaperMetadata) -> PaperMetadataRead:
             "pmid": row.pmid,
             "pmcid": row.pmcid,
             "openalex_id": row.openalex_id,
+            "semantic_scholar_id": row.semantic_scholar_id,
             "venue": row.venue,
             "volume": row.volume,
             "issue": row.issue,
@@ -90,19 +92,36 @@ def cached_paper_to_read(row: CachedPaperMetadata) -> PaperMetadataRead:
     )
 
 
-async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
+async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> list[PaperMetadata]:
+    """Upsert by strong identity without renaming keys already used by saved data.
+
+    A later DOI may enrich an S2-only snapshot. Keep its durable key, and resolve
+    both aliases in get_cached_paper; never orphan library pins, notes or edges.
+    """
+    papers = deduplicate(papers)
     if not papers:
-        return
-
-    existing_rows = await db.execute(
-        select(CachedPaperMetadata).where(
-            CachedPaperMetadata.canonical_key.in_([paper.canonical_key for paper in papers])
-        )
-    )
-    existing = {row.canonical_key: row for row in existing_rows.scalars().all()}
-
+        return []
+    clauses = [CachedPaperMetadata.canonical_key.in_([p.canonical_key for p in papers])]
+    for field in ("semantic_scholar_id", "doi", "arxiv_id", "pmid", "pmcid"):
+        values = [getattr(p, field) for p in papers if getattr(p, field)]
+        if values:
+            clauses.append(getattr(CachedPaperMetadata, field).in_(values))
+    rows = list((await db.execute(select(CachedPaperMetadata).where(or_(*clauses)))).scalars())
+    stored = []
     for paper in papers:
-        row = existing.get(paper.canonical_key)
+        row = None
+        for candidate in sorted(rows, key=lambda r: r.canonical_key):
+            data = cached_paper_to_read(candidate).model_dump()
+            data["authors"] = [Author(**author) for author in data["authors"]]
+            combined = deduplicate([PaperMetadata(**data), paper])
+            if len(combined) == 1:
+                row = candidate
+                paper = combined[0]
+                paper.canonical_key = row.canonical_key
+                # Group keys anchor notes/tags. Preserve the existing anchor.
+                paper.paper_group_key = row.paper_group_key
+                break
+        stored.append(paper)
         incoming_sources = _provider_sources_for(paper)
         payload = {
             "paper_group_key": paper.paper_group_key,
@@ -115,6 +134,7 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
             "pmid": paper.pmid,
             "pmcid": paper.pmcid,
             "openalex_id": paper.openalex_id,
+            "semantic_scholar_id": paper.semantic_scholar_id,
             "venue": paper.venue,
             "volume": paper.volume,
             "issue": paper.issue,
@@ -137,8 +157,7 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
                 **payload,
             )
             db.add(row)
-            # A repeated key later in the same call merges into this row.
-            existing[paper.canonical_key] = row
+            rows.append(row)
             continue
         for field_name, value in payload.items():
             setattr(row, field_name, value)
@@ -150,10 +169,31 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> None:
         db.add(row)
 
     await db.flush()
+    return stored
 
 
 async def get_cached_paper(db: AsyncSession, canonical_key: str) -> CachedPaperMetadata | None:
-    return await db.get(CachedPaperMetadata, canonical_key)
+    row = await db.get(CachedPaperMetadata, canonical_key)
+    if row is not None:
+        return row
+    prefix, _, value = canonical_key.partition(":")
+    fields = {
+        "s2": "semantic_scholar_id",
+        "doi": "doi",
+        "arxiv": "arxiv_id",
+        "pmid": "pmid",
+        "pmcid": "pmcid",
+    }
+    if prefix not in fields:
+        return None
+    value = {"doi": normalize_doi, "arxiv": normalize_arxiv}.get(prefix, str.strip)(value)
+    result = await db.execute(
+        select(CachedPaperMetadata)
+        .where(getattr(CachedPaperMetadata, fields[prefix]) == value)
+        .order_by(CachedPaperMetadata.canonical_key)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_cached_papers_by_group(
@@ -202,11 +242,12 @@ async def resolve_identifier(db: AsyncSession, parsed: ParsedIdentifier) -> Reso
 
     from app.providers import registry
 
-    lookup = await registry.resolve_doi(parsed.doi)
+    lookup = await registry.resolve_doi(parsed.doi, confirm_missing=False)
     if lookup.paper is None:
         return ResolvedPaper(lookup.status)
-    await cache_papers(db, [lookup.paper])
-    return ResolvedPaper("found", await get_cached_paper(db, lookup.paper.canonical_key))
+    # The upsert may keep an older key for the same work (alias merge).
+    stored = (await cache_papers(db, [lookup.paper]))[0]
+    return ResolvedPaper("found", await get_cached_paper(db, stored.canonical_key))
 
 
 async def _detail_from_row(db: AsyncSession, row: CachedPaperMetadata) -> dict:
@@ -227,7 +268,8 @@ async def get_paper_detail(
     db: AsyncSession, canonical_key: str, *, allow_lookup: bool = True
 ) -> dict:
     """Hydrate a single paper from the durable metadata snapshot, falling
-    back to a live DOI lookup (which upserts the snapshot) on a cache miss.
+    back to a live stable-identifier lookup (which upserts the snapshot) on a
+    cache miss.
 
     The key is normalized first, so a bare DOI or a DOI link resolves too.
     hash:-keyed papers with no cached row cannot be re-fetched and 404.
@@ -240,6 +282,13 @@ async def get_paper_detail(
         if DOI_RE.fullmatch(doi):
             parsed = ParsedIdentifier(kind="doi", canonical_key=key, doi=doi, raw=canonical_key)
             row = (await resolve_identifier(db, parsed)).row
+    elif row is None and allow_lookup and key.startswith(("s2:", "arxiv:", "pmid:", "pmcid:")):
+        from app.providers import registry
+
+        paper = await registry.lookup_by_id(key)
+        if paper is not None:
+            stored = (await cache_papers(db, [paper]))[0]
+            row = await get_cached_paper(db, stored.canonical_key)
 
     if row is None:
         raise NotFoundError(f"Paper not found: {key}")
@@ -258,10 +307,27 @@ async def get_cached_papers_by_keys(
     return {row.canonical_key: row for row in result.scalars().all()}
 
 
+async def get_cached_papers_by_dois(
+    db: AsyncSession, dois: set[str]
+) -> dict[str, CachedPaperMetadata]:
+    """Batched DOI-alias half of ``get_cached_paper``: per normalized DOI, the
+    row with the lowest canonical key, whatever key it is stored under."""
+    if not dois:
+        return {}
+    result = await db.execute(
+        select(CachedPaperMetadata)
+        .where(CachedPaperMetadata.doi.in_(dois))
+        .order_by(CachedPaperMetadata.canonical_key)
+    )
+    found: dict[str, CachedPaperMetadata] = {}
+    for row in result.scalars().all():
+        found.setdefault(row.doi, row)
+    return found
+
+
 def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchResult:
-    """Interleave provider results round-robin by rank, deduplicate by
-    canonical_key (keeping the earliest-position occurrence), and union
-    provider_sources on each kept paper.
+    """Interleave provider results by rank, merge strong identity aliases and
+    complementary metadata, retaining the first result position.
 
     Returns a synthetic SearchResult whose `.papers` preserves the merged
     order, `.providers` is the list of provider names that contributed,
@@ -280,22 +346,14 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         )
 
     streams = [r.papers for r in results]
-    seen: dict[str, PaperMetadata] = {}
-    ordered: list[PaperMetadata] = []
-
-    for round_papers in zip_longest(*streams):
-        for paper in round_papers:
-            if paper is None:
-                continue
-            if paper.canonical_key in seen:
-                existing = seen[paper.canonical_key]
-                sources = set(_provider_sources_for(existing))
-                sources.update(_provider_sources_for(paper))
-                existing.provider_sources = sorted(sources)
-                continue
-            paper.provider_sources = sorted(set(_provider_sources_for(paper)))
-            seen[paper.canonical_key] = paper
-            ordered.append(paper)
+    ordered = deduplicate(
+        [
+            paper
+            for round_papers in zip_longest(*streams)
+            for paper in round_papers
+            if paper is not None
+        ]
+    )
 
     raw_total = sum(len(r.papers) for r in results)
     provider_names = [r.provider for r in results if r.provider]
@@ -307,6 +365,7 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         page_size=results[0].page_size,
         provider="+".join(provider_names),
         providers=provider_names,
+        has_more=any(result.has_more for result in results),
     )
 
 
@@ -361,6 +420,7 @@ def build_search_response(result: ProviderSearchResult) -> dict:
         "items": items,
         "total_count": len(items),
         "raw_total_count": result.total_count,
+        "has_more": result.has_more,
         "page": result.page,
         "page_size": result.page_size,
         "providers": providers_list,

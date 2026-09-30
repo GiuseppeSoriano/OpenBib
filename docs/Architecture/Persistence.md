@@ -25,7 +25,7 @@ of the metadata for every paper a user has actually touched.
 | Table | Contents | Key |
 |-------|----------|-----|
 | `users` | Account, Argon2id password hash, display name | `id` (UUID) |
-| `collections` | Name, description, visibility (`private/shared/public`) | `id` (UUID) |
+| `collections` | Name, description, revision, encrypted revocable read link | `id` (UUID) |
 | `collection_members` | Collaboration roles (`owner/editor/viewer`) | `(collection_id, user_id)` |
 | `collection_papers` | Specific paper *versions* saved in a collection | `(collection_id, paper_canonical_key)` |
 | `user_library_entries` | One row per logical paper in the user's library; anchors notes/tags | `(user_id, paper_group_key)` |
@@ -158,3 +158,5 @@ everyone without touching any user's data.
 - Zotero credentials now use versioned AES-256-GCM ciphertext. The encryption migration removes plaintext transactionally; see [Security](../Security.md).
 - Periodic refresh policy for stale `cached_paper_metadata` rows
   (citation counts age; a lightweight re-fetch on read after N days).
+
+Collection authorization and capability lifecycle: [Collection sharing](CollectionSharing.md).

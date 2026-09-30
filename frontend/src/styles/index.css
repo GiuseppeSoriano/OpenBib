@@ -743,6 +743,22 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* Shared list feedback: a failed query's retry and the "Show more" row. */
+  .query-feedback,
+  .load-more {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: var(--space-md);
+    margin-block: var(--space-lg);
+  }
+
+  .query-feedback .btn,
+  .load-more .btn {
+    min-height: var(--control-min);
+  }
 }
 
 .auth-loading { padding-top: 2rem; }

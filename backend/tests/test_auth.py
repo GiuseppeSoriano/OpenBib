@@ -1,14 +1,12 @@
 """Authentication, cookie, replay, and account lifecycle regression tests."""
 
-import json
 import uuid
 from datetime import timedelta
 
-import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from app.auth.models import AuthSession, EmailOutbox
+from app.auth.models import AuthSession
 from app.auth.service import (
     active_session,
     consume_action_token,
@@ -23,9 +21,6 @@ from app.auth.service import (
     verify_access_token,
     verify_password,
 )
-from app.common.crypto import EncryptedValue, keyring
-from app.dependencies import get_db
-from app.main import create_app
 from app.users.models import User
 
 PASSWORD = "correct horse battery staple"
@@ -43,22 +38,6 @@ async def user_for_test(db):
     db.add(user)
     await db.flush()
     return user
-
-
-@pytest.fixture
-def client_app(db):
-    app = create_app()
-
-    async def dependency():
-        try:
-            yield db
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
-
-    app.dependency_overrides[get_db] = dependency
-    return app
 
 
 def test_password_and_required_jwt_claims():
@@ -135,47 +114,22 @@ async def test_http_replay_persists_revocation_and_clears_cookie(db, client_app)
     assert all(row.revoked_at is not None for row in rows)
 
 
-async def test_registration_verification_and_no_overwrite(db, client_app):
-    email = "new@example.com"
-    body = {
-        "email": email.upper(),
-        "password": PASSWORD,
-        "display_name": "New reader",
-        "locale": "it",
-        "accept_terms": True,
-        "terms_version": "dev-1",
-        "privacy_version": "dev-1",
-    }
+async def test_legacy_registration_endpoints_are_retired(db, client_app):
+    user = await user_for_test(db)
+    user.email_verified_at = None
+    old_hash = user.password_hash
+    token = await create_action_token(db, user.id, "verify_email", timedelta(hours=24))
     async with AsyncClient(
         transport=ASGITransport(app=client_app), base_url="http://testserver"
     ) as client:
-        registered = await client.post("/api/v1/auth/register", json=body)
-        assert registered.status_code == 202
-        again = await client.post(
-            "/api/v1/auth/register", json={**body, "password": "malicious replacement password"}
-        )
-        assert again.json() == registered.json()
-        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
-        assert verify_password(PASSWORD, user.password_hash)
-        outbox = (
-            await db.execute(select(EmailOutbox).where(EmailOutbox.user_id == user.id))
-        ).scalar_one()
-        payload = keyring.decrypt(
-            EncryptedValue(outbox.payload_ciphertext, outbox.payload_nonce, outbox.key_version),
-            purpose="email",
-            aad=f"email:{outbox.user_id}:{outbox.id}",
-        )
-        assert b"token=" not in outbox.payload_ciphertext
-        token = json.loads(payload)["body"].split("#token=")[1]
-        verified = await client.post(
-            "/api/v1/auth/verify-email", json={"token": token, "new_password": PASSWORD}
-        )
-        assert verified.status_code == 200
-        assert (
-            await client.post(
-                "/api/v1/auth/verify-email", json={"token": token, "new_password": PASSWORD}
-            )
-        ).status_code == 400
+        for path, body in [
+            ("register", {"email": user.email, "password": PASSWORD}),
+            ("verify-email", {"token": token, "new_password": "attacker chosen password"}),
+            ("email/resend", {"email": user.email}),
+        ]:
+            assert (await client.post("/api/v1/auth/" + path, json=body)).status_code == 410
+    await db.refresh(user)
+    assert user.email_verified_at is None and user.password_hash == old_hash
 
 
 async def test_export_excludes_secrets_and_reset_revokes(db, client_app):

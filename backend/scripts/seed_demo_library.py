@@ -219,9 +219,7 @@ async def _collection(db: AsyncSession, user: User, name: str, counts: Counter[s
     )
     coll = result.scalars().first()
     if coll is None:
-        coll = Collection(
-            owner_id=user.id, name=name, description=SEED_MARKER, visibility="private"
-        )
+        coll = Collection(owner_id=user.id, name=name, description=SEED_MARKER)
         db.add(coll)
         await db.flush()
         db.add(CollectionMember(collection_id=coll.id, user_id=user.id, role="owner"))

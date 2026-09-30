@@ -109,6 +109,7 @@ async def test_related_page_raises_on_timeouts(provider):
         await provider.related_page("W1", filter_key="cites", sort="x")
 
 
+@pytest.mark.skip(reason="integration: ported in WP1")
 @pytest.mark.asyncio
 @respx.mock
 async def test_registry_maps_direction_and_order_to_openalex(monkeypatch):

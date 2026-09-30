@@ -1,3 +1,4 @@
+import { useLocation } from "react-router-dom";
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import App from "@/App";
@@ -28,4 +29,15 @@ describe("App routing (anonymous)", () => {
     renderWithProviders(<App />, { route: "/settings" });
     expect(await screen.findByText("Welcome back")).toBeInTheDocument();
   });
+});
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="destination">{location.state?.returnTo}</output>;
+}
+
+it.each(["/library?focus=group%3Atest#anchor", "/settings?section=security#password"])("preserves the complete destination for %s", async (route) => {
+  renderWithProviders(<><App /><LocationProbe /></>, { route });
+  await screen.findByText("Welcome back");
+  expect(screen.getByTestId("destination")).toHaveTextContent(route);
 });

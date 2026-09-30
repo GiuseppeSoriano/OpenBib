@@ -195,6 +195,7 @@
   .app-footer a {
     display: inline-flex;
     align-items: center;
+    gap: var(--space-xs);
     min-height: var(--touch-target);
     padding-inline: var(--space-sm);
     border-radius: var(--radius-sm);

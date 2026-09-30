@@ -15,7 +15,7 @@ from app.providers import registry
 
 
 def _cached(
-    key: str, group: str, title: str, openalex_id: str | None = None
+    key: str, group: str, title: str, semantic_scholar_id: str | None = None
 ) -> CachedPaperMetadata:
     return CachedPaperMetadata(
         canonical_key=key,
@@ -24,8 +24,8 @@ def _cached(
         authors_json=[],
         topics_json=[],
         keywords_json=[],
-        openalex_id=openalex_id,
-        provider_source="openalex",
+        semantic_scholar_id=semantic_scholar_id,
+        provider_source="semantic_scholar",
     )
 
 
@@ -33,20 +33,20 @@ def _cached(
 async def test_base_graph_links_intra_set_via_references(db, monkeypatch):
     db.add_all(
         [
-            _cached("doi:a", "group:a", "Paper A", openalex_id="https://openalex.org/WA"),
-            _cached("doi:b", "group:b", "Paper B", openalex_id="https://openalex.org/WB"),
+            _cached("doi:a", "group:a", "Paper A", semantic_scholar_id="WA"),
+            _cached("doi:b", "group:b", "Paper B", semantic_scholar_id="WB"),
         ]
     )
     await db.flush()
 
-    async def fake_refs(openalex_id):
+    async def fake_refs(semantic_scholar_id):
         # A references B (A cites B); B references nothing in the set.
         return {
-            "https://openalex.org/WA": ["https://openalex.org/WB"],
-            "https://openalex.org/WB": [],
-        }.get(openalex_id, [])
+            "WA": ["WB"],
+            "WB": [],
+        }.get(semantic_scholar_id, [])
 
-    monkeypatch.setattr(registry, "get_openalex_reference_ids", fake_refs)
+    monkeypatch.setattr(registry, "get_reference_ids", fake_refs)
 
     res = await graph_service.build_base_graph(db, None, ["doi:a", "doi:b"])
 

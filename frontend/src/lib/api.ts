@@ -99,13 +99,13 @@ export const zotero = {
   async getStatus() { return (await api.get<ZoteroStatus>("/zotero/credentials")).data; },
   async setCredentials(apiKey: string) { return (await api.put<ZoteroStatus>("/zotero/credentials", { api_key: apiKey })).data; },
   async deleteCredentials() { await api.delete("/zotero/credentials"); },
-  async syncCollection(collectionId: string) { return (await api.post<ZoteroSyncReport>(`/zotero/sync/collection/${collectionId}`)).data; },
+  async syncCollection(collectionId: string, headers: Record<string, string> = {}) { return (await api.post<ZoteroSyncReport>(`/zotero/sync/collection/${collectionId}`, undefined, { headers })).data; },
   async syncLibrary() { return (await api.post<ZoteroSyncReport>("/zotero/sync/library")).data; },
 };
 
 export const graph = {
   async buildPaper(paperKey: string) { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`)).data; },
-  async buildCollection(collectionId: string) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`)).data; },
+  async buildCollection(collectionId: string, headers: Record<string, string> = {}) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { headers })).data; },
   async buildLibrary() { return (await api.get<GraphResponse>("/graph/library")).data; },
   async related(body: RelatedRangeRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<RelatedRangeResponse>("/graph/related", body, { signal: options.signal })).data; },
   async topUp(body: TopUpRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<TopUpResponse>("/graph/related/top-up", body, { signal: options.signal })).data; },

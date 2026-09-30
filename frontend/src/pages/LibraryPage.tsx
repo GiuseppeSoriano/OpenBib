@@ -16,6 +16,7 @@ import type { LibraryEntryListItem, ZoteroSyncReport } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
+import QueryError from "@/components/ui/QueryError";
 import PaperCard from "@/components/paper/PaperCard";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
@@ -242,15 +243,19 @@ export default function LibraryPage() {
         ))}
       </div>
 
-      {entriesQuery.hasNextPage && (
-        <div className="library-more">
+      {entriesQuery.isFetchNextPageError && (
+        <QueryError busy={entriesQuery.isFetching} onRetry={() => void entriesQuery.fetchNextPage()} />
+      )}
+
+      {entriesQuery.hasNextPage && !entriesQuery.isFetchNextPageError && (
+        <div className="load-more">
           <button
             type="button"
             className="btn btn-secondary"
             onClick={() => void entriesQuery.fetchNextPage()}
             disabled={entriesQuery.isFetchingNextPage}
           >
-            {entriesQuery.isFetchingNextPage ? t("common.loading") : t("common.loadMore")}
+            {entriesQuery.isFetchingNextPage ? t("common.loading") : t("common.showMore")}
           </button>
         </div>
       )}

@@ -238,35 +238,36 @@ async def _resolve_read(db: AsyncSession, canonical_key: str) -> PaperMetadataRe
     return _fallback_paper(canonical_key)
 
 
-async def _resolve_openalex_id(db: AsyncSession, paper: PaperMetadataRead) -> str | None:
-    """OpenAlex work id for a paper, looking it up by DOI (and caching) if the
-    cached metadata doesn't already carry one. Returns None for papers we can't
-    map (e.g. hash-only keys with no DOI) — callers degrade gracefully."""
-    if paper.openalex_id:
-        return paper.openalex_id
-    if paper.doi:
-        meta = await registry.lookup_by_doi(paper.doi)
+async def _resolve_graph_id(db: AsyncSession, paper: PaperMetadataRead) -> str | None:
+    if paper.semantic_scholar_id:
+        return paper.semantic_scholar_id
+    identifier = registry.paper_identifier(paper)
+    if identifier:
+        meta = await registry.lookup_by_id(identifier)
         if meta is not None:
             await paper_service.cache_papers(db, [meta])
-            return meta.openalex_id
+            paper.semantic_scholar_id = meta.semantic_scholar_id
+            return meta.semantic_scholar_id
     return None
 
 
 async def _fetch_referenced_ids(
     db: AsyncSession, redis: aioredis.Redis | None, paper: PaperMetadataRead
 ) -> set[str]:
-    """OpenAlex ids referenced by ``paper`` (i.e. papers it cites), Redis-cached."""
-    openalex_id = await _resolve_openalex_id(db, paper)
-    if not openalex_id:
+    """Graph authority IDs referenced by ``paper`` (i.e. papers it cites), Redis-cached."""
+    graph_id = await _resolve_graph_id(db, paper)
+    if not graph_id:
         return set()
     if redis is not None:
-        cached = await provider_cache.cache_get(redis, "openalex", "references", openalex_id)
+        cached = await provider_cache.cache_get(
+            redis, registry.CACHE_NAMESPACE, "references", "ids:" + graph_id
+        )
         if cached is not None:
             return set(cached)
-    ids = await registry.get_openalex_reference_ids(openalex_id)
+    ids = await registry.get_reference_ids(graph_id)
     if redis is not None:
         await provider_cache.cache_set(
-            redis, "openalex", "references", openalex_id, sorted(set(ids))
+            redis, registry.CACHE_NAMESPACE, "references", "ids:" + graph_id, sorted(set(ids))
         )
     return set(ids)
 
@@ -274,6 +275,7 @@ async def _fetch_referenced_ids(
 async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
     """Canonical keys the user has saved (library version pins + collection
     papers). Used to decide which discovered edges are durable enough to store."""
+    from app.collections.access import accessible_to
     from app.collections.models import Collection, CollectionPaper
     from app.library.models import UserLibraryVersion
 
@@ -285,7 +287,7 @@ async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]
     coll = await db.execute(
         select(CollectionPaper.paper_canonical_key)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .where(Collection.owner_id == user_id)
+        .where(accessible_to(user_id))
     )
     keys.update(row[0] for row in coll.all())
     return keys
@@ -323,7 +325,7 @@ async def build_base_graph(
 ) -> GraphResponse:
     """Graph of a set of saved papers + the citation edges *among them*.
 
-    Edges come from each seed's OpenAlex ``referenced_works`` intersected with
+    Edges come from each seed's references at the graph authority intersected with
     the seed set (complete and bounded). Intra-set edges are persisted so the
     next open is fast.
     """
@@ -364,19 +366,23 @@ async def build_base_graph(
         return paper
 
     seed_papers = [await ensure_node(key) for key in seed_keys]
+    # Edges only link two seed groups: a one-group graph needs no provider call.
+    edge_seeds = seed_papers if len(nodes) > 1 else []
 
-    openalex_to_group: dict[str, str] = {
-        p.openalex_id: p.paper_group_key for p in seed_papers if p.openalex_id
-    }
+    graph_to_group: dict[str, str] = {}
+    for paper in edge_seeds:
+        graph_id = await _resolve_graph_id(db, paper)
+        if graph_id:
+            graph_to_group[graph_id] = paper.paper_group_key
 
     edges: set[tuple[str, str, str]] = set()
     edges_to_store: list[dict] = []
-    for paper in seed_papers:
-        if not paper.openalex_id:
+    for paper in edge_seeds:
+        if not paper.semantic_scholar_id:
             continue
         ref_ids = await _fetch_referenced_ids(db, redis, paper)
         for ref_id in ref_ids:
-            cited_group = openalex_to_group.get(ref_id)
+            cited_group = graph_to_group.get(ref_id)
             if cited_group is None or cited_group == paper.paper_group_key:
                 continue
             edges.add((paper.paper_group_key, cited_group, CITED_BY))
@@ -387,7 +393,7 @@ async def build_base_graph(
                         "source_key": paper.canonical_key,
                         "target_key": cited_node.selected_version.canonical_key,
                         "relation_type": CITED_BY,
-                        "provider_source": "openalex",
+                        "provider_source": registry.PRIMARY_PROVIDER,
                     }
                 )
     if edges_to_store:

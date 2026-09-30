@@ -1,12 +1,14 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, GitFork, Loader2, RotateCcw } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, GitFork, Loader2, Lock, RotateCcw } from "lucide-react";
 import EmptyState from "@/components/ui/EmptyState";
 import { apiStatus, retryAfterSeconds } from "@/lib/apiError";
 
 type GraphBaseStateProps =
   | { status: "loading" }
   | { status: "empty"; description: string }
+  | { status: "unavailable"; backTo: string }
   | { status: "error"; error: unknown; retrying?: boolean; onRetry: () => void };
 
 /** Status-specific copy for a failed base graph. */
@@ -19,8 +21,9 @@ export function baseErrorMessage(error: unknown, t: TFunction): string {
 }
 
 /**
- * The canvas area before a base graph is ready: loading, empty, or a
- * specific error with Retry. The page header stays rendered around it.
+ * The canvas area before a base graph is ready: loading, empty, a shared
+ * collection that is no longer readable, or a specific error with Retry.
+ * The page header stays rendered around it.
  */
 export default function GraphBaseState(props: GraphBaseStateProps) {
   const { t } = useTranslation();
@@ -39,6 +42,22 @@ export default function GraphBaseState(props: GraphBaseStateProps) {
     return (
       <div className="graph-base-state">
         <EmptyState icon={GitFork} title={t("graph.title")} description={props.description} />
+      </div>
+    );
+  }
+
+  if (props.status === "unavailable") {
+    return (
+      <div className="graph-base-state" role="alert">
+        <EmptyState
+          icon={Lock}
+          title={t("sharing.unavailable")}
+          action={
+            <Link to={props.backTo} className="btn btn-secondary graph-btn">
+              {t("graph.backToCollection")}
+            </Link>
+          }
+        />
       </div>
     );
   }

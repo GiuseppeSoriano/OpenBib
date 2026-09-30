@@ -1,80 +1,93 @@
-"""Provider registry — fallback chain and multi-provider orchestration."""
+"""Explicit provider enablement, lazy construction and application operations.
 
-from __future__ import annotations
+The catalog retains inactive adapters without importing or constructing them.
+Adding a catalog entry does not enable it: enablement and graph authority are
+separate decisions. Request parameters can only narrow the enabled set.
+"""
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from importlib import import_module
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
 
 from app.config import settings
-from app.providers.arxiv import ArxivProvider
-from app.providers.base import (
-    AuthorMetadata,
-    PaperMetadata,
-    PaperReference,
-    ProviderCapability,
-    SearchFilters,
-    SearchResult,
-)
-from app.providers.crossref import CrossrefProvider
-from app.providers.europepmc import EuropePMCProvider
-from app.providers.openalex import OpenAlexProvider, RelatedPage
-
-if TYPE_CHECKING:
-    from app.providers.base import BaseProvider
+from app.providers.base import BaseProvider, PaperMetadata, SearchFilters, SearchResult
+from app.providers.semantic_scholar import ProviderError
 
 logger = logging.getLogger(__name__)
 
-# Singleton instances
-_openalex = OpenAlexProvider()
-_crossref = CrossrefProvider()
-_arxiv = ArxivProvider()
-_europepmc = EuropePMCProvider()
-
-# Fallback chains per operation
-LOOKUP_DOI_CHAIN: list[BaseProvider] = [_openalex, _crossref, _europepmc]
-LOOKUP_ARXIV_CHAIN: list[BaseProvider] = [_arxiv, _openalex]
-LOOKUP_PMID_CHAIN: list[BaseProvider] = [_europepmc, _openalex]
-REFERENCES_CHAIN: list[BaseProvider] = [_openalex, _crossref, _europepmc]
-CITATIONS_CHAIN: list[BaseProvider] = [_openalex, _europepmc]
-
-# All providers by name
-_PROVIDERS: dict[str, BaseProvider] = {
-    "openalex": _openalex,
-    "crossref": _crossref,
-    "arxiv": _arxiv,
-    "europepmc": _europepmc,
+PROVIDER_FACTORIES = {
+    "semantic_scholar": ("app.providers.semantic_scholar", "SemanticScholarProvider"),
+    "openalex": ("app.providers.openalex", "OpenAlexProvider"),
+    "crossref": ("app.providers.crossref", "CrossrefProvider"),
+    "arxiv": ("app.providers.arxiv", "ArxivProvider"),
+    "europepmc": ("app.providers.europepmc", "EuropePMCProvider"),
 }
+ENABLED_PROVIDERS = ("semantic_scholar",)
+PRIMARY_PROVIDER = ENABLED_PROVIDERS[0]
+# Version all derived caches to avoid serving pre-refactor fanout/graph results.
+CACHE_NAMESPACE = "papers-v3:" + "+".join(ENABLED_PROVIDERS)
+_instances: dict[str, BaseProvider] = {}
 
 
-def get_provider(name: str) -> BaseProvider | None:
-    return _PROVIDERS.get(name)
+def selected_provider_names(names: list[str] | None = None) -> list[str]:
+    requested = list(dict.fromkeys(names if names is not None else ENABLED_PROVIDERS))
+    if not requested or any(name not in ENABLED_PROVIDERS for name in requested):
+        raise ProviderError("Requested paper provider is not enabled.", 422)
+    return requested
+
+
+def get_provider(name: str = PRIMARY_PROVIDER) -> BaseProvider:
+    selected_provider_names([name])
+    if name not in _instances:
+        module, factory = PROVIDER_FACTORIES[name]
+        _instances[name] = getattr(import_module(module), factory)()
+    return _instances[name]
+
+
+async def close_providers() -> None:
+    global _handle_client
+    for provider in _instances.values():
+        await provider.close()
+    _instances.clear()
+    if _handle_client is not None:
+        await _handle_client.aclose()
+        _handle_client = None
 
 
 @dataclass
 class DoiLookup:
-    """Outcome of resolving a DOI. ``not_found`` is definitive (every provider
+    """Outcome of resolving a DOI. ``not_found`` is definitive (the provider
     answered with a miss and doi.org does not know the handle); any failure,
-    timeout or registered-but-undescribed DOI is ``unavailable``."""
+    timeout or registered-but-undescribed DOI is ``unavailable``, carrying the
+    provider's ``Retry-After`` seconds when it sent one."""
 
     status: Literal["found", "not_found", "unavailable"]
     paper: PaperMetadata | None = None
+    retry_after: int | None = None
 
 
-_handle_client = httpx.AsyncClient(base_url="https://doi.org", timeout=5)
+# Test override for the DOI resolution chain; ``None`` means the primary provider.
+LOOKUP_DOI_CHAIN: list[BaseProvider] | None = None
+_handle_client: httpx.AsyncClient | None = None
+
+
+def _handle() -> httpx.AsyncClient:
+    global _handle_client
+    if _handle_client is None:
+        _handle_client = httpx.AsyncClient(base_url="https://doi.org", timeout=5)
+    return _handle_client
 
 
 async def doi_handle_exists(doi: str) -> bool | None:
-    """Ask the doi.org handle API whether the DOI is registered at all.
-    ``None`` means the check itself failed."""
+    """Ask the doi.org handle API whether the DOI is registered at all. It
+    never fetches metadata. ``None`` means the check itself failed."""
     try:
-        resp = await _handle_client.get(
-            f"/api/handles/{quote(doi, safe='/')}", params={"type": "URL"}
-        )
+        resp = await _handle().get(f"/api/handles/{quote(doi, safe='/')}", params={"type": "URL"})
     except httpx.HTTPError:
         logger.warning("DOI handle check failed", exc_info=True)
         return None
@@ -88,15 +101,29 @@ async def doi_handle_exists(doi: str) -> bool | None:
         return None
 
 
+def _retry_after(exc: ProviderError) -> int | None:
+    value = (exc.headers or {}).get("Retry-After")
+    try:
+        return max(0, int(value)) if value is not None else None
+    except ValueError:
+        return None
+
+
 async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
     # Read the module attribute on every call so tests can swap the chain.
-    chain = LOOKUP_DOI_CHAIN
+    chain = LOOKUP_DOI_CHAIN if LOOKUP_DOI_CHAIN is not None else [get_provider()]
     if not chain:
         return DoiLookup("unavailable")
     failed = False
+    retry_after: int | None = None
     for provider in chain:
         try:
             result = await provider.lookup_by_doi(doi)
+        except ProviderError as exc:
+            failed = True
+            retry_after = _retry_after(exc) if retry_after is None else retry_after
+            logger.warning("Provider %s failed DOI lookup: %s", provider.name, exc.detail)
+            continue
         except Exception:
             failed = True
             logger.warning(
@@ -106,10 +133,10 @@ async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
         if result:
             return DoiLookup("found", result)
     if failed:
-        return DoiLookup("unavailable")
+        return DoiLookup("unavailable", retry_after=retry_after)
     if not confirm_missing:
         return DoiLookup("not_found")
-    # DataCite-only DOIs (Zenodo, figshare, arXiv) can miss everywhere: a
+    # DataCite-only DOIs (Zenodo, figshare, arXiv) can be missing upstream: a
     # registered handle means "save as pending", never "does not exist". Only
     # a definitive "not registered" from doi.org rejects; a failed check is
     # an unconfirmed miss and stays pending too.
@@ -129,33 +156,19 @@ async def resolve_doi(doi: str, *, confirm_missing: bool = True) -> DoiLookup:
 
 
 async def lookup_by_doi(doi: str) -> PaperMetadata | None:
-    return (await resolve_doi(doi, confirm_missing=False)).paper
+    return await get_provider().lookup_by_doi(doi)
+
+
+async def lookup_by_id(identifier: str) -> PaperMetadata | None:
+    return await get_provider().lookup_by_id(identifier)
 
 
 async def lookup_by_arxiv_id(arxiv_id: str) -> PaperMetadata | None:
-    for provider in LOOKUP_ARXIV_CHAIN:
-        try:
-            result = await provider.lookup_by_id(arxiv_id)
-            if result:
-                return result
-        except Exception:
-            logger.warning(
-                "Provider %s failed arXiv lookup for %s", provider.name, arxiv_id, exc_info=True
-            )
-    return None
+    return await lookup_by_id("ARXIV:" + arxiv_id)
 
 
 async def lookup_by_pmid(pmid: str) -> PaperMetadata | None:
-    for provider in LOOKUP_PMID_CHAIN:
-        try:
-            result = await provider.lookup_by_id(pmid)
-            if result:
-                return result
-        except Exception:
-            logger.warning(
-                "Provider %s failed PMID lookup for %s", provider.name, pmid, exc_info=True
-            )
-    return None
+    return await lookup_by_id("PMID:" + pmid)
 
 
 async def search(
@@ -163,20 +176,9 @@ async def search(
     filters: SearchFilters | None = None,
     page: int = 1,
     size: int = 20,
-    provider_name: str = "openalex",
+    provider_name: str = PRIMARY_PROVIDER,
 ) -> SearchResult:
-    """Search using a specific provider (default: OpenAlex)."""
-    provider = _PROVIDERS.get(provider_name, _openalex)
-    if ProviderCapability.SEARCH not in provider.capabilities:
-        provider = _openalex
-
-    f = filters or SearchFilters()
-    return await provider.search(query, f, page, size)
-
-
-# Default order when fanning out across all providers — used as both the
-# query order AND the round-robin tie-break for cross-provider duplicates.
-SEARCH_FANOUT_ORDER: list[str] = ["openalex", "crossref", "arxiv", "europepmc"]
+    return await get_provider(provider_name).search(query, filters or SearchFilters(), page, size)
 
 
 async def search_all(
@@ -186,138 +188,56 @@ async def search_all(
     size: int = 20,
     providers: list[str] | None = None,
 ) -> list[SearchResult]:
-    """Fan out the search across multiple providers in parallel.
+    return [
+        await search(query, filters, page, size, name)
+        for name in selected_provider_names(providers)
+    ]
 
-    Defaults to all four search-capable providers in SEARCH_FANOUT_ORDER.
-    Failed providers (timeout, 5xx, parse error) are logged and dropped —
-    a single bad provider must not fail the whole search. Returns the
-    successful results in the requested provider order.
-    """
-    f = filters or SearchFilters()
-    requested = providers or SEARCH_FANOUT_ORDER
-    selected: list[BaseProvider] = []
-    for name in requested:
-        provider = _PROVIDERS.get(name)
-        if provider is None:
-            logger.warning("Unknown provider requested in search_all: %s", name)
-            continue
-        if ProviderCapability.SEARCH not in provider.capabilities:
-            continue
-        selected.append(provider)
 
-    if not selected:
+async def get_references(paper_id: str):
+    return await get_provider().get_references(paper_id)
+
+
+async def get_citations(paper_id: str):
+    return await get_provider().get_citations(paper_id)
+
+
+async def list_citing_papers(
+    paper_id: str | None, *, order: str = "cited_by_count", limit: int = 25
+) -> list[PaperMetadata]:
+    if not paper_id:
         return []
-
-    raw_results = await asyncio.gather(
-        *(p.search(query, f, page, size) for p in selected),
-        return_exceptions=True,
-    )
-
-    results: list[SearchResult] = []
-    for _provider, outcome in zip(selected, raw_results, strict=True):
-        if isinstance(outcome, Exception):
-            logger.warning(
-                "Provider search failed",
-            )
-            continue
-        results.append(outcome)
-    return results
-
-
-async def get_references(paper_id: str) -> list[PaperReference]:
-    for provider in REFERENCES_CHAIN:
-        if ProviderCapability.REFERENCES not in provider.capabilities:
-            continue
-        try:
-            result = await provider.get_references(paper_id)
-            if result:
-                return result
-        except Exception:
-            logger.warning(
-                "Provider %s failed references for %s", provider.name, paper_id, exc_info=True
-            )
-    return []
-
-
-async def get_citations(paper_id: str) -> list[PaperReference]:
-    for provider in CITATIONS_CHAIN:
-        if ProviderCapability.CITATIONS not in provider.capabilities:
-            continue
-        try:
-            result = await provider.get_citations(paper_id)
-            if result:
-                return result
-        except Exception:
-            logger.warning(
-                "Provider %s failed citations for %s", provider.name, paper_id, exc_info=True
-            )
-    return []
-
-
-# Map the UI-facing ordering choice to an OpenAlex sort expression.
-_CITING_SORTS = {
-    "cited_by_count": "cited_by_count:desc",
-    "recent": "publication_date:desc",
-}
-
-
-async def related_page(
-    openalex_id: str,
-    *,
-    direction: str = "cited_by",
-    order: str = "cited_by_count",
-    cursor: str = "*",
-    per_page: int = 200,
-) -> RelatedPage:
-    """One cursor page of a work's citers (``direction="cited_by"``) or
-    references (``"cites"``) for the graph's related-paper ranges. Failures
-    propagate: an outage must never read as "no related papers"."""
-    sort = _CITING_SORTS.get(order, _CITING_SORTS["cited_by_count"])
-    filter_key = "cited_by" if direction == "cites" else "cites"
-    return await _openalex.related_page(
-        openalex_id, filter_key=filter_key, sort=sort, cursor=cursor, per_page=per_page
+    return await get_provider().list_related_papers(
+        paper_id, direction="citations", order=order, limit=limit
     )
 
 
-async def works_by_ids(openalex_ids: list[str]) -> list[PaperMetadata]:
-    """Full OpenAlex records for the given work ids, in input order. Errors
-    propagate so callers can tell an outage from a merged work."""
-    if not openalex_ids:
+async def list_referenced_papers(
+    paper_id: str | None, *, order: str = "cited_by_count", limit: int = 25
+) -> list[PaperMetadata]:
+    if not paper_id:
         return []
-    return await _openalex.works_by_ids(openalex_ids)
+    return await get_provider().list_related_papers(
+        paper_id, direction="references", order=order, limit=limit
+    )
 
 
-async def openalex_work_by_doi(doi: str) -> PaperMetadata | None:
-    """The OpenAlex work for a DOI, or ``None`` when OpenAlex has none (404).
-    Unlike ``resolve_doi`` there is no fallback and errors propagate: only
-    OpenAlex can say a work has no OpenAlex id, and an outage must never read
-    as "it has none"."""
-    return await _openalex.lookup_by_doi(doi)
+async def get_reference_ids(paper_id: str | None) -> list[str]:
+    return await get_provider().reference_ids(paper_id) if paper_id else []
 
 
-async def get_openalex_reference_ids(openalex_id: str | None) -> list[str]:
-    """OpenAlex work ids (full URLs) referenced by the given work.
-
-    Used to compute exact citation edges *among papers already in the app*:
-    intersect these ids with the in-app paper set. OpenAlex-only on purpose —
-    its ``referenced_works`` is a complete, single-call list whose id format
-    matches our cached ``openalex_id`` values.
-    """
-    if not openalex_id:
-        return []
-    short = openalex_id.rsplit("/", 1)[-1]
-    try:
-        refs = await _openalex.get_references(short)
-    except Exception:
-        logger.warning("OpenAlex failed references for %s", openalex_id, exc_info=True)
-        return []
-    return [r.canonical_key for r in refs if r.canonical_key]
-
-
-async def get_author(author_id: str) -> AuthorMetadata | None:
-    """Author profiles — only OpenAlex for MVP."""
-    try:
-        return await _openalex.get_author(author_id)
-    except Exception:
-        logger.warning("OpenAlex author lookup failed for %s", author_id, exc_info=True)
-        return None
+def paper_identifier(paper) -> str | None:
+    """Resolve legacy snapshots through interoperable IDs, never an OpenAlex call."""
+    if paper.semantic_scholar_id:
+        return paper.semantic_scholar_id
+    for field, prefix in (
+        ("doi", "DOI"),
+        ("arxiv_id", "ARXIV"),
+        ("pmid", "PMID"),
+        ("pmcid", "PMCID"),
+    ):
+        if value := getattr(paper, field, None):
+            return f"{prefix}:{value}"
+    if paper.canonical_key.startswith(("doi:", "s2:", "arxiv:", "pmid:", "pmcid:")):
+        return paper.canonical_key
+    return None

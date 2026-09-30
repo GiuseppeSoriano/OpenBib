@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 _DEV_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -65,10 +65,10 @@ class Settings(BaseSettings):
     email_from: str = "OpenBib <noreply@localhost>"
     email_worker_poll_seconds: float = 5.0
 
-    # Providers
-    openalex_api_key: str = ""
-    openalex_email: str = ""
-    crossref_mailto: str = ""
+    # Only providers in the registry enablement list are instantiated.
+    semantic_scholar_api_key: SecretStr = SecretStr("")
+    semantic_scholar_api_key_file: str = ""
+
     # Budget for resolving one DOI across the provider chain before it is
     # stored as pending, plus the per-request limits of batch imports.
     doi_resolve_timeout_seconds: float = 10.0
@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     graph_related_max_results: int = Field(10000, ge=200, le=50000)
     graph_related_scan_budget_seconds: float = Field(20.0, gt=0, le=20)
     graph_related_topup_concurrency: int = Field(4, ge=1, le=8)
+
+    # Inactive provider configuration is retained for future use.
+    openalex_api_key: str = ""
+    openalex_email: str = ""
+    crossref_mailto: str = ""
 
     # Cache TTLs (seconds)
     cache_ttl_lookup: int = 86400
@@ -126,6 +131,10 @@ class Settings(BaseSettings):
             file_path = getattr(self, f"{field}_file", "")
             if file_path:
                 setattr(self, field, self._read_file(file_path, field))
+        if self.semantic_scholar_api_key_file:
+            self.semantic_scholar_api_key = SecretStr(
+                self._read_file(self.semantic_scholar_api_key_file, "semantic_scholar_api_key")
+            )
         try:
             keys = json.loads(self.app_encryption_keys)
         except json.JSONDecodeError as exc:
@@ -209,7 +218,7 @@ class Settings(BaseSettings):
         return self
 
     model_config = {
-        "env_file": ".env",
+        "env_file": (Path(__file__).resolve().parents[2] / ".env", ".env"),
         "env_file_encoding": "utf-8",
         "extra": "ignore",
         "hide_input_in_errors": True,

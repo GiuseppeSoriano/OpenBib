@@ -213,3 +213,17 @@ describe("page states", () => {
     expect(screen.getByText("Le informazioni legali non sono disponibili.")).toBeInTheDocument();
   });
 });
+
+describe.each(["en", "it"])("sharing and registration disclosures (%s)", (locale) => {
+  it("names Semantic Scholar, the DOI check and temporary registration", async () => {
+    await show("privacy", locale);
+    expect(screen.getByText(/Semantic Scholar/)).toHaveTextContent("doi.org");
+    expect(screen.getByText(locale === "it" ? /La registrazione temporanea/ : /Temporary registration stores/)).toBeInTheDocument();
+    expect(screen.getByText(locale === "it" ? /registrazione temporanea usano cookie/ : /temporary registration use technical/)).toBeInTheDocument();
+  });
+
+  it("describes read-only links and collaborators in the terms", async () => {
+    await show("terms", locale);
+    expect(screen.getByText(locale === "it" ? /link di sola lettura e collaboratori autorizzati/ : /read-only links and authorized collaborators/)).toBeInTheDocument();
+  });
+});

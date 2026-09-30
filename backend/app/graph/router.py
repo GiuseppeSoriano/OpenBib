@@ -1,7 +1,7 @@
 """Graph router — citation graphs for a paper, a collection, or the library,
 plus related-paper ranges and pinned top-ups.
 
-Single-paper graphs, public-collection graphs, related ranges and top-ups
+Single-paper graphs, shared-collection graphs, related ranges and top-ups
 are usable without an account (anonymous exploration); only the library graph
 is inherently user-scoped and requires auth.
 """
@@ -12,6 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from app.collections import service as collection_service
+from app.collections.access import ShareToken
 from app.common.exceptions import ApiError
 from app.common.identifiers import PaperKey
 from app.common.rate_limit import client_ip, enforce_rate_limit
@@ -160,9 +161,10 @@ async def collection_graph(
     request: Request,
     response: Response,
     order: Order = Query("cited_by_count", deprecated=True, description=_ORDER_DOC),
+    share_token: ShareToken = None,
 ):
     """Citation graph of every paper in a collection. View RBAC is enforced
-    by list_papers: anonymous users can only see public collections."""
+    by list_papers: anonymous users need a valid read link."""
     await enforce_rate_limit(
         redis,
         request,
@@ -173,7 +175,9 @@ async def collection_graph(
         window_seconds=60,
         fail_closed=True,
     )
-    rows = await collection_service.list_papers(db, collection_id, user.id if user else None)
+    rows = await collection_service.list_papers(
+        db, collection_id, user.id if user else None, share_token
+    )
     seeds = [row["paper_canonical_key"] for row in rows]
     if len(seeds) > 200:
         raise HTTPException(

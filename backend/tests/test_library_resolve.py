@@ -60,7 +60,7 @@ async def _user(db, email: str = "resolver@example.com") -> tuple[uuid.UUID, dic
 
 
 async def _collection(db, owner_id: uuid.UUID, members=()) -> uuid.UUID:
-    coll = Collection(id=uuid.uuid4(), owner_id=owner_id, name="Audit", visibility="private")
+    coll = Collection(id=uuid.uuid4(), owner_id=owner_id, name="Audit")
     db.add(coll)
     await db.flush()
     db.add(CollectionMember(collection_id=coll.id, user_id=owner_id, role="owner"))

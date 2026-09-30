@@ -13,10 +13,8 @@ from app.auth.schemas import (
     LoginRequest,
     MessageResponse,
     PasswordResetRequest,
-    RegisterRequest,
     TokenRequest,
     TokenResponse,
-    VerifyEmailRequest,
 )
 from app.auth.service import (
     consume_action_token,
@@ -37,7 +35,6 @@ from app.auth.service import (
 from app.common.rate_limit import client_ip, enforce_rate_limit
 from app.config import settings
 from app.dependencies import DB, AuthenticatedUser
-from app.legal import get_legal_config
 from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -84,94 +81,17 @@ async def _queue_action(
     raw = await create_action_token(
         db, user.id, purpose, ttl, recipient if purpose == "change_email" else None
     )
-    subject, body = lifecycle_email(purpose, locale, raw)
-    await queue_email(db, user.id, recipient, subject, body)
+    subject, body, html = lifecycle_email(purpose, locale, raw)
+    await queue_email(db, user.id, recipient, subject, body, html)
 
 
-@router.post("/register", response_model=MessageResponse, status_code=status.HTTP_202_ACCEPTED)
-async def register(body: RegisterRequest, request: Request, response: Response, db: DB):
-    await enforce_rate_limit(
-        request.app.state.redis,
-        request,
-        response,
-        scope="register-ip",
-        identity=client_ip(request),
-        limit=5,
-        window_seconds=3600,
-        fail_closed=True,
-    )
-    await enforce_rate_limit(
-        request.app.state.redis,
-        request,
-        response,
-        scope="register-email",
-        identity=f"email:{body.email}",
-        limit=5,
-        window_seconds=3600,
-        fail_closed=True,
-    )
-    legal = get_legal_config()
-    if body.terms_version != legal.terms_version or body.privacy_version != legal.privacy_version:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Legal documents changed; reload and accept the current versions",
-        )
-    await lock_email_target(db, str(body.email))
-    result = await db.execute(select(User).where(User.email == str(body.email)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        now = utcnow()
-        user = User(
-            email=str(body.email),
-            password_hash=hash_password(body.password),
-            display_name=body.display_name.strip(),
-            terms_accepted_at=now,
-            terms_version=legal.terms_version,
-            privacy_acknowledged_at=now,
-            privacy_version=legal.privacy_version,
-        )
-        db.add(user)
-        try:
-            await db.flush()
-        except IntegrityError:
-            await db.rollback()
-            return MessageResponse()
-    else:
-        verify_password(body.password, None)
-        return MessageResponse()
-    await _queue_action(db, user, "verify_email", body.locale, user.email, timedelta(hours=24))
-    return MessageResponse()
-
-
-@router.post("/verify-email", response_model=TokenResponse)
-async def verify_email(body: VerifyEmailRequest, request: Request, response: Response, db: DB):
-    await enforce_rate_limit(
-        request.app.state.redis,
-        request,
-        response,
-        scope="verify-email",
-        identity=client_ip(request),
-        limit=10,
-        window_seconds=600,
-        fail_closed=True,
-    )
-    action = await consume_action_token(db, body.token, "verify_email")
-    if action is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token"
-        )
-    user = await db.get(User, action.user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token"
-        )
-    user.password_hash = hash_password(body.new_password)
-    user.email_verified_at = utcnow()
-    await revoke_user_actions(db, user.id)
-    await revoke_user_sessions(db, user.id)
-    session, raw = await create_session(db, user.id)
-    _set_refresh_cookie(response, raw)
-    return _token_response(user, session.id)
+@router.post("/register", deprecated=True, status_code=410)
+@router.post("/verify-email", deprecated=True, status_code=410)
+@router.post("/email/resend", deprecated=True, status_code=410)
+async def retired_registration():
+    return {
+        "detail": "Registration has changed. Restart at /register to verify your email with a code."
+    }
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -255,36 +175,6 @@ async def logout_all(user: AuthenticatedUser, response: Response, db: DB):
     await revoke_user_actions(db, user.id)
     await revoke_user_sessions(db, user.id)
     _clear_refresh_cookie(response)
-
-
-@router.post("/email/resend", response_model=MessageResponse, status_code=status.HTTP_202_ACCEPTED)
-async def resend_verification(body: EmailRequest, request: Request, response: Response, db: DB):
-    await enforce_rate_limit(
-        request.app.state.redis,
-        request,
-        response,
-        scope="resend-ip",
-        identity=client_ip(request),
-        limit=5,
-        window_seconds=3600,
-        fail_closed=True,
-    )
-    await enforce_rate_limit(
-        request.app.state.redis,
-        request,
-        response,
-        scope="resend-email",
-        identity=f"email:{body.email}",
-        limit=5,
-        window_seconds=3600,
-        fail_closed=True,
-    )
-    user = (
-        await db.execute(select(User).where(User.email == str(body.email)))
-    ).scalar_one_or_none()
-    if user is not None and user.email_verified_at is None:
-        await _queue_action(db, user, "verify_email", body.locale, user.email, timedelta(hours=24))
-    return MessageResponse()
 
 
 @router.post(

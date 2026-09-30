@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
 from app.collections import service as collections_service
 from app.collections.models import CollectionPaper
-from app.collections.schemas import CollectionCreate, Visibility
+from app.collections.schemas import CollectionCreate
 from app.dependencies import get_db
 from app.library import service as library_service
 from app.library.models import UserLibraryEntry, UserLibraryVersion
@@ -181,9 +181,7 @@ async def test_library_save_keeps_an_existing_pin_for_uncached_papers(db):
 async def test_collection_paper_delete_tries_exact_then_normalized_key(db):
     user = await _make_user(db)
     headers = await _auth(db, user)
-    coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Legacy", visibility=Visibility.private)
-    )
+    coll = await collections_service.create_collection(db, user.id, CollectionCreate(name="Legacy"))
     db.add(CollectionPaper(collection_id=coll.id, paper_canonical_key="10.1109/TNN.raw"))
     db.add(CollectionPaper(collection_id=coll.id, paper_canonical_key="doi:10.1/x", position=1))
     await db.flush()
@@ -237,7 +235,7 @@ async def test_delete_entry_conflict_and_detach_over_http(db):
     headers = await _auth(db, user)
     await cache_papers(db, [_paper("doi:10.1/x", "group:x")])
     coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Reading list", visibility=Visibility.private)
+        db, user.id, CollectionCreate(name="Reading list")
     )
     await collections_service.add_paper(db, coll.id, user.id, "doi:10.1/x")
 

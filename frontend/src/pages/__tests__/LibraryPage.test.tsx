@@ -188,7 +188,7 @@ describe("LibraryPage", () => {
     expect(await screen.findByTestId("paper-details")).toBeInTheDocument();
   });
 
-  it("loads the next page on Load more and appends it", async () => {
+  it("loads the next page on Show more and appends it", async () => {
     const user = userEvent.setup();
     vi.mocked(library.listEntries).mockImplementation((params = {}) =>
       params.page === 2
@@ -199,13 +199,13 @@ describe("LibraryPage", () => {
     await screen.findByText("First Library Paper");
     expect(screen.getByText("Showing 2 of 3")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await user.click(screen.getByRole("button", { name: "Show more" }));
 
     expect(await screen.findByText("Third Library Paper")).toBeInTheDocument();
     expect(screen.getByText("First Library Paper")).toBeInTheDocument();
     expect(lastListParams()).toMatchObject({ page: 2, size: 25 });
     expect(screen.getByText("3 papers")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
   it("opens a ?focus= entry that is not on the first page via getEntry", async () => {
@@ -376,7 +376,7 @@ describe("LibraryPage filters", () => {
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText("Couldn’t load your Library.")).toBeInTheDocument();
 
-    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -420,4 +420,59 @@ describe("LibraryPage filters", () => {
       window.matchMedia = original;
     }
   });
+});
+
+// Five pages of full cards: slow under a loaded parallel run, hence the timeout.
+it("continues beyond 100 entries without duplicating page overlaps", async () => {
+  const { library } = await import("@/lib/api");
+  const { waitFor } = await import("@testing-library/react");
+  vi.mocked(library.listEntries).mockImplementation(async (params) => {
+    const page = params?.page ?? 1;
+    const start = (page - 1) * 25;
+    const batch = Array.from({ length: page < 5 ? 25 : 2 }, (_, i) => {
+      const key = `entry-${start + i}`;
+      return { ...entries[0]!, paper_group_key: key, primary_canonical_key: key, primary_version: paper(key, `Library item ${start + i}`) };
+    });
+    if (page === 5) batch[0] = { ...batch[0]!, paper_group_key: 'entry-99', primary_version: paper('entry-99', 'Library item 99') };
+    return { items: batch, total: 102, page, size: 25 };
+  });
+  renderWithProviders(<LibraryPage />);
+  await screen.findByText("Library item 0");
+  for (let page = 2; page <= 5; page++) {
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await screen.findByText(`Library item ${page === 5 ? 101 : (page - 1) * 25}`);
+  }
+  expect(screen.getAllByText("Library item 99")).toHaveLength(1);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Show more" })).toBeNull());
+}, 20_000);
+
+it("shows a retry instead of an empty library on a failed request", async () => {
+  const { library } = await import("@/lib/api");
+  vi.mocked(library.listEntries)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ items: entries, total: entries.length, page: 1, size: 25 });
+  renderWithProviders(<LibraryPage />);
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+});
+
+it("keeps loaded entries and retries a failed next page", async () => {
+  let failNext = true;
+  vi.mocked(library.listEntries).mockImplementation((params = {}) => {
+    if (params.page !== 2) return envelope(entries, 3, 1, 2);
+    if (failNext) return Promise.reject(new Error("offline"));
+    return envelope([entry("doi:10.1/c", "Third Library Paper")], 3, 2, 2);
+  });
+  renderLibrary();
+  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(screen.getByText("First Library Paper")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  failNext = false;
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+  expect(await screen.findByText("Third Library Paper")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
 });

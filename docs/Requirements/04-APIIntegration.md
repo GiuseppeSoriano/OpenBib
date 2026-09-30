@@ -1,3 +1,5 @@
+> Historical multi-provider design. The current runtime uses Semantic Scholar only. See [the implemented provider architecture](../Architecture/SemanticScholar.md) for the active endpoint mapping, authentication and limitations. The provider descriptions below are retained for future work.
+
 # API Integration Specification
 
 > Detailed specification for integrating the four external providers: **OpenAlex**, **arXiv**, **Crossref**, and **Europe PMC**.

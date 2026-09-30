@@ -98,6 +98,7 @@ export default function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
         )}
       </p>
       {journalEnabled && <p>{t("legal.page.journal")}</p>}
+      <p>{t("legal.page.registration")}</p>
       <p>{t("legal.page.storage")}</p>
       <h2>{t("legal.page.rightsHeading")}</h2>
       <p>{t("legal.page.rights")}</p>

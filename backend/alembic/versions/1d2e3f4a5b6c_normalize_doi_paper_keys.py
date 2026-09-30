@@ -1,7 +1,7 @@
 """normalize legacy raw-DOI paper keys
 
 Revision ID: 1d2e3f4a5b6c
-Revises: c7d8e9f0a1b2
+Revises: f8a9b0c1d2e3
 
 Data-only repair: paper keys stored before identifiers were normalized (bare
 DOIs, ``DOI:``-labelled keys, doi.org links) are re-keyed to ``doi:<lowercase
@@ -18,7 +18,7 @@ from alembic import op
 from app.common.key_repair import repair_paper_keys
 
 revision: str = "1d2e3f4a5b6c"
-down_revision: str | None = "c7d8e9f0a1b2"
+down_revision: str | None = "f8a9b0c1d2e3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -60,8 +60,18 @@ async def db(engine) -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
 
 
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch):
+    # Local .env credentials and backup preferences must not affect unit tests.
+    from app.config import Settings, settings
+
+    defaults = Settings(_env_file=None)
+    for name in Settings.model_fields:
+        monkeypatch.setattr(settings, name, getattr(defaults, name))
+
+
 @pytest_asyncio.fixture(autouse=True)
-async def redis_backend(monkeypatch):
+async def redis_backend(monkeypatch, isolated_settings):
     import redis.asyncio as redis
 
     original = redis.from_url
@@ -77,22 +87,43 @@ async def redis_backend(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def hermetic_doi_resolution(monkeypatch):
-    """No test may reach a real DOI provider or doi.org: an empty chain makes
-    every uncached DOI resolve as ``unavailable`` (stored as pending)."""
+def hermetic_doi_resolution(monkeypatch, isolated_settings):
+    """No test may reach a real DOI provider or doi.org: the API key is forced
+    blank (even when the environment exports one), so the primary provider
+    fails before any HTTP call and every uncached DOI resolves as
+    ``unavailable`` (stored as pending)."""
+    from pydantic import SecretStr
+
+    from app.config import settings
     from app.providers import registry
 
-    async def handle_not_registered(_doi: str) -> bool:
-        return False
+    async def handle_check_failed(_doi: str) -> None:
+        return None
 
-    async def openalex_unreachable(_doi: str):
-        raise RuntimeError("tests never reach OpenAlex")
-
-    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [])
-    monkeypatch.setattr(registry, "doi_handle_exists", handle_not_registered)
-    monkeypatch.setattr(registry, "openalex_work_by_doi", openalex_unreachable)
+    monkeypatch.setattr(settings, "semantic_scholar_api_key", SecretStr(""))
+    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", None)
+    monkeypatch.setattr(registry, "doi_handle_exists", handle_check_failed)
 
 
 @pytest.fixture
 def user_id():
     return uuid4()
+
+
+@pytest.fixture
+def client_app(db):
+    from app.dependencies import get_db
+    from app.main import create_app
+
+    app = create_app()
+
+    async def dependency():
+        try:
+            yield db
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    app.dependency_overrides[get_db] = dependency
+    return app

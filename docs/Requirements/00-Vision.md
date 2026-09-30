@@ -19,7 +19,7 @@ No single existing platform combines all of the following:
 1. **Discovery that adapts** — relating your saved papers to new relevant ones, with the ability to dismiss irrelevant suggestions
 2. **Graph exploration** — visualizing citation networks, co-authorship, and topical similarity across multiple criteria
 3. **Version awareness** — distinguishing preprints, conference papers, journal extensions, and corrections of the same work
-4. **Collection-based organization** — creating shareable, playlist-like groupings of papers with fine-grained visibility controls
+4. **Collection-based organization** — creating shareable, playlist-like groupings of papers with read links and account editing permissions
 5. **Social browsing** — discovering what other researchers are reading through their public collections
 6. **Lean data model** — storing only user-specific data (collections, notes, preferences) while relying on public APIs for paper metadata
 
@@ -60,7 +60,7 @@ Existing tools (Zotero, Mendeley, ResearchRabbit, Connected Papers, Semantic Sch
 ### In scope (MVP)
 
 - User registration, login, logout, password recovery, profile management
-- Collection CRUD with private/shared/public visibility
+- Collection CRUD with revocable read links and account editors
 - Add papers by DOI, title, URL, or from search results
 - Bibliographic search across multiple providers with filters and ordering
 - Duplicate detection and version distinction (preprint vs. journal, etc.)
@@ -93,3 +93,5 @@ Existing tools (Zotero, Mendeley, ResearchRabbit, Connected Papers, Semantic Sch
 3. A second user can browse the first user's public collection, import it, and add their own notes.
 4. The system remains usable when one external provider is down (graceful degradation).
 5. Cached API responses reduce redundant calls by ≥90% within their TTL window.
+
+Current implemented sharing contract: [Collection sharing](../Architecture/CollectionSharing.md).

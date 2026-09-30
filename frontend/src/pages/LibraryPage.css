@@ -67,13 +67,4 @@
     font-size: 0.8rem;
     color: var(--color-text-secondary);
   }
-
-  .library-more {
-    display: flex;
-    justify-content: center;
-  }
-
-  .library-more .btn {
-    min-height: var(--control-min);
-  }
 }

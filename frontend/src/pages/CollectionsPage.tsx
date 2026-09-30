@@ -3,30 +3,26 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
-import type { Collection, Visibility } from "@/types";
+import type { Collection } from "@/types";
 import { Plus, Trash2, FolderOpen } from "lucide-react";
+import QueryError from "@/components/ui/QueryError";
+import { useToast } from "@/components/ui/Toast";
 import ConfirmModal from "@/components/ConfirmModal";
 import Modal from "@/components/ui/Modal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import "./CollectionsPage.css";
 
-const VISIBILITIES: Visibility[] = ["private", "shared", "public"];
-
-function visibilityLabel(v: Visibility, t: (key: string) => string) {
-  return t(`collections.visibility${v.charAt(0).toUpperCase()}${v.slice(1)}`);
-}
-
 export default function CollectionsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("private");
   const [pendingDelete, setPendingDelete] = useState<Collection | null>(null);
 
-  const { data: collections, isLoading } = useQuery({
+  const { data: collections, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["collections"],
     queryFn: async () => {
       const { data } = await api.get<Collection[]>("/collections");
@@ -36,15 +32,15 @@ export default function CollectionsPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      await api.post("/collections", { name, description: description || null, visibility });
+      await api.post("/collections", { name, description: description || null });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["collections"] });
       setShowCreate(false);
       setName("");
       setDescription("");
-      setVisibility("private");
     },
+    onError: () => toast(t("collections.createFailed"), "error"),
   });
 
   const deleteMutation = useMutation({
@@ -56,6 +52,7 @@ export default function CollectionsPage() {
       void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
       void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
     },
+    onError: () => toast(t("collections.deleteFailed"), "error"),
   });
 
   const handleCreate = (e: FormEvent) => {
@@ -74,6 +71,7 @@ export default function CollectionsPage() {
       </div>
 
       {isLoading && <SkeletonCard count={3} />}
+      {isError && <QueryError onRetry={() => void refetch()} busy={isFetching} />}
 
       <div className="collection-grid">
         {collections?.map((c) => (
@@ -82,17 +80,17 @@ export default function CollectionsPage() {
               <h3>{c.name}</h3>
               {c.description && <p>{c.description}</p>}
               <div className="collection-item-meta">
-                <span className="badge badge--neutral">{visibilityLabel(c.visibility, t)}</span>
+                <span className="badge badge--neutral">{t(c.is_owner ? "sharing.owner" : c.can_edit ? "sharing.editor" : "sharing.reader")}</span>
                 <span>{t("collections.paperCount", { count: c.paper_count })}</span>
               </div>
             </Link>
-            <button
+            {c.is_owner && <button
               className="btn-ghost collection-delete"
               onClick={() => setPendingDelete(c)}
               title={t("collections.deleteCollectionTitle")}
             >
               <Trash2 size={14} />
-            </button>
+            </button>}
           </div>
         ))}
       </div>
@@ -127,19 +125,6 @@ export default function CollectionsPage() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-          <div className="segmented" role="group" aria-label={t("collections.visibilityPrivate")}>
-            {VISIBILITIES.map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={visibility === v ? "active" : ""}
-                aria-pressed={visibility === v}
-                onClick={() => setVisibility(v)}
-              >
-                {visibilityLabel(v, t)}
-              </button>
-            ))}
-          </div>
           <div className="confirm-actions">
             <button
               type="button"
@@ -148,7 +133,7 @@ export default function CollectionsPage() {
             >
               {t("common.cancel")}
             </button>
-            <button type="submit" className="btn btn-primary" disabled={!name.trim()}>
+            <button type="submit" className="btn btn-primary" disabled={!name.trim() || createMutation.isPending}>
               {t("collections.create")}
             </button>
           </div>

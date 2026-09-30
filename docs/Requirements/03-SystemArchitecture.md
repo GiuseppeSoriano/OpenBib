@@ -81,7 +81,7 @@ backend/
 │   ├── config.py              # Pydantic Settings (env-based)
 │   ├── dependencies.py        # FastAPI dependency injection (DB session, current user, etc.)
 │   ├── auth/
-│   │   ├── router.py          # POST /auth/register, /auth/login, /auth/refresh, /auth/logout
+│   │   ├── router.py          # Login/sessioni; registrazione OTP in registration.py
 │   │   ├── service.py         # password hash/verify, token create/validate
 │   │   └── schemas.py
 │   ├── users/
@@ -224,7 +224,7 @@ frontend/
 | **Collection Detail** | Papers in a collection, ordering, bulk actions | PaperList, StateSelector, TagEditor, ShareDialog |
 | **Paper Detail** | Full paper metadata, notes, related papers, graph preview | MetadataPanel, NoteEditor, RelatedPapers, MiniGraph |
 | **Graph Explorer** | Interactive citation/reference graph | GraphCanvas, GraphControls, NodeTooltip, DetailPanel |
-| **Public Collections** | Browse shared/public collections | CollectionGrid, SearchBar |
+| **Collection sharing** | Revocable read links and verified-account editors | CollectionSharing, CollectionDetailPage |
 | **Settings** | Preferences, password change, data export, account deletion | PreferenceForm, ExportButton, DangerZone |
 
 ### 4.3 State management
@@ -272,7 +272,8 @@ paper_graph_edges (source_key ←→ target_key)
 | owner_id | UUID | FK → users.id, NOT NULL |
 | name | VARCHAR(200) | NOT NULL |
 | description | TEXT | |
-| visibility | ENUM('private', 'shared', 'public') | NOT NULL, default 'private' |
+| revision | INTEGER | NOT NULL, default 1; optimistic metadata concurrency |
+| read_link_* | digest, ciphertext, nonce, key version | Nullable; all null when link disabled |
 | created_at | TIMESTAMPTZ | NOT NULL |
 | updated_at | TIMESTAMPTZ | NOT NULL |
 
@@ -561,3 +562,5 @@ The existing prototype (stdlib HTTP server, SQLite, vanilla JS) established core
 | `canonical_key()` function | `common/canonical.py` (same logic, shared across services) |
 | SQLite database | PostgreSQL (Alembic migrations from SQLite schema) |
 | Vanilla JS + CSS | React + TypeScript + existing design tokens |
+
+Current implemented sharing contract: [Collection sharing](../Architecture/CollectionSharing.md).

@@ -5,7 +5,13 @@ from pathlib import Path
 
 from sqlalchemy import delete
 
-from app.auth.models import AccountDeletionTombstone, AuthSession, EmailOutbox, UserActionToken
+from app.auth.models import (
+    AccountDeletionTombstone,
+    AuthSession,
+    EmailOutbox,
+    RegistrationChallenge,
+    UserActionToken,
+)
 from app.auth.service import utcnow
 from app.config import settings
 from app.database import async_session_factory
@@ -14,6 +20,12 @@ from app.database import async_session_factory
 async def cleanup_expired_data():
     now = utcnow()
     async with async_session_factory() as db:
+        await db.execute(
+            delete(RegistrationChallenge).where(
+                (RegistrationChallenge.expires_at < now - timedelta(hours=23))
+                | (RegistrationChallenge.used_at < now - timedelta(hours=23))
+            )
+        )
         await db.execute(delete(AuthSession).where(AuthSession.expires_at < now))
         await db.execute(delete(UserActionToken).where(UserActionToken.expires_at < now))
         await db.execute(

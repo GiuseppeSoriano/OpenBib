@@ -3,9 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { GitFork } from "lucide-react";
-import { graph as graphApi, library } from "@/lib/api";
+import api, { graph as graphApi, library } from "@/lib/api";
 import { apiStatus } from "@/lib/apiError";
 import { COMPACT_QUERY, PHONE_MAX } from "@/lib/breakpoints";
+import { collectionRead, useCollectionAccess } from "@/lib/collection-access";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAuth } from "@/contexts/AuthContext";
 import CitationGraph, { type CitationGraphHandle } from "@/components/graph/CitationGraph";
@@ -34,20 +35,26 @@ import { useGraphExploration } from "@/components/graph/useGraphExploration";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import EmptyState from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import type { CitingOrder, GraphNode, GraphResponse, RelationDirection } from "@/types";
+import type { CitingOrder, Collection, GraphNode, GraphResponse, RelationDirection } from "@/types";
 import "@/components/graph/graph.css";
 import "./GraphPage.css";
 
 export type GraphMode = "manual" | "paper" | "collection" | "library";
 type SeededMode = Exclude<GraphMode, "manual">;
+type CollectionAccess = ReturnType<typeof useCollectionAccess>;
 
 export default function GraphPage({ mode }: { mode: GraphMode }) {
   const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
+  const { user } = useAuth();
+  const access = useCollectionAccess(collectionId);
   if (mode === "manual") return <ManualGraph />;
   const paramKey =
     mode === "paper" ? (paperKey ? decodeURIComponent(paperKey) : "") : mode === "collection" ? collectionId ?? "" : "";
-  // A new seed is a new session: exploration state, pins and layout reset.
-  return <GraphExplorer key={`${mode}:${paramKey}`} mode={mode} paramKey={paramKey} />;
+  // A collection graph belongs to its read capability and viewer (a new
+  // share link, sign-in or sign-out changes the scope); the others to the viewer.
+  const scope = mode === "collection" ? access.scope : user?.id ?? "anonymous";
+  // A new seed or scope is a new session: exploration state, pins and layout reset.
+  return <GraphExplorer key={`${mode}:${paramKey}:${scope}`} mode={mode} paramKey={paramKey} scope={scope} access={access} />;
 }
 
 /** The /graph route has no seed: point the user at the entry points. */
@@ -79,9 +86,19 @@ function seedHeading(node: GraphNode | undefined): string | null {
   return doi ? `DOI ${doi}` : null;
 }
 
-function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string }) {
+function GraphExplorer({
+  mode,
+  paramKey,
+  scope,
+  access,
+}: {
+  mode: SeededMode;
+  paramKey: string;
+  scope: string;
+  access: CollectionAccess;
+}) {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const compact = useMediaQuery(COMPACT_QUERY);
   const phone = useMediaQuery(`(max-width: ${PHONE_MAX}px)`);
@@ -90,19 +107,41 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
 
   // The base graph is the seeds and the edges among them; ordering only
   // applies to related ranges, so switching it never refetches this.
-  const baseQuery = useQuery<GraphResponse>({
-    queryKey: ["graph-base", mode, paramKey],
+  // A collection graph that is no longer readable resolves to null.
+  const baseQuery = useQuery<GraphResponse | null>({
+    queryKey: ["graph-base", mode, paramKey, scope],
     queryFn: () => {
       if (mode === "paper") return graphApi.buildPaper(paramKey);
-      if (mode === "collection") return graphApi.buildCollection(paramKey);
+      if (mode === "collection") return collectionRead(() => graphApi.buildCollection(paramKey, access.headers));
       return graphApi.buildLibrary();
     },
-    enabled: baseEnabled,
+    enabled: baseEnabled && !authLoading,
     staleTime: Infinity,
+    // A capability-scoped graph is never kept once the page leaves it.
+    ...(mode === "collection" ? { gcTime: 0 } : {}),
     refetchOnWindowFocus: false,
     retry: (failureCount, error) => (apiStatus(error) ?? 0) >= 500 && failureCount < 1,
   });
-  const base = baseQuery.data;
+
+  // Access to a shared collection can be withdrawn while its graph is open.
+  // Rebuilding the graph on every focus would cost a rate-limited request, so
+  // a light read of the collection checks it instead.
+  const accessProbe = useQuery({
+    queryKey: ["collection", paramKey, scope],
+    queryFn: () =>
+      collectionRead(
+        async () =>
+          (await api.get<Collection>(`/collections/${encodeURIComponent(paramKey)}`, { headers: access.headers })).data,
+      ),
+    enabled: mode === "collection" && baseEnabled && !authLoading,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: "always",
+    retry: false,
+  });
+  const unavailable = mode === "collection" && (accessProbe.data === null || baseQuery.data === null);
+  // Withdrawing the base aborts in-flight ranges and drops the exploration.
+  const base = unavailable ? undefined : baseQuery.data ?? undefined;
 
   // Library membership colors saved nodes (signed-in users only).
   const { data: libraryKeys } = useQuery({
@@ -145,6 +184,9 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
   const sheetReturnRef = useRef<HTMLElement | null>(null);
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const papersListId = useId();
+  useEffect(() => {
+    if (unavailable) setDetailsKey(null);
+  }, [unavailable]);
 
   const selectedId = state.selectedId;
   const selectedNode = selectedId ? catalog.getNode(selectedId) ?? null : null;
@@ -238,7 +280,9 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
   const showSummary = !!selectedNode || !!state.pending || !!state.error || !!state.notice || expandActive;
 
   let baseState = null;
-  if (baseQuery.isError) {
+  if (unavailable) {
+    baseState = <GraphBaseState status="unavailable" backTo={`/collections/${paramKey}${access.fragment}`} />;
+  } else if (baseQuery.isError) {
     baseState = (
       <GraphBaseState
         status="error"
@@ -268,7 +312,7 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
         edgeCount={edgeCount}
         pinnedCount={state.pinned.size}
         compact={compact}
-        onBack={() => navigate(-1)}
+        onBack={() => (mode === "collection" ? navigate(`/collections/${paramKey}${access.fragment}`) : navigate(-1))}
         onZoomIn={() => graphRef.current?.zoomIn()}
         onZoomOut={() => graphRef.current?.zoomOut()}
         onFit={() => graphRef.current?.fit()}
@@ -311,7 +355,7 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
             />
           )}
           {baseState}
-          {!compact && selectedNode && (
+          {!compact && hasGraph && selectedNode && (
             <GraphNodePopup
               node={selectedNode}
               pinned={state.pinned.has(selectedNode.id)}
@@ -398,7 +442,7 @@ function GraphExplorer({ mode, paramKey }: { mode: SeededMode; paramKey: string 
         />
       )}
 
-      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
+      <PaperDetailsPanel paperKey={unavailable ? null : detailsKey} onClose={() => setDetailsKey(null)} />
     </div>
   );
 }

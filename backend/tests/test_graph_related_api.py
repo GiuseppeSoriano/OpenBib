@@ -17,6 +17,8 @@ from app.providers import registry
 from app.providers.openalex import RelatedPage
 from app.users.models import User
 
+pytestmark = pytest.mark.skip(reason="integration: ported in WP3")
+
 # SQLite ignores FOR UPDATE, so only Postgres can prove the user lock is free.
 ON_POSTGRES = os.getenv("TEST_DB_URL", "").startswith("postgresql")
 SEED = "doi:10.1/seed"

@@ -30,6 +30,7 @@ logger = logging.getLogger("openbib")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _ACCOUNT_ACTION_PREFIXES = ("/api/v1/auth/", "/api/v1/users/me/")
 _COOKIE_MUTATION_PATHS = {
+    *[f"/api/v1/auth/registration/{step}" for step in ("start", "resend", "verify", "complete")],
     "/api/v1/auth/verify-email",
     "/api/v1/auth/login",
     "/api/v1/auth/refresh",
@@ -50,6 +51,9 @@ async def lifespan(app: FastAPI):
     pool = app.state.redis
     logger.info("Redis pool initialized")
     yield
+    from app.providers.registry import close_providers
+
+    await close_providers()
     await pool.aclose()
     await engine.dispose()
     logger.info("Application resources closed")
@@ -74,7 +78,7 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Collection-Share-Token"],
     )
 
     @app.middleware("http")
@@ -187,7 +191,14 @@ def create_app() -> FastAPI:
                 response.headers[name] = value
         response.headers["Cache-Control"] = (
             "no-store"
-            if request.url.path.startswith("/api/v1/auth")
+            if request.url.path.startswith(
+                (
+                    "/api/v1/auth",
+                    "/api/v1/collections",
+                    "/api/v1/graph/collection",
+                    "/api/v1/zotero/sync/collection",
+                )
+            )
             else response.headers.get("Cache-Control", "no-cache")
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -222,6 +233,7 @@ def create_app() -> FastAPI:
     async def conflict_handler(_request: Request, exc: ConflictError):
         return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)})
 
+    from app.auth.registration import router as registration_router
     from app.auth.router import router as auth_router
     from app.collections.router import router as collections_router
     from app.graph.router import router as graph_router
@@ -234,6 +246,7 @@ def create_app() -> FastAPI:
 
     for router in (
         auth_router,
+        registration_router,
         users_router,
         collections_router,
         papers_router,

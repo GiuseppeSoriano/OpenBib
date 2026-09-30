@@ -110,8 +110,8 @@ async def request_email_change(
     if existing.scalar_one_or_none() is not None:
         return {"message": "If the request is valid, further instructions will be sent."}
     raw = await create_action_token(db, user.id, "change_email", timedelta(hours=24), email)
-    subject, content = lifecycle_email("change_email", body.locale, raw)
-    await queue_email(db, user.id, email, subject, content)
+    subject, content, html = lifecycle_email("change_email", body.locale, raw)
+    await queue_email(db, user.id, email, subject, content, html)
     return {"message": "If the request is valid, further instructions will be sent."}
 
 

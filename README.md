@@ -8,21 +8,25 @@
 
 OpenBib is an open-source academic reference manager for searching across public bibliographic providers, building a personal research library, and exploring the citation graph around a paper or collection. This repository contains the source of official releases and everything needed to run and develop the application locally.
 
-Search, paper details, public collections, and citation graphs work without an account. Signing in unlocks persistent collections, notes, tags, reading states, version pins, and one-way Zotero sync.
+Search, paper details, collections shared through read-only links, and citation graphs work without an account. Signing in unlocks persistent collections, notes, tags, reading states, version pins, and one-way Zotero sync.
 
 > [!IMPORTANT]
 > OpenBib is currently an **alpha project**. The core workflows are usable, but APIs, data migrations, and user-facing behavior may change before the first stable release. Please back up important data.
+
+## Try OpenBib online
+
+Want to try or use OpenBib without installing it locally? Visit the hosted version at **[www.open-bib.com](https://www.open-bib.com)**. No local setup is needed. To self-host or contribute to the open-source project, follow the instructions below.
 
 ## Why OpenBib?
 
 Academic discovery is spread across search engines, reference managers, and graph tools. OpenBib brings those workflows together in an application you can inspect, run locally and contribute to:
 
-- **Search four providers at once** — OpenAlex, arXiv, Crossref, and Europe PMC are queried in parallel, then deduplicated and grouped by paper version.
+- **Discover papers with Semantic Scholar** — one authenticated source for search, metadata, references and citations, normalized and deduplicated before display.
 - **Explore citation networks visually** — expand citers or references, preserve node positions, and move directly from discovery to a paper's details.
-- **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and public or collaborative collections.
+- **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and collections with read-only links and authorized collaborators.
 - **Keep Zotero in the workflow** — push a collection or the whole library to Zotero with an idempotent one-way sync.
 - **Use it comfortably anywhere** — responsive UI, light and dark themes, and bundled English and Italian translations.
-- **Stay useful during provider outages** — Redis caching and graceful provider degradation keep the application responsive when an upstream API is slow.
+- **Stay useful during provider outages** — Redis caching, retries and explicit upstream errors keep the application responsive when an upstream API is slow.
 
 ## Architecture
 
@@ -31,7 +35,7 @@ flowchart LR
     Browser[React + TypeScript SPA] -->|REST /api| API[FastAPI]
     API --> Postgres[(PostgreSQL)]
     API --> Redis[(Redis cache)]
-    API --> Providers[OpenAlex · arXiv<br/>Crossref · Europe PMC]
+    API --> Providers[Semantic Scholar]
     API --> Zotero[Zotero Web API]
 ```
 
@@ -59,7 +63,7 @@ cd OpenBib
 
 cp .env.example .env
 # Replace JWT_SECRET_KEY in .env with a strong, random secret.
-# OPENALEX_EMAIL and CROSSREF_MAILTO should identify your API requests.
+# Set SEMANTIC_SCHOLAR_API_KEY to your Semantic Scholar API key.
 
 docker compose up --build -d
 ```
@@ -100,9 +104,8 @@ Copy [`.env.example`](.env.example) to `.env` before starting the Compose stack.
 | `JWT_SECRET_KEY` | Signs short-lived access tokens | Insecure development placeholder |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `10` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime | `7` |
-| `OPENALEX_API_KEY` | Optional OpenAlex API key | Empty |
-| `OPENALEX_EMAIL` | Contact email for OpenAlex requests | Example address |
-| `CROSSREF_MAILTO` | Contact email for Crossref polite-pool requests | Example address |
+| `SEMANTIC_SCHOLAR_API_KEY` | Required for live paper retrieval; `x-api-key` header | Empty |
+| `SEMANTIC_SCHOLAR_API_KEY_FILE` | Optional secret file, takes precedence | Empty |
 | `CORS_ORIGINS` | JSON list of allowed browser origins | Local web ports |
 | `CACHE_TTL_*` | Provider-cache lifetimes in seconds | See `.env.example` |
 
@@ -119,7 +122,9 @@ docker compose up -d db cache mailpit
 ### Backend
 
 ```bash
-cp .env.example backend/.env
+# If you do not already have a root .env:
+cp -n .env.example .env
+# Set SEMANTIC_SCHOLAR_API_KEY in .env. backend/.env overrides root values.
 cd backend
 
 uv sync --frozen --extra dev --python 3.12
@@ -178,7 +183,7 @@ Application runtime images exclude test/development packages. CI runs PostgreSQL
 
 ## Production and privacy
 
-Registration requires email verification. Access tokens stay in browser memory; opaque refresh sessions rotate in an HttpOnly cookie. Account settings provide verified email changes, password changes, session revocation, password-protected JSON export and account deletion. Zotero credentials and pending emails are encrypted with versioned application keys.
+Registration follows email → six-digit OTP → name/password and legal acceptance → automatic sign-in. The password is requested only after mailbox verification. See [registration API, limits and local testing](docs/Architecture/RegistrationOTP.md). Access tokens stay in browser memory; opaque refresh sessions rotate in an HttpOnly cookie. Account settings provide verified email changes, password changes, session revocation, password-protected JSON export and account deletion. Zotero credentials and pending emails are encrypted with versioned application keys.
 
 Every production operator supplies their own legal configuration and authenticated SMTP. Off-site encrypted backups are optional; without them database loss may be irreversible and the privacy notice must accurately disclose this. The application includes bilingual privacy/terms pages and only technical storage for sessions, theme and language: no analytics, trackers or consent banner are bundled. Legal texts still require human review for the actual operator and jurisdiction.
 
@@ -209,4 +214,6 @@ OpenBib is available under the [MIT License](LICENSE). By contributing, you agre
 
 ## Acknowledgements
 
-OpenBib builds on bibliographic data and APIs provided by [OpenAlex](https://openalex.org/), [arXiv](https://arxiv.org/), [Crossref](https://www.crossref.org/), and [Europe PMC](https://europepmc.org/), with optional export to [Zotero](https://www.zotero.org/).
+OpenBib retrieves bibliographic data exclusively from [Semantic Scholar](https://www.semanticscholar.org/), with optional export to [Zotero](https://www.zotero.org/). OpenAlex, arXiv, Crossref and Europe PMC adapters remain available as inactive implementations.
+
+See the [provider audit and endpoint mapping](docs/Architecture/SemanticScholar.md) for enablement, identity rules, operational limits and live test instructions.

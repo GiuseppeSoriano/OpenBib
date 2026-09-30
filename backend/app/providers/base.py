@@ -27,6 +27,7 @@ class Author:
     name: str
     family_name: str | None = None
     given_name: str | None = None
+    semantic_scholar_id: str | None = None
     openalex_id: str | None = None
     orcid: str | None = None
     affiliations: list[str] = field(default_factory=list)
@@ -44,6 +45,7 @@ class PaperMetadata:
     arxiv_id: str | None = None
     pmid: str | None = None
     pmcid: str | None = None
+    semantic_scholar_id: str | None = None
     openalex_id: str | None = None
     venue: str | None = None
     volume: str | None = None
@@ -79,6 +81,8 @@ class SearchResult:
     page_size: int
     provider: str
     providers: list[str] = field(default_factory=list)
+    # Providers must report continuation before local filtering/deduplication.
+    has_more: bool = False
 
 
 @dataclass
@@ -123,6 +127,20 @@ class BaseProvider(ABC):
 
     @abstractmethod
     async def get_citations(self, paper_id: str) -> list[PaperReference]: ...
+
+    async def list_related_papers(
+        self, paper_id: str, *, direction: str, order: str, limit: int
+    ) -> list[PaperMetadata]:
+        raise NotImplementedError
+
+    async def reference_ids(self, paper_id: str) -> list[str]:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        """Close an adapter client when initialized; inactive adapters are never constructed."""
+        client = getattr(self, "_client", None)
+        if client is not None:
+            await client.aclose()
 
     @abstractmethod
     async def get_author(self, author_id: str) -> AuthorMetadata | None: ...

@@ -119,13 +119,106 @@ def main():
                 "SELECT column_name FROM information_schema.columns WHERE table_name='zotero_credentials' AND column_name='api_key'"
             )
         )
-        print(
-            "Clean upgrade, previous-head upgrade, encryption round-trip and failure atomicity passed"
+        # Upgrade the actual pre-OTP head with existing account/action data.
+        reset()
+        migrate("d6e7f8a9b0c1", key_file)
+        asyncio.run(
+            sql(
+                "INSERT INTO users (id,email,password_hash,display_name) VALUES (:id,'otp-migration@example.com','preserved-hash','Preserved')",
+                {"id": user_id},
+            )
         )
+        for digit, purpose in enumerate(("verify_email", "reset_password", "change_email"), 1):
+            asyncio.run(
+                sql(
+                    "INSERT INTO user_action_tokens (id,user_id,purpose,token_digest,expires_at) VALUES (:id,:uid,:purpose,:digest,CURRENT_TIMESTAMP + INTERVAL '1 day')",
+                    {
+                        "id": str(uuid.uuid4()),
+                        "uid": user_id,
+                        "purpose": purpose,
+                        "digest": str(digit) * 64,
+                    },
+                )
+            )
+        migrate("head", key_file)
+        assert (
+            asyncio.run(sql("SELECT password_hash FROM users"))[0]["password_hash"]
+            == "preserved-hash"
+        )
+        actions = asyncio.run(sql("SELECT purpose,used_at FROM user_action_tokens"))
+        assert all((r["used_at"] is not None) == (r["purpose"] == "verify_email") for r in actions)
+        assert asyncio.run(sql("SELECT count(*) AS n FROM registration_challenges"))[0]["n"] == 0
+        # Preserve all collection identities/content and legacy roles; no links enabled.
+        reset()
+        migrate("e7f8a9b0c1d2", key_file)
+        users = [str(uuid.uuid4()) for _ in range(4)]
+        for index, uid in enumerate(users):
+            asyncio.run(
+                sql(
+                    "INSERT INTO users (id,email,password_hash,display_name) VALUES (:id,:email,'hash','Fixture')",
+                    {"id": uid, "email": f"sharing{index}@example.com"},
+                )
+            )
+        collections = [str(uuid.uuid4()) for _ in range(3)]
+        for cid, visibility in zip(collections, ("private", "shared", "public"), strict=True):
+            asyncio.run(
+                sql(
+                    "INSERT INTO collections (id,owner_id,name,visibility) VALUES (:id,:owner,'Preserved',:visibility)",
+                    {"id": cid, "owner": users[0], "visibility": visibility},
+                )
+            )
+            asyncio.run(
+                sql(
+                    "INSERT INTO collection_papers (collection_id,paper_canonical_key,added_by) VALUES (:id,'doi:10.1/preserved',:owner)",
+                    {"id": cid, "owner": users[0]},
+                )
+            )
+            for uid, role in zip(users, ("owner", "editor", "viewer", "owner"), strict=True):
+                asyncio.run(
+                    sql(
+                        "INSERT INTO collection_members (collection_id,user_id,role) VALUES (:cid,:uid,:role)",
+                        {"cid": cid, "uid": uid, "role": role},
+                    )
+                )
+        migrate("head", key_file)
+        rows = asyncio.run(sql("SELECT id,owner_id,revision,read_link_digest FROM collections"))
+        assert {str(r["id"]) for r in rows} == set(collections)
+        assert all(
+            str(r["owner_id"]) == users[0] and r["revision"] == 1 and r["read_link_digest"] is None
+            for r in rows
+        )
+        assert asyncio.run(sql("SELECT count(*) AS n FROM collection_papers"))[0]["n"] == 3
+        assert (
+            asyncio.run(sql("SELECT count(*) AS n FROM collection_members WHERE role='editor'"))[0][
+                "n"
+            ]
+            == 6
+        )
+        assert (
+            asyncio.run(sql("SELECT count(*) AS n FROM collection_members WHERE role='viewer'"))[0][
+                "n"
+            ]
+            == 3
+        )
+        assert not asyncio.run(
+            sql(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='collections' AND column_name='visibility'"
+            )
+        )
+        assert not asyncio.run(sql("SELECT typname FROM pg_type WHERE typname='visibility_enum'"))
         check_key_repair(key_file)
+        print(
+            "Clean upgrade, previous-head upgrade, encryption round-trip, failure atomicity, "
+            "pre-OTP and collection sharing upgrades, and the legacy paper-key repair "
+            "(logged counts, re-upgrade idempotency) passed"
+        )
 
 
+# Seed at c7d8 (the schema the audit found, with collections.visibility) so
+# the upgrade also crosses the later revisions; downgrade only to the repair's
+# parent, since its own downgrade is the no-op.
 KEY_REPAIR_FROM = "c7d8e9f0a1b2"
+KEY_REPAIR_PARENT = "f8a9b0c1d2e3"
 TNN = "doi:10.1109/tnn.2008.2005605"
 RAW_KEYS = ("10.1109/tnn.2008.2005605", "https://dx.doi.org/10.1109/TNN.2008.2005605")
 
@@ -228,11 +321,10 @@ def check_key_repair(key_file):
     assert_key_repair()
     # The downgrade is a documented no-op; upgrading again re-runs the repair
     # over already repaired data, which must change nothing.
-    migrate(KEY_REPAIR_FROM, key_file, command="downgrade")
+    migrate(KEY_REPAIR_PARENT, key_file, command="downgrade")
     log = migrate("head", key_file)
     assert "Paper key repair: 0 keys mapped, 1 unrepairable" in log, log
     assert_key_repair()
-    print("Legacy paper-key repair, its logged counts and re-upgrade idempotency passed")
 
 
 if __name__ == "__main__":

@@ -189,6 +189,16 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         addToCatalog(next);
         dispatch({ type: "baseLoaded", base: next });
       },
+      /** Drop the whole exploration (the base was withdrawn, e.g. lost access). */
+      clear() {
+        abort();
+        if (stateRef.current.baseIds.size === 0) return;
+        catalog.reset();
+        setCatalogRevision((revision) => revision + 1);
+        const next = initialExplorationState(stateRef.current.mode);
+        stateRef.current = next;
+        setState(next);
+      },
       select(id: string | null) {
         dispatchDropping({ type: "select", id });
       },
@@ -271,6 +281,7 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
 
   useEffect(() => {
     if (base) actions.reset(base);
+    else actions.clear();
   }, [base, actions]);
 
   // "Expand pinned" pauses on 429 and resumes by itself after Retry-After.

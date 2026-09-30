@@ -1,0 +1,17 @@
+.collection-sharing { display: grid; gap: 1.5rem; max-height: 75vh; overflow-y: auto; }
+.collection-sharing section + section { border-top: 1px solid var(--color-border); padding-top: 1.5rem; }
+.collection-sharing h4 { margin: 0 0 .5rem; }
+.collection-sharing p { line-height: 1.5; }
+.collection-sharing label { display: grid; gap: .5rem; min-width: 0; }
+.collection-sharing form { display: grid; gap: .75rem; }
+.sharing-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.sharing-members { list-style: none; padding: 0; }
+.sharing-members li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 0; }
+.sharing-members li div { display: grid; gap: .25rem; overflow-wrap: anywhere; min-width: 0; }
+.sharing-status { font-weight: 600; }
+@media (max-width: 540px) {
+  .sharing-actions { flex-direction: column; }
+  .collection-sharing .btn { min-height: 44px; }
+  .collection-sharing input { font-size: 16px; }
+  .sharing-members li { align-items: start; flex-direction: column; }
+}

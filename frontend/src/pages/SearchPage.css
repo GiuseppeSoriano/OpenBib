@@ -63,11 +63,6 @@
     gap: var(--space-sm);
   }
 
-  .search-error {
-    color: var(--color-danger);
-    font-size: 0.88rem;
-  }
-
   .dismiss-btn {
     font-size: 0.78rem;
     margin-left: auto;

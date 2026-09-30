@@ -30,6 +30,7 @@ export interface PaperMetadata {
   arxiv_id: string | null;
   pmid?: string | null;
   pmcid?: string | null;
+  semantic_scholar_id?: string | null;
   openalex_id?: string | null;
   venue: string | null;
   volume?: string | null;
@@ -52,6 +53,7 @@ export interface Author {
   name: string;
   family_name?: string | null;
   given_name?: string | null;
+  semantic_scholar_id?: string | null;
   openalex_id: string | null;
   orcid: string | null;
   affiliations: string[];
@@ -110,14 +112,14 @@ export interface ZoteroSyncReport {
 }
 
 /* ── Collection ─────────────────────────────────────────── */
-export type Visibility = "private" | "shared" | "public";
 export type MemberRole = "owner" | "editor" | "viewer";
 
 export interface Collection {
   id: string;
   name: string;
   description: string | null;
-  visibility: Visibility;
+  revision: number;
+  can_manage_access: boolean;
   is_owner: boolean;
   can_edit: boolean;
   paper_count: number;
@@ -199,6 +201,7 @@ export interface SearchResult {
   items: SearchResultItem[];
   total_count: number;
   raw_total_count: number;
+  has_more: boolean;
   page: number;
   page_size: number;
   providers: string[];
@@ -359,4 +362,12 @@ export interface TopUpResponse {
   sources: TopUpSourceResult[];
   range_size: number;
   max_results: number;
+}
+
+export interface RegistrationStatus {
+  stage: "email" | "otp" | "profile" | "expired" | "locked";
+  email_masked?: string | null;
+  expires_at?: string | null;
+  otp_expires_at?: string | null;
+  resend_after?: number;
 }

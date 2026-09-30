@@ -15,15 +15,12 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("account lifecycle pages", () => {
-  it("keeps the verification token in memory and submits the final password", async () => {
+  it("retires verification links without asking for another password", async () => {
     window.history.replaceState(null, "", "/verify-email#token=mailbox-token");
     renderWithProviders(<VerifyEmailPage />);
-    const password = await screen.findByLabelText("Password");
+    expect(await screen.findByRole("link", { name: "Start registration again" })).toHaveAttribute("href", "/register");
     expect(window.location.hash).toBe("");
-    fireEvent.change(password, { target: { value: "a sufficiently long password" } });
-    fireEvent.submit(password.closest("form")!);
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/auth/verify-email", { token: "mailbox-token", new_password: "a sufficiently long password" }));
-    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
   });
 
   it("offers password reset without storing the fragment token", async () => {
@@ -31,17 +28,15 @@ describe("account lifecycle pages", () => {
     renderWithProviders(<ResetPasswordPage />);
     const password = await screen.findByLabelText("New password");
     expect(window.location.hash).toBe("");
-    expect(password).toHaveAttribute("minlength", "15");
+    expect(password).toHaveAttribute("minlength", "8");
     fireEvent.change(password, { target: { value: "another sufficiently long password" } });
     fireEvent.submit(password.closest("form")!);
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/auth/password/reset", { token: "reset-token", new_password: "another sufficiently long password" }));
   });
 
-  it("allows a generic verification resend", async () => {
+  it("redirects the old check-email flow to OTP registration", async () => {
     renderWithProviders(<CheckEmailPage />);
-    const email = await screen.findByLabelText("Email");
-    fireEvent.change(email, { target: { value: "reader@example.com" } });
-    fireEvent.submit(email.closest("form")!);
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/auth/email/resend", { email: "reader@example.com", locale: "en" }));
+    expect(await screen.findByRole("link", { name: "Start registration again" })).toHaveAttribute("href", "/register");
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 });

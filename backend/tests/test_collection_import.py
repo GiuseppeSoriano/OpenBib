@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
 from app.collections import service as collections_service
 from app.collections.models import CollectionPaper
-from app.collections.schemas import CollectionCreate, Visibility
+from app.collections.schemas import CollectionCreate
 from app.common import rate_limit
 from app.dependencies import get_db
 from app.library.models import UserLibraryEntry, UserLibraryVersion
@@ -77,7 +77,7 @@ def _client(db) -> AsyncClient:
 async def _setup(db, email: str = "importer@example.com"):
     user = await _make_user(db, email)
     coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Imports", visibility=Visibility.private)
+        db, user.id, CollectionCreate(name="Imports")
     )
     return user, coll, await _auth(db, user)
 
@@ -204,6 +204,42 @@ async def test_provider_outage_inserts_unresolved_rows(db):
     assert response.json()["unresolved"] == 2
     assert [row["resolved"] for row in listed.json()] == [False, False]
     assert await _count(db, UserLibraryVersion, user_id=user.id) == 2
+
+
+@pytest.mark.asyncio
+async def test_doi_cached_as_an_s2_alias_needs_no_provider(db, monkeypatch):
+    async def unexpected(doi: str, **_kwargs):
+        raise AssertionError(f"unexpected provider call for {doi}")
+
+    s2_id = "b" * 40
+    snapshot = _paper(f"s2:{s2_id}", "group:s2import", "Snapshot")
+    snapshot.semantic_scholar_id = s2_id
+    enriched = _paper("doi:10.1/s2alias", "group:s2import", "Snapshot")
+    enriched.semantic_scholar_id = s2_id
+    await cache_papers(db, [snapshot])
+    await cache_papers(db, [enriched])
+    monkeypatch.setattr("app.providers.registry.resolve_doi", unexpected)
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        first = await client.post(
+            f"/api/v1/collections/{coll.id}/import/dois",
+            json={"dois": ["10.1/s2alias"]},
+            headers=headers,
+        )
+        again = await client.post(
+            f"/api/v1/collections/{coll.id}/import/dois",
+            json={"dois": ["https://doi.org/10.1/S2ALIAS"]},
+            headers=headers,
+        )
+
+    assert [(r["status"], r["canonical_key"]) for r in first.json()["results"]] == [
+        ("added", f"s2:{s2_id}")
+    ]
+    assert [(r["status"], r["canonical_key"]) for r in again.json()["results"]] == [
+        ("duplicate", f"s2:{s2_id}")
+    ]
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 1
 
 
 @pytest.mark.asyncio

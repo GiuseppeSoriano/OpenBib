@@ -1,4 +1,4 @@
-import { NavLink, Link } from "react-router-dom";
+import { NavLink, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LogIn } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +17,7 @@ const NAV_ITEMS = [
 
 /** Slim top navigation bar — the app's only navigation chrome on desktop. */
 export default function TopNav() {
+  const location = useLocation();
   const { t } = useTranslation();
   const { user } = useAuth();
 
@@ -48,7 +49,7 @@ export default function TopNav() {
         {user ? (
           <UserMenu />
         ) : (
-          <Link to="/login" className="btn btn-primary topnav-signin">
+          <Link to="/login" state={{ returnTo: location.pathname + location.search + location.hash }} className="btn btn-primary topnav-signin">
             <LogIn size={14} />
             <span className="topnav-signin-label">{t("nav.signIn")}</span>
           </Link>

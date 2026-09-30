@@ -181,6 +181,30 @@ async def test_detail_404_for_unknown_hash_key(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_detail_miss_is_not_sent_to_doi_org(db, monkeypatch):
+    from app.providers import registry
+
+    class Miss:
+        name = "miss"
+
+        async def lookup_by_doi(self, doi):
+            return None
+
+    async def handle_check(doi: str):
+        raise AssertionError("viewing a paper must not query doi.org")
+
+    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [Miss()])
+    monkeypatch.setattr(registry, "doi_handle_exists", handle_check)
+    app = _make_app(db)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/papers/doi:10.5/unknown")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_detail_route_does_not_shadow_sibling_routes(db):
     """/search and /dismissed must still resolve to their own handlers."""
     app = _make_app(db)

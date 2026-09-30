@@ -269,8 +269,12 @@ async def test_tag_filter_uses_the_entry_group(db):
     assert empty.status_code == 422
 
 
-async def _collection(db, owner_id, *, visibility="private", members=(), keys=()) -> uuid.UUID:
-    coll = Collection(id=uuid.uuid4(), owner_id=owner_id, name="Reading", visibility=visibility)
+async def _collection(
+    db, owner_id, *, members=(), keys=(), read_link_digest: str | None = None
+) -> uuid.UUID:
+    coll = Collection(
+        id=uuid.uuid4(), owner_id=owner_id, name="Reading", read_link_digest=read_link_digest
+    )
     db.add(coll)
     await db.flush()
     db.add(CollectionMember(collection_id=coll.id, user_id=owner_id, role="owner"))
@@ -295,13 +299,16 @@ async def test_collection_filter_requires_a_viewable_collection(db):
     await db.flush()
     mine = await _collection(db, user_id, keys=["doi:10.1/p1", "doi:10.1/elsewhere"])
     shared = await _collection(db, owner_id, members=[(user_id, "viewer")], keys=["doi:10.1/v3"])
-    public = await _collection(db, owner_id, visibility="public", keys=["doi:10.1/p2"])
+    # A read link is a capability for the shared page only, never for this filter.
+    linked = await _collection(db, owner_id, read_link_digest="0" * 64, keys=["doi:10.1/p2"])
     private = await _collection(db, owner_id, keys=["doi:10.1/p1"])
 
     async with _client(db) as client:
         in_mine = await _groups(client, headers, collection_id=str(mine))
         in_shared = await _groups(client, headers, collection_id=str(shared))
-        in_public = await _groups(client, headers, collection_id=str(public))
+        link_only = await client.get(
+            ENTRIES, params={"collection_id": str(linked)}, headers=headers
+        )
         hidden = await client.get(ENTRIES, params={"collection_id": str(private)}, headers=headers)
         missing = await client.get(
             ENTRIES, params={"collection_id": str(uuid.uuid4())}, headers=headers
@@ -311,7 +318,7 @@ async def test_collection_filter_requires_a_viewable_collection(db):
     assert in_mine == ["group:p001"]
     # Matched through a second pinned version of the entry.
     assert in_shared == ["group:p003"]
-    assert in_public == ["group:p002"]
+    assert link_only.status_code == 404
     assert hidden.status_code == 404
     assert missing.status_code == 404
     assert malformed.status_code == 422

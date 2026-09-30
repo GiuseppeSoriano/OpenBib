@@ -52,3 +52,8 @@ describe("Layout (top navbar shell)", () => {
     expect(screen.getAllByRole("navigation", { name: "Principale" })).toHaveLength(2);
   });
 });
+
+it("links to the open-source repository from the footer", () => {
+  renderWithProviders(<Layout />);
+  expect(screen.getByRole("link", { name: /Contribute on GitHub/ })).toHaveAttribute("href", "https://github.com/GiuseppeSoriano/OpenBib");
+});

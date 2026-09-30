@@ -8,8 +8,8 @@ from fastapi import status
 from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.collections.models import Collection, CollectionMember, CollectionPaper
-from app.collections.service import _can_view, _member_roles
+from app.collections.access import authorize, editable_by
+from app.collections.models import Collection, CollectionPaper
 from app.common.exceptions import ApiError, ConflictError, InvalidIdentifierError, NotFoundError
 from app.common.identifiers import (
     ParsedIdentifier,
@@ -253,9 +253,8 @@ async def _entry_filters(
             .exists()
         )
     if collection_id is not None:
-        coll = await db.get(Collection, collection_id)
-        if coll is None or not _can_view(coll, user_id, await _member_roles(db, collection_id)):
-            raise NotFoundError("Collection not found")
+        # A collection the user cannot read is a 404 (no read-link token here).
+        await authorize(db, collection_id, user_id)
         filters.append(
             select(CollectionPaper.paper_canonical_key)
             .join(
@@ -513,14 +512,15 @@ async def _canonical_keys_in_collections(
     db: AsyncSession, user_id: uuid.UUID, canonical_keys: list[str]
 ) -> set[str]:
     """Return the subset of keys that are still referenced by at least one
-    of this user's collections."""
+    collection this user can edit (a read-only copy never blocks, because
+    the user could not detach it)."""
     if not canonical_keys:
         return set()
     q = (
         select(CollectionPaper.paper_canonical_key)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
         .where(
-            Collection.owner_id == user_id,
+            editable_by(user_id),
             CollectionPaper.paper_canonical_key.in_(canonical_keys),
         )
     )
@@ -564,7 +564,7 @@ async def delete_entry(
 ) -> None:
     """Delete a Library entry and everything anchored to it.
 
-    While a pinned version is still in one of the user's own collections the
+    While a pinned version is still in a collection the user can edit the
     delete is refused with the list of those collections, unless ``detach``
     asks to remove the paper from them first.
     """
@@ -579,14 +579,14 @@ async def delete_entry(
         )
     )
     pinned_keys = [row[0] for row in pins_q.all()]
-    # Same owned-collections scope as _canonical_keys_in_collections.
+    # Same editable-collections scope as _canonical_keys_in_collections.
     blocking = []
     if pinned_keys:
         rows_q = await db.execute(
             select(CollectionPaper, Collection.name)
             .join(Collection, Collection.id == CollectionPaper.collection_id)
             .where(
-                Collection.owner_id == user_id,
+                editable_by(user_id),
                 CollectionPaper.paper_canonical_key.in_(pinned_keys),
             )
             .order_by(Collection.name, Collection.id)
@@ -640,24 +640,11 @@ async def _editable_collection_ids(
     db: AsyncSession, user_id: uuid.UUID, canonical_key: str
 ) -> set[uuid.UUID]:
     """Collections holding ``canonical_key`` that the user may edit (the same
-    rule as ``collections.service._can_edit``)."""
+    rule as ``collections.access.authorize(permission="edit")``)."""
     q = (
         select(CollectionPaper.collection_id)
         .join(Collection, Collection.id == CollectionPaper.collection_id)
-        .outerjoin(
-            CollectionMember,
-            and_(
-                CollectionMember.collection_id == Collection.id,
-                CollectionMember.user_id == user_id,
-            ),
-        )
-        .where(
-            CollectionPaper.paper_canonical_key == canonical_key,
-            or_(
-                Collection.owner_id == user_id,
-                CollectionMember.role.in_(("owner", "editor")),
-            ),
-        )
+        .where(CollectionPaper.paper_canonical_key == canonical_key, editable_by(user_id))
     )
     return {row[0] for row in (await db.execute(q)).all()}
 
@@ -725,8 +712,8 @@ async def resolve_library_paper(
 
         await lock_user(db, user_id)
         if lookup.paper is not None:
-            await cache_papers(db, [lookup.paper])
-            cached = await get_cached_paper(db, lookup.paper.canonical_key)
+            stored = (await cache_papers(db, [lookup.paper]))[0]
+            cached = await get_cached_paper(db, stored.canonical_key)
         else:
             status_ = "unavailable"
 
@@ -790,7 +777,7 @@ async def list_group_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     q = (
         select(UserLibraryEntry.paper_group_key)
         .where(UserLibraryEntry.user_id == user_id)
-        .order_by(UserLibraryEntry.created_at.desc())
+        .order_by(UserLibraryEntry.created_at.desc(), UserLibraryEntry.paper_group_key)
     )
     return [row[0] for row in (await db.execute(q)).all()]
 

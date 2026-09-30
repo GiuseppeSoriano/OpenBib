@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
+from app.collections.access import ShareToken
 from app.common.rate_limit import enforce_rate_limit
 from app.dependencies import DB, CurrentUser
 from app.zotero import service
@@ -55,7 +56,12 @@ async def delete_credentials(user: CurrentUser, db: DB):
 
 @router.post("/sync/collection/{collection_id}", response_model=ZoteroSyncReport)
 async def sync_collection(
-    collection_id: uuid.UUID, request: Request, response: Response, user: CurrentUser, db: DB
+    collection_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: DB,
+    share_token: ShareToken = None,
 ):
     await enforce_rate_limit(
         request.app.state.redis,
@@ -67,7 +73,7 @@ async def sync_collection(
         window_seconds=3600,
         fail_closed=True,
     )
-    return await service.sync_collection(db, user.id, collection_id)
+    return await service.sync_collection(db, user.id, collection_id, share_token)
 
 
 @router.post("/sync/library", response_model=ZoteroSyncReport)

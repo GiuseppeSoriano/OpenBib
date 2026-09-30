@@ -29,7 +29,8 @@ const collection: Collection = {
   id: "c1",
   name: "Graph learning",
   description: null,
-  visibility: "private",
+  revision: 1,
+  can_manage_access: true,
   is_owner: true,
   can_edit: true,
   paper_count: 3,
@@ -70,6 +71,7 @@ describe("DashboardPage", () => {
     await show();
     expect(await screen.findByRole("heading", { level: 2, name: "Get started" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: /Graph learning/ })).toHaveAttribute("href", "/collections/c1");
+    expect(screen.getByRole("link", { name: /Graph learning/ })).toHaveTextContent("Read only");
     expect(screen.getAllByRole("link", { name: "Find your first paper" })).toHaveLength(1);
   });
 
@@ -136,9 +138,9 @@ describe("DashboardPage", () => {
     expect(tiles.map((tile) => tile.querySelector(".stat-value")?.textContent)).toEqual(["11", "2", "9", "7"]);
     expect(tiles.map((tile) => tile.querySelector(".stat-hint")?.textContent)).toEqual([
       "Papers you’ve saved, each counted once",
-      "Collections you own",
-      "Papers added to your collections, repeats included",
-      "Different papers across your collections",
+      "Your collections and those shared with you",
+      "Papers added to collections you can access, repeats included",
+      "Different papers across collections you can access",
     ]);
     expect(screen.queryByRole("heading", { name: "Get started" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Graph learning/ })).toHaveAttribute("href", "/collections/c1");
@@ -179,7 +181,7 @@ describe("DashboardPage", () => {
     const { container } = await show("it");
     expect(await screen.findByText("11")).toBeInTheDocument();
     expect(container.querySelector(".stat-label")).toHaveTextContent("In Libreria");
-    expect(screen.getByText("Articoli distinti nelle tue raccolte")).toBeInTheDocument();
+    expect(screen.getByText("Articoli distinti nelle raccolte a cui hai accesso")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Esporta i tuoi dati" })).toHaveAttribute("href", "/settings#your-data");
     expect(screen.getByRole("link", { name: "Trova articoli" })).toHaveAttribute("href", "/search");
   });

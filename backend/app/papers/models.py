@@ -96,6 +96,7 @@ class CachedPaperMetadata(Base):
     arxiv_id: Mapped[str | None] = mapped_column(String(255))
     pmid: Mapped[str | None] = mapped_column(String(255))
     pmcid: Mapped[str | None] = mapped_column(String(255))
+    semantic_scholar_id: Mapped[str | None] = mapped_column(String(64), index=True)
     openalex_id: Mapped[str | None] = mapped_column(String(255))
     venue: Mapped[str | None] = mapped_column(String(512))
     volume: Mapped[str | None] = mapped_column(String(100))

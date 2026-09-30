@@ -41,7 +41,6 @@ async def _make_collection(db, owner_id, name="My Coll"):
         id=uuid.uuid4(),
         owner_id=owner_id,
         name=name,
-        visibility="private",
     )
     db.add(coll)
     await db.flush()
@@ -404,3 +403,29 @@ async def test_tags_fall_back_to_canonical_key_without_cached_group(db):
         "uncached"
     ]
     assert await paper_service.get_tags(db, user.id, "hash:uncached-v2") == []
+
+
+async def test_library_pagination_is_stable_when_creation_times_match(db):
+    from datetime import datetime
+
+    user = await _make_user(db)
+    timestamp = datetime(2026, 1, 1)
+    for index in reversed(range(102)):
+        key = f"group:{index:03}"
+        db.add(
+            UserLibraryEntry(
+                user_id=user.id,
+                paper_group_key=key,
+                primary_canonical_key=f"s2:{index}",
+                created_at=timestamp,
+            )
+        )
+    await db.flush()
+    pages = [
+        (await library_service.list_entries(db, user.id, page=page, size=25))[0]
+        for page in range(1, 6)
+    ]
+    keys = [entry["paper_group_key"] for page in pages for entry in page]
+    assert keys == [f"group:{index:03}" for index in range(102)]
+    entries, _ = await library_service.list_entries(db, user.id, page=6, size=25)
+    assert entries == []

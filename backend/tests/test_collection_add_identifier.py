@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
 from app.collections import service as collections_service
 from app.collections.models import CollectionPaper
-from app.collections.schemas import CollectionCreate, Visibility
+from app.collections.schemas import CollectionCreate
 from app.common import rate_limit
 from app.common.identifiers import synthetic_group_key
 from app.dependencies import get_db
@@ -80,9 +80,7 @@ def _client(db) -> AsyncClient:
 
 async def _setup(db, email: str = "adder@example.com"):
     user = await _make_user(db, email)
-    coll = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Audit", visibility=Visibility.private)
-    )
+    coll = await collections_service.create_collection(db, user.id, CollectionCreate(name="Audit"))
     return user, coll, await _auth(db, user)
 
 
@@ -257,11 +255,41 @@ async def test_provider_alias_is_stored_under_the_returned_key(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cached_doi_alias_of_an_s2_row_is_deduped(db):
+    s2_id = "a" * 40
+    snapshot = _paper(f"s2:{s2_id}", "group:s2alias", "Snapshot")
+    snapshot.doi = None
+    snapshot.semantic_scholar_id = s2_id
+    enriched = _paper("doi:10.1/x", "group:s2alias", "Snapshot")
+    enriched.semantic_scholar_id = s2_id
+    await cache_papers(db, [snapshot])
+    await cache_papers(db, [enriched])
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        first = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "10.1/x"},
+            headers=headers,
+        )
+        again = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "10.1/x"},
+            headers=headers,
+        )
+
+    assert first.status_code == 201
+    assert first.json()["paper_canonical_key"] == f"s2:{s2_id}"
+    assert again.status_code == 409
+    assert again.json()["detail"]["code"] == "already_in_collection"
+    assert again.json()["detail"]["canonical_key"] == f"s2:{s2_id}"
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 1
+
+
+@pytest.mark.asyncio
 async def test_real_group_replaces_an_earlier_synthetic_entry(db, monkeypatch):
     user, coll, headers = await _setup(db)
-    other = await collections_service.create_collection(
-        db, user.id, CollectionCreate(name="Other", visibility=Visibility.private)
-    )
+    other = await collections_service.create_collection(db, user.id, CollectionCreate(name="Other"))
 
     async with _client(db) as client:
         pending = await client.post(

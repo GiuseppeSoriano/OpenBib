@@ -15,6 +15,10 @@ interface AddToCollectionMenuProps {
   variant?: "button" | "icon";
 }
 
+function editableOnly(collections: Collection[]): Collection[] {
+  return collections.filter((collection) => collection.can_edit);
+}
+
 /**
  * Shared "Add to collection" popover — used on Search, Library, and the
  * paper details panel. Collections load lazily when the menu opens.
@@ -31,10 +35,9 @@ export default function AddToCollectionMenu({
 
   const { data: collections } = useQuery({
     queryKey: ["collections"],
-    queryFn: async () => {
-      const { data } = await api.get<Collection[]>("/collections");
-      return data;
-    },
+    queryFn: async () => (await api.get<Collection[]>("/collections")).data,
+    // The cached list is the full one other pages show; only offer editable collections here.
+    select: editableOnly,
     enabled,
   });
 

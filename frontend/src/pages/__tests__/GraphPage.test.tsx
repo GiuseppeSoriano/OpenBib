@@ -1,7 +1,8 @@
+import { focusManager } from "@tanstack/react-query";
 import { mockRefresh } from "@/test/auth-mock";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Routes, Route } from "react-router-dom";
+import { Link, Routes, Route } from "react-router-dom";
 import GraphPage from "@/pages/GraphPage";
 import { mockMatchMedia, renderWithProviders, restoreMatchMedia } from "@/test/utils";
 import type { GraphNode, GraphResponse, PaperMetadata, RelatedRangeRequest, RelatedRangeResponse } from "@/types";
@@ -29,15 +30,20 @@ vi.mock("react-force-graph-2d", async () => {
 
 const api = vi.hoisted(() => ({
   buildPaper: vi.fn(),
+  buildCollection: vi.fn(),
   related: vi.fn(),
   topUp: vi.fn(),
+}));
+
+const http = vi.hoisted(() => ({
+  get: vi.fn<(url: string, config?: unknown) => Promise<{ data: unknown }>>(() => Promise.resolve({ data: [] })),
 }));
 
 vi.mock("@/lib/api", () => ({
   refreshAccessToken: vi.fn(() => mockRefresh()),
   setAccessToken: vi.fn(),
   setAuthFailureHandler: vi.fn(),
-  default: { get: vi.fn(() => Promise.resolve({ data: [] })), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  default: { get: http.get, post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   graph: api,
   papers: { getDetail: vi.fn() },
   library: { listKeys: vi.fn(() => Promise.resolve([])) },
@@ -387,7 +393,7 @@ describe("GraphPage (desktop)", () => {
     fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
 
     expect(await within(bar()).findByText("The citation provider is unavailable right now.")).toBeInTheDocument();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(bar()).getByRole("button", { name: "Try again" }));
     expect(api.related).toHaveBeenCalledTimes(2);
     expect(await within(ranges()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
   });
@@ -400,7 +406,7 @@ describe("GraphPage (desktop)", () => {
     fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
 
     expect(await within(bar()).findByText("Too many requests. Try again in 30 s.")).toBeInTheDocument();
-    expect(within(bar()).getByRole("button", { name: "Retry" })).toBeDisabled();
+    expect(within(bar()).getByRole("button", { name: "Try again" })).toBeDisabled();
   });
 
   it("disables Expand pinned nodes with a hint when nothing is pinned", async () => {
@@ -470,7 +476,7 @@ describe("GraphPage (desktop)", () => {
     expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
     expect(api.buildPaper).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(within(alert).getByRole("button", { name: /Retry/ }));
+    fireEvent.click(within(alert).getByRole("button", { name: /Try again/ }));
     await waitFor(() => expect(api.buildPaper).toHaveBeenCalledTimes(2));
   });
 
@@ -723,7 +729,7 @@ describe("GraphPage (compact)", () => {
     expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ direction: "cites", range_start: 0 }), expect.anything());
 
     expect(await within(summary()).findByText("The citation provider is unavailable right now.")).toBeInTheDocument();
-    fireEvent.click(within(summary()).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(summary()).getByRole("button", { name: "Try again" }));
     expect(api.related).toHaveBeenCalledTimes(3);
     expect(await within(summary()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
     expect(within(openSheet()).getByRole("button", { name: "References" })).toHaveAttribute("aria-pressed", "true");
@@ -762,5 +768,120 @@ describe("GraphPage (manual)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Citation graph" })).toBeInTheDocument();
     expect(screen.queryByTestId("graph-bottombar")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+describe("GraphPage (shared collection)", () => {
+  const TOKEN = "a".repeat(43);
+  const NEW_TOKEN = "b".repeat(43);
+  const secondSeed = paper("hash:second", "group:second", "Second Seed");
+
+  function renderCollectionGraph() {
+    return renderWithProviders(
+      <>
+        <Link to={`/graph/collection/c1#share=${NEW_TOKEN}`}>Use the new link</Link>
+        <Routes>
+          <Route path="/graph/collection/:collectionId" element={<GraphPage mode="collection" />} />
+          <Route path="/collections/:id" element={<p>Collection page</p>} />
+        </Routes>
+      </>,
+      { route: `/graph/collection/c1#share=${TOKEN}` },
+    );
+  }
+
+  function collectionReads(status: "ok" | "revoked") {
+    http.get.mockImplementation((url: string) => {
+      if (!url.startsWith("/collections/")) return Promise.resolve({ data: [] });
+      return status === "ok" ? Promise.resolve({ data: { id: "c1" } }) : Promise.reject(httpError(404));
+    });
+  }
+
+  beforeEach(() => {
+    mockMatchMedia(() => false);
+    engine.mounts = 0;
+    api.buildCollection.mockReset().mockImplementation(() => Promise.resolve(baseGraph()));
+    api.related.mockReset().mockImplementation((body: RelatedRangeRequest) => Promise.resolve(rangeResponse(body)));
+    collectionReads("ok");
+  });
+
+  afterEach(() => {
+    focusManager.setFocused(undefined);
+    http.get.mockReset().mockImplementation(() => Promise.resolve({ data: [] }));
+    restoreMatchMedia();
+  });
+
+  it("sends the read capability with the graph and the access check", async () => {
+    renderCollectionGraph();
+    await ready();
+
+    const headers = { "X-Collection-Share-Token": TOKEN };
+    expect(api.buildCollection).toHaveBeenCalledWith("c1", headers);
+    expect(http.get).toHaveBeenCalledWith("/collections/c1", { headers });
+  });
+
+  it("clears the exploration when the read link is revoked, without rebuilding the graph", async () => {
+    renderCollectionGraph();
+    await ready();
+    selectSeed();
+    const late = deferred<RelatedRangeResponse>();
+    let signal: AbortSignal | undefined;
+    api.related.mockImplementationOnce((_body: RelatedRangeRequest, options: { signal?: AbortSignal }) => {
+      signal = options.signal;
+      return late.promise;
+    });
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    collectionReads("revoked");
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+
+    expect(await screen.findByText("Collection unavailable or access no longer granted.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the collection" })).toHaveAttribute("href", `/collections/c1#share=${TOKEN}`);
+    expect(screen.queryByTestId("force-graph-stub")).toBeNull();
+    expect(screen.queryByTestId("graph-node-popup")).toBeNull();
+    expect(screen.queryByTestId("graph-bottombar")).toBeNull();
+    expect(signal?.aborted).toBe(true);
+    expect(api.buildCollection).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the unavailable state when the graph itself is no longer readable", async () => {
+    api.buildCollection.mockImplementation(() => Promise.reject(httpError(403)));
+    renderCollectionGraph();
+
+    expect(await screen.findByText("Collection unavailable or access no longer granted.")).toBeInTheDocument();
+    expect(screen.queryByTestId("force-graph-stub")).toBeNull();
+  });
+
+  it("starts a fresh exploration for a new link and ignores the old scope's responses", async () => {
+    api.buildCollection.mockImplementation((_id: string, headers: Record<string, string>) =>
+      Promise.resolve(headers["X-Collection-Share-Token"] === NEW_TOKEN ? baseGraph(secondSeed) : baseGraph()),
+    );
+    renderCollectionGraph();
+    await ready();
+    const list = openPapers();
+    fireEvent.click(within(list).getByRole("button", { name: "Pin “Other Paper”" }));
+    fireEvent.click(within(list).getByRole("button", { name: /^Seed Paper/ }));
+    const late = deferred<RelatedRangeResponse>();
+    api.related.mockImplementationOnce(() => late.promise);
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    fireEvent.click(screen.getByRole("link", { name: "Use the new link" }));
+    await waitFor(() => expect(api.buildCollection).toHaveBeenCalledWith("c1", { "X-Collection-Share-Token": NEW_TOKEN }));
+    await waitFor(() => expect(forceNode("group:second")).toBeDefined());
+    await act(async () => late.resolve(rangeResponse(api.related.mock.calls[0]![0] as RelatedRangeRequest)));
+
+    expect(forceNode("group:Related-0")).toBeUndefined();
+    expect(engine.props.graphData.nodes).toHaveLength(2);
+    expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
+    expect(screen.queryByTestId("graph-node-popup")).toBeNull();
+  });
+
+  it("goes back to the collection with its read link", async () => {
+    renderCollectionGraph();
+    await ready();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByText("Collection page")).toBeInTheDocument();
   });
 });

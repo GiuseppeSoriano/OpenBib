@@ -49,7 +49,7 @@ async def _user(db, email="repair@example.com") -> uuid.UUID:
 
 
 async def _collection(db, owner_id, name="Audit", members=()) -> uuid.UUID:
-    coll = Collection(id=uuid.uuid4(), owner_id=owner_id, name=name, visibility="private")
+    coll = Collection(id=uuid.uuid4(), owner_id=owner_id, name=name)
     db.add(coll)
     await db.flush()
     db.add(CollectionMember(collection_id=coll.id, user_id=owner_id, role="owner"))

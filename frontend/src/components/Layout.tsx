@@ -1,5 +1,6 @@
 import { Link, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ExternalLink } from "lucide-react";
 import TopNav from "@/components/nav/TopNav";
 import MobileTabBar from "@/components/nav/MobileTabBar";
 
@@ -17,7 +18,15 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
-      <footer className="app-footer"><Link to="/privacy">{t("legal.privacy")}</Link><Link to="/terms">{t("legal.terms")}</Link></footer>
+      <footer className="app-footer">
+        <Link to="/privacy">{t("legal.privacy")}</Link>
+        <Link to="/terms">{t("legal.terms")}</Link>
+        <a href="https://github.com/GiuseppeSoriano/OpenBib" target="_blank" rel="noopener noreferrer">
+          {t("nav.contribute")}
+          <ExternalLink size={12} aria-hidden="true" />
+          <span className="sr-only">{` ${t("common.opensInNewTab")}`}</span>
+        </a>
+      </footer>
       <MobileTabBar />
     </div>
   );

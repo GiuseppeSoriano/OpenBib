@@ -20,7 +20,12 @@ from app.collections.service import (
 from app.common.exceptions import InvalidIdentifierError
 from app.common.identifiers import ParsedIdentifier, parse_paper_identifier
 from app.config import settings
-from app.papers.service import cache_papers, get_cached_papers_by_keys
+from app.papers.service import (
+    cache_papers,
+    get_cached_paper,
+    get_cached_papers_by_dois,
+    get_cached_papers_by_keys,
+)
 from app.providers import registry
 from app.providers.registry import DoiLookup
 
@@ -98,11 +103,25 @@ async def import_identifiers(
         candidates.append((line_no, raw, parsed))
 
     cached = await get_cached_papers_by_keys(db, seen)
-    present = await keys_in_collection(db, collection_id, seen)
+    # Like add_paper's get_cached_paper: a DOI may be cached as an alias of
+    # another key (an ``s2:`` row enriched with that DOI).
+    stored_keys: dict[str, str] = {}
+    uncached_dois = {
+        parsed.doi: parsed.canonical_key
+        for _, _, parsed in candidates
+        if parsed.doi and parsed.canonical_key not in cached
+    }
+    for doi, row in (await get_cached_papers_by_dois(db, set(uncached_dois))).items():
+        stored_keys[uncached_dois[doi]] = row.canonical_key
+        cached[row.canonical_key] = row
+    present = await keys_in_collection(db, collection_id, seen | set(stored_keys.values()))
     to_resolve = [
         parsed.doi
         for _, _, parsed in candidates
-        if parsed.doi and parsed.canonical_key not in cached and parsed.canonical_key not in present
+        if parsed.doi
+        and parsed.canonical_key not in cached
+        and parsed.canonical_key not in stored_keys
+        and parsed.canonical_key not in present
     ]
     lookups: dict[str, DoiLookup] = {}
     if to_resolve:
@@ -118,12 +137,18 @@ async def import_identifiers(
             }.values()
         )
         await cache_papers(db, found)
-        found_keys = {paper.canonical_key for paper in found}
-        cached.update(await get_cached_papers_by_keys(db, found_keys))
-        present = await keys_in_collection(db, collection_id, seen | found_keys)
+        # The upsert may keep an older key for the same work (alias merge).
+        for paper in found:
+            row = await get_cached_paper(db, paper.canonical_key)
+            if row is not None:
+                stored_keys[paper.canonical_key] = row.canonical_key
+                cached[row.canonical_key] = row
+        present = await keys_in_collection(db, collection_id, seen | set(stored_keys.values()))
 
     for line_no, raw, parsed in candidates:
         key = parsed.canonical_key
+        if key not in present:
+            key = stored_keys.get(key, key)
         row = cached.get(key)
         if key not in present and row is None:
             lookup = lookups.get(parsed.doi) if parsed.doi else None
@@ -131,7 +156,7 @@ async def import_identifiers(
                 results[line_no] = _line(line_no, raw, "not_found", key)
                 continue
             if lookup.paper is not None:
-                key = lookup.paper.canonical_key
+                key = stored_keys.get(lookup.paper.canonical_key, lookup.paper.canonical_key)
                 row = cached.get(key)
         if key in present:
             results[line_no] = _line(line_no, raw, "duplicate", key)
