@@ -68,9 +68,20 @@ class PaperDetailRead(PaperMetadataRead):
     versions: list[PaperMetadataRead] = []
 
 
+class PossibleVersionRead(BaseModel):
+    """Another result that may be a version of this one. Never merged."""
+
+    paper_group_key: str
+    title: str
+    provider_sources: list[str] = []
+
+    _clean_title = field_validator("title", mode="before")(clean_title_value)
+
+
 class SearchPaperItemRead(BaseModel):
     kind: Literal["paper"]
     paper: PaperMetadataRead
+    possible_versions: list[PossibleVersionRead] = []
 
 
 class SearchPaperGroupItemRead(BaseModel):
@@ -82,8 +93,12 @@ class SearchPaperGroupItemRead(BaseModel):
     selected_version: PaperMetadataRead
     versions: list[PaperMetadataRead] = []
     provider_sources: list[str] = []
+    possible_versions: list[PossibleVersionRead] = []
 
     _clean_title = field_validator("title", mode="before")(clean_title_value)
+
+
+SearchSort = Literal["relevance", "date", "citations"]
 
 
 class SearchResultRead(BaseModel):
@@ -94,6 +109,17 @@ class SearchResultRead(BaseModel):
     page: int
     page_size: int
     providers: list[str] = []
+    sort: SearchSort = "relevance"
+    # Opaque continuation of the date and citation sorts; None on the last page.
+    next_cursor: str | None = None
+    # The provider's own match count (an estimate), kept before deduplication.
+    total_estimate: int | None = None
+    # Paging stopped at the provider's result window (relevance: first 1,000).
+    window_capped: bool = False
+    # A filter (author) was applied to the served rows only.
+    filtered_locally: bool = False
+    # The provider that answered.
+    source: str = "semantic_scholar"
 
 
 class StateUpdate(BaseModel):

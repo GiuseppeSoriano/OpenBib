@@ -36,6 +36,8 @@ class GraphResponse(BaseModel):
     # Lets the client size its range controls before the first related call.
     related_range_size: int = Field(default_factory=lambda: settings.graph_related_range_size)
     related_max_results: int = Field(default_factory=lambda: settings.graph_related_max_results)
+    # Some seeds' references could not be fetched in time: edges may be missing.
+    edges_partial: bool = False
 
 
 class GraphQuery(BaseModel):
@@ -91,14 +93,17 @@ class RelatedRangeResponse(BaseModel):
     total_available: int  # eligible groups after exclusion (exact or estimate)
     total_exact: bool
     total_capped: bool
-    provider_total: int | None  # OpenAlex meta.count, for "first 10,000 of N"
+    # The source's citation or reference count (an estimate), for "first
+    # 10,000 of N".
+    provider_total: int | None
     scanned: int  # raw provider records scanned
     has_more: bool
     exhausted: bool  # the whole eligible list fits in this range
     clamped: bool
     scan_incomplete: bool  # the scan budget ran out before the range filled
     snapshot_id: str | None
-    reason: Literal["no_provider_id"] | None = None
+    # "ranking": the list is still being collected and ranked (no nodes yet).
+    reason: Literal["no_provider_id", "ranking"] | None = None
 
 
 class TopUpSource(BaseModel):
@@ -130,7 +135,8 @@ class TopUpSourceResult(BaseModel):
     provider_total: int | None
     exhausted: bool  # no eligible paper outside the connected ones remains
     reason: Literal["no_provider_id"] | None = None
-    error: Literal["provider_unavailable", "timeout"] | None = None
+    # "ranking": retry the source later; "rate_limited": after Retry-After.
+    error: Literal["provider_unavailable", "timeout", "ranking", "rate_limited"] | None = None
 
 
 class TopUpResponse(BaseModel):

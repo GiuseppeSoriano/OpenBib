@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar, Literal
 from urllib.parse import quote
@@ -19,12 +18,15 @@ from app.providers.base import (
     PaperMetadata,
     PaperReference,
     ProviderCapability,
+    RelatedPage,
     SearchFilters,
     SearchResult,
     build_canonical_key,
     build_paper_group_key,
 )
 from app.providers.rate_limiter import ProviderRateLimiter
+
+__all__ = ["OpenAlexProvider", "RelatedPage"]
 
 _BASE = "https://api.openalex.org"
 
@@ -96,16 +98,6 @@ def _related_entry(raw: dict) -> list:
 # Root fields that cover every key input of ``_work_keys`` plus the ordering
 # and display fields of an entry; abstracts and locations stay out of lists.
 _RELATED_SELECT = "id,doi,title,authorships,publication_year,publication_date,cited_by_count"
-
-
-@dataclass
-class RelatedPage:
-    """One cursor page of a related-works list. ``count`` is OpenAlex's
-    ``meta.count``; ``next_cursor`` is ``None`` at the end of the list."""
-
-    entries: list[list]
-    count: int
-    next_cursor: str | None
 
 
 def _full_text_links(raw: dict) -> tuple[str | None, str | None]:
@@ -302,8 +294,9 @@ class OpenAlexProvider(BaseProvider):
     ) -> RelatedPage:
         """One cursor page of the works related to ``paper_id`` (``cites`` →
         citers, ``cited_by`` → references) as compact entries. Cursor paging
-        has no 10,000-result ceiling and keeps one stable traversal. A 404 is
-        an empty, finished list; every other failure raises."""
+        has no 10,000-result ceiling and keeps one stable traversal. ``count``
+        is OpenAlex's ``meta.count``. A 404 is an empty, finished list; every
+        other failure raises."""
         await self._limiter.acquire()
         params = _params()
         params["filter"] = f"{filter_key}:{_short_id(paper_id)}"
@@ -313,14 +306,16 @@ class OpenAlexProvider(BaseProvider):
         params["select"] = _RELATED_SELECT
         resp = await self._client.get("/works", params=params)
         if resp.status_code == 404:
-            return RelatedPage([], 0, None)
+            return RelatedPage([], count=0)
         resp.raise_for_status()
         data = resp.json()
         meta = data.get("meta") or {}
+        next_cursor = meta.get("next_cursor") or None
         return RelatedPage(
             entries=[_related_entry(w) for w in data.get("results") or []],
+            next=next_cursor,
+            exhausted=next_cursor is None,
             count=int(meta.get("count") or 0),
-            next_cursor=meta.get("next_cursor") or None,
         )
 
     async def works_by_ids(self, ids: list[str]) -> list[PaperMetadata]:

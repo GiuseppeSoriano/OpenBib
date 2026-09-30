@@ -83,6 +83,37 @@ class SearchResult:
     providers: list[str] = field(default_factory=list)
     # Providers must report continuation before local filtering/deduplication.
     has_more: bool = False
+    # The provider's own match count (an estimate), when it reports one.
+    total_estimate: int | None = None
+    # More matches exist but lie beyond the provider's result window.
+    window_capped: bool = False
+
+
+@dataclass
+class BulkSearchPage:
+    """One batch of a sorted bulk search. ``token`` continues it and is
+    ``None`` at the end; ``total`` is the provider's match count."""
+
+    items: list[PaperMetadata]
+    total: int
+    token: str | None = None
+
+
+@dataclass
+class RelatedPage:
+    """One page of a paper's citers or references as compact entries.
+
+    ``next`` continues the list (a Semantic Scholar offset, an OpenAlex
+    cursor) and is ``None`` once ``exhausted``. ``capped`` means the provider
+    will not page further although more records exist; ``count`` is the
+    provider's total when it reports one.
+    """
+
+    entries: list[list]
+    next: int | str | None = None
+    exhausted: bool = True
+    capped: bool = False
+    count: int | None = None
 
 
 @dataclass
@@ -128,10 +159,10 @@ class BaseProvider(ABC):
     @abstractmethod
     async def get_citations(self, paper_id: str) -> list[PaperReference]: ...
 
-    async def list_related_papers(
-        self, paper_id: str, *, direction: str, order: str, limit: int
-    ) -> list[PaperMetadata]:
-        raise NotImplementedError
+    async def lookup_many(self, provider_ids: list[str]) -> list[PaperMetadata | None]:
+        """Records for ``provider_ids`` in input order, ``None`` for a miss.
+        Adapters with a batch endpoint override this one-by-one fallback."""
+        return [await self.lookup_by_id(provider_id) for provider_id in provider_ids]
 
     async def reference_ids(self, paper_id: str) -> list[str]:
         raise NotImplementedError

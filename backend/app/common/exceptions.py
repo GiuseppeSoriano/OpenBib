@@ -26,9 +26,19 @@ class ApiError(HTTPException):
     the custom handlers above stringify it.
     """
 
-    def __init__(self, status_code: int, code: str, message: str, **extra):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **extra,
+    ):
         super().__init__(
-            status_code=status_code, detail={"code": code, "message": message, **extra}
+            status_code=status_code,
+            detail={"code": code, "message": message, **extra},
+            headers=headers,
         )
         self.code = code
 

@@ -1,11 +1,13 @@
-"""OpenAlex related-works paging and id hydration (HTTP mocked with respx)."""
+"""OpenAlex related-works paging and id hydration (HTTP mocked with respx).
+
+The adapter is inactive: the registry pages related lists from Semantic
+Scholar (tests/test_semantic_scholar.py)."""
 
 import httpx
 import pytest
 import respx
 from httpx import Response
 
-from app.providers import registry
 from app.providers.openalex import (
     OpenAlexProvider,
     RelatedPage,
@@ -60,7 +62,7 @@ async def test_related_page_sends_cursor_paging_params_and_parses_meta(provider)
     assert params["cursor"] == "*"
     assert params["select"] == SELECT
     assert page.count == 9742
-    assert page.next_cursor == "c2"
+    assert (page.next, page.exhausted) == ("c2", False)
     assert page.entries == [
         ["W1", "doi:10.1/w1", _work_keys(_work(1))[1], "Work 1", 99, "2020-05-01"],
         ["W2", "doi:10.1/w2", _work_keys(_work(2))[1], "Work 2", 98, "2020-05-01"],
@@ -78,7 +80,7 @@ async def test_related_page_forwards_the_cursor_and_ends_on_null(provider):
 
     assert route.calls.last.request.url.params["cursor"] == "abc"
     assert route.calls.last.request.url.params["filter"] == "cited_by:W9"
-    assert page == RelatedPage([], 3, None)
+    assert page == RelatedPage([], next=None, exhausted=True, count=3)
 
 
 @pytest.mark.asyncio
@@ -87,7 +89,7 @@ async def test_related_page_404_is_an_empty_finished_list(provider):
     respx.get(WORKS).mock(return_value=Response(404))
 
     assert await provider.related_page("W1", filter_key="cites", sort="x") == RelatedPage(
-        [], 0, None
+        [], count=0
     )
 
 
@@ -109,23 +111,10 @@ async def test_related_page_raises_on_timeouts(provider):
         await provider.related_page("W1", filter_key="cites", sort="x")
 
 
-@pytest.mark.skip(reason="integration: ported in WP1")
-@pytest.mark.asyncio
-@respx.mock
-async def test_registry_maps_direction_and_order_to_openalex(monkeypatch):
-    monkeypatch.setattr(registry, "_openalex", OpenAlexProvider())
-    route = respx.get(WORKS).mock(
-        return_value=Response(200, json={"meta": {"count": 0, "next_cursor": None}, "results": []})
-    )
+def test_related_page_is_shared_with_the_provider_base():
+    from app.providers.base import RelatedPage as BaseRelatedPage
 
-    await registry.related_page("W1", direction="cited_by", order="recent")
-    citers = route.calls.last.request.url.params
-    await registry.related_page("W1", direction="cites", order="cited_by_count", per_page=50)
-    references = route.calls.last.request.url.params
-
-    assert (citers["filter"], citers["sort"]) == ("cites:W1", "publication_date:desc")
-    assert (references["filter"], references["sort"]) == ("cited_by:W1", "cited_by_count:desc")
-    assert references["per_page"] == "50"
+    assert RelatedPage is BaseRelatedPage
 
 
 @pytest.mark.asyncio

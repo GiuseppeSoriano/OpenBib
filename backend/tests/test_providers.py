@@ -8,7 +8,8 @@ import respx
 from httpx import Response
 
 from app.common.canonical import build_canonical_key, build_paper_group_key
-from app.providers import arxiv, crossref, europepmc
+from app.common.identifiers import synthetic_group_key
+from app.providers import arxiv, crossref, europepmc, identity, semantic_scholar
 from app.providers.openalex import _map_work, _reconstruct_abstract
 
 MARKUP_TITLE = "Odor <i>coding</i> in <scp>Drosophila</scp>"
@@ -315,3 +316,92 @@ def test_arxiv_normalizes_summary_and_keeps_raw_title_keys():
     assert paper.abstract == "We study graph networks in depth.\n\nA second paragraph."
     assert paper.version == "v2"
     _assert_raw_title_keys(paper, raw_title, ["Ada Lovelace"], year=2023)
+
+
+# ── Semantic Scholar ────────────────────────────────────────
+
+S2_ID = "3efd851140aa28e95221b55fcc5659eea97b172d"
+
+
+def _s2_paper(**overrides) -> dict:
+    raw = {
+        "paperId": S2_ID,
+        "title": f"  {MARKUP_TITLE} ",
+        "authors": [{"authorId": "1", "name": "Ada Lovelace"}],
+        "year": 2021,
+        "externalIds": {"DOI": "10.1109/TNN.2008.2005605"},
+        "abstract": "<jats:p>Odor p &lt; 0.05</jats:p>\n<jats:p>Second.</jats:p>",
+        "url": f"https://www.semanticscholar.org/paper/{S2_ID}",
+        "openAccessPdf": {"url": "https://arxiv.org/pdf/2101.00001", "status": "GREEN"},
+    }
+    raw.update(overrides)
+    return raw
+
+
+def test_semantic_scholar_cleans_text_and_keeps_raw_title_keys():
+    paper = semantic_scholar.map_paper(_s2_paper())
+    assert paper.title == "Odor coding in Drosophila"
+    assert paper.abstract == "Odor p < 0.05\n\nSecond."
+    assert paper.canonical_key == "doi:10.1109/tnn.2008.2005605"
+    assert paper.paper_group_key == build_paper_group_key(MARKUP_TITLE, ["Ada Lovelace"])
+    # The S2 url is the landing page; only openAccessPdf is a full-text link.
+    assert paper.abstract_url == f"https://www.semanticscholar.org/paper/{S2_ID}"
+    assert paper.pdf_url == "https://arxiv.org/pdf/2101.00001"
+    entry = semantic_scholar.related_entry(_s2_paper())
+    assert entry == [S2_ID, paper.canonical_key, paper.paper_group_key, 737791, None]
+    assert entry[3] == paper.publication_date.toordinal()
+
+
+@pytest.mark.parametrize(
+    "pdf", [{"url": "", "status": None, "disclaimer": "Notice"}, {"url": None}, None, "x"]
+)
+def test_semantic_scholar_empty_open_access_pdf_is_absent(pdf):
+    assert semantic_scholar.map_paper(_s2_paper(openAccessPdf=pdf)).pdf_url is None
+
+
+def test_semantic_scholar_abstract_whitespace_or_markup_only_is_none():
+    assert semantic_scholar.map_paper(_s2_paper(abstract="  ")).abstract is None
+    assert semantic_scholar.map_paper(_s2_paper(abstract="<p> </p>")).abstract is None
+
+
+def test_semantic_scholar_related_entry_matches_map_paper_keys():
+    no_doi = _s2_paper(externalIds={}, publicationDate="2020-02-03", citationCount=7)
+    paper = semantic_scholar.map_paper(no_doi)
+    entry = semantic_scholar.related_entry(no_doi)
+    assert entry == [
+        S2_ID,
+        f"s2:{S2_ID}",
+        paper.paper_group_key,
+        date(2020, 2, 3).toordinal(),
+        7,
+    ]
+    untitled = semantic_scholar.related_entry({"paperId": S2_ID.upper(), "title": None})
+    assert untitled == [S2_ID, f"s2:{S2_ID}", synthetic_group_key(f"s2:{S2_ID}"), None, None]
+
+
+def test_semantic_scholar_pmcid_is_stored_in_key_form():
+    paper = semantic_scholar.map_paper(_s2_paper(externalIds={"PubMedCentral": "2323736"}))
+    assert paper.pmcid == "PMC2323736"
+    assert "pmcid:PMC2323736" in identity.aliases(paper)
+    # Requests still send the bare number Semantic Scholar expects.
+    assert semantic_scholar.s2_identifier("pmcid:" + paper.pmcid) == "PMCID:2323736"
+    prefixed = semantic_scholar.map_paper(_s2_paper(externalIds={"PubMedCentral": "pmc9"}))
+    assert prefixed.pmcid == "PMC9"
+    assert semantic_scholar.map_paper(_s2_paper(externalIds={"PubMedCentral": " "})).pmcid is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "10.1/X",
+        "https://www.doi.org/10.1/X",
+        "http://dx.doi.org/10.1/x",
+        "doi.org/10.1/x",
+        "doi 10.1/x",
+        "DOI: 10.1/x",
+        "\u00a010.1/x\u200b",
+    ],
+)
+def test_identity_doi_normalization_matches_doi_input(raw):
+    assert identity.normalize_doi(raw) == "10.1/x"
+    assert semantic_scholar.s2_identifier("doi:" + raw) == "DOI:10.1/x"

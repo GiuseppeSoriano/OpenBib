@@ -13,13 +13,13 @@ import unicodedata
 from copy import deepcopy
 from dataclasses import asdict, fields
 
+from app.common.identifiers import strip_doi_prefixes
 from app.providers.base import PaperMetadata
 
 
 def normalize_doi(value: str) -> str:
-    return re.sub(
-        r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", value.strip(), flags=re.I
-    ).lower()
+    # The same prefix handling as DOI input and canonical keys.
+    return strip_doi_prefixes(value).lower()
 
 
 def normalize_arxiv(value: str) -> str:

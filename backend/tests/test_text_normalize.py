@@ -63,6 +63,14 @@ def test_unknown_tag_like_text_is_kept():
         ("&lt;script&gt;alert(1)&lt;/script&gt;Kept", "Kept"),
         ("<!-- comment -->Visible", "Visible"),
         ("<table><tr><th>n</th><td>1</td></tr><tr><td>2</td></tr></table>", "n 1\n\n2"),
+        ("<table><tr><td>1</td><td>2</td></tr></table>", "1 2"),
+        (
+            "<table><caption>Doses</caption><thead><tr><th>mg</th></tr></thead>"
+            "<tbody><tr><td>5</td></tr></tbody><tfoot><tr><td>n=3</td></tr></tfoot></table>",
+            "Doses\n\nmg\n\n5\n\nn=3",
+        ),
+        ("when x<a and y>b holds", "when x<a and y>b holds"),
+        ("x <style>a</style> y <style> z", "x y <style> z"),
     ],
 )
 def test_malformed_input(raw, expected):

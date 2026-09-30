@@ -105,6 +105,53 @@ def hermetic_doi_resolution(monkeypatch, isolated_settings):
     monkeypatch.setattr(registry, "doi_handle_exists", handle_check_failed)
 
 
+class S2Mock:
+    """Semantic Scholar on ``httpx.MockTransport``. Queue outcomes in
+    ``responses`` (a JSON body, an ``httpx.Response`` or an exception to
+    raise) or set ``handler(request)``; every request lands in ``calls``."""
+
+    def __init__(self) -> None:
+        self.responses: list = []
+        self.calls: list = []
+        self.handler = None
+        self.provider = None
+
+    def __call__(self, request):
+        import httpx
+
+        assert request.url.host == "api.semanticscholar.org"
+        assert request.headers["x-api-key"] == "mock-private-key"
+        assert "mock-private-key" not in str(request.url)
+        self.calls.append(request)
+        outcome = self.handler(request) if self.handler else self.responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome if isinstance(outcome, httpx.Response) else httpx.Response(200, json=outcome)
+
+
+@pytest_asyncio.fixture
+async def s2_mock(monkeypatch, hermetic_doi_resolution):
+    """The registry's Semantic Scholar provider with a mock key, no pacing or
+    backoff waits, and every HTTP call answered by an ``S2Mock``."""
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from pydantic import SecretStr
+
+    from app.config import settings
+    from app.providers import registry
+    from app.providers.semantic_scholar import SemanticScholarProvider
+
+    monkeypatch.setattr(settings, "semantic_scholar_api_key", SecretStr("mock-private-key"))
+    mock = S2Mock()
+    mock.provider = SemanticScholarProvider(transport=httpx.MockTransport(mock))
+    mock.provider._limiter.acquire = AsyncMock()
+    mock.provider._sleep = AsyncMock()
+    monkeypatch.setattr(registry, "_instances", {"semantic_scholar": mock.provider})
+    yield mock
+    await mock.provider.close()
+
+
 @pytest.fixture
 def user_id():
     return uuid4()

@@ -6,6 +6,7 @@ user's library. Do not record credentials or raw HTTP responses in test output.
 
 import os
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -122,5 +123,28 @@ async def test_live_invalid_key(live_provider, monkeypatch):
     )
     with pytest.raises(ProviderError) as error:
         await registry.lookup_by_id(S2_ID)
-    assert error.value.status_code == 503 and "rejected" in error.value.detail
+    assert error.value.status_code == 503 and error.value.code == "provider_key_rejected"
     print("Live invalid-key rejection passed.")
+
+
+async def test_live_batch_bulk_and_related_paging(live_provider):
+    doi = "10.1109/tnn.2008.2005605"
+    found, missing = await registry.papers_by_ids(["DOI:" + doi, "DOI:10.9999/missing.x"])
+    assert found is not None and found.doi == doi and missing is None
+    resolved = await registry.resolve_dois([doi])
+    assert resolved[doi].status == "found"
+    refs = await registry.references_batch([found.semantic_scholar_id])
+    assert len(refs[found.semantic_scholar_id]) > 50
+    # "Attention Is All You Need" has far more than 10,000 citers.
+    (attention,) = await registry.papers_by_ids(["ARXIV:1706.03762"])
+    page = await registry.related_page(attention.semantic_scholar_id, "cited_by", offset=9000)
+    assert page.capped and page.exhausted and len(page.entries) > 900
+    assert all(entry[1].startswith(("doi:", "s2:")) for entry in page.entries)
+    batch = await registry.search_sorted("graph neural networks", sort="citations")
+    assert batch.total > 1000 and batch.token and len(batch.items) > 900
+    counts = [p.cited_by_count or 0 for p in batch.items]
+    assert counts[:50] == sorted(counts[:50], reverse=True)
+    recent = await registry.search_sorted("graph neural networks", sort="date")
+    today = datetime.now(UTC).date()
+    assert all(p.publication_date is None or p.publication_date <= today for p in recent.items)
+    print("Batch lookup, batch references, capped citation paging and bulk sorts passed.")
