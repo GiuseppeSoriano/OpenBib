@@ -19,8 +19,8 @@ from app.users.models import User
 
 
 def _paper(canonical_key: str, group_key: str, title: str) -> PaperMetadata:
-    # No openalex_id / doi → the graph degrades gracefully to no citations,
-    # so these tests never touch the network.
+    # No semantic_scholar_id / doi → the graph degrades gracefully to no
+    # citations, so these tests never touch the network.
     return PaperMetadata(
         canonical_key=canonical_key,
         paper_group_key=group_key,

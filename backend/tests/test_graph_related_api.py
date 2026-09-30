@@ -10,72 +10,40 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
+from app.config import settings
 from app.dependencies import get_db
 from app.main import create_app
-from app.papers.models import CachedPaperMetadata
 from app.providers import registry
-from app.providers.openalex import RelatedPage
+from app.providers.semantic_scholar import ProviderError
 from app.users.models import User
-
-pytestmark = pytest.mark.skip(reason="integration: ported in WP3")
+from tests.test_graph_related import (
+    SEED,
+    SEED2,
+    SEED2_ID,
+    SEED_GROUP,
+    SEED_ID,
+    FakeS2,
+    _cached,
+)
 
 # SQLite ignores FOR UPDATE, so only Postgres can prove the user lock is free.
 ON_POSTGRES = os.getenv("TEST_DB_URL", "").startswith("postgresql")
-SEED = "doi:10.1/seed"
-SEED_GROUP = "group:seed"
-
-
-def _entry(n: int) -> list:
-    return [f"Wp{n}", f"doi:10.1/p{n}", f"group:p{n}", f"Paper {n}", 1000 - n, "2020-01-01"]
-
-
-class FakeOpenAlex:
-    def __init__(self, total: int = 100):
-        self.total = total
-        self.fail: set[str] = set()
-        self.calls = 0
-        self.observe = None
-
-    async def related_page(self, openalex_id, *, cursor="*", per_page=200, **_kwargs):
-        self.calls += 1
-        if self.observe:
-            await self.observe()
-        if openalex_id.rsplit("/", 1)[-1] in self.fail:
-            raise RuntimeError("provider down")
-        start = 0 if cursor == "*" else int(cursor)
-        stop = min(start + per_page, self.total)
-        entries = [_entry(i) for i in range(start, stop)]
-        return RelatedPage(entries, self.total, str(stop) if stop < self.total else None)
-
-    async def works_by_ids(self, ids):
-        if self.observe:
-            await self.observe()
-        return []
 
 
 @pytest.fixture
 def fake(monkeypatch):
-    fake = FakeOpenAlex()
+    fake = FakeS2()
+    fake.add(SEED_ID, 100)
     monkeypatch.setattr(registry, "related_page", fake.related_page)
-    monkeypatch.setattr(registry, "works_by_ids", fake.works_by_ids)
+    monkeypatch.setattr(registry, "papers_by_ids", fake.papers_by_ids)
+    monkeypatch.setattr(registry, "lookup_by_id", fake.lookup_by_id)
     return fake
 
 
 @pytest.fixture
 async def seeds(db):
-    for key, group, work in ((SEED, SEED_GROUP, "W0"), ("doi:10.1/seed2", "group:seed2", "W1")):
-        db.add(
-            CachedPaperMetadata(
-                canonical_key=key,
-                paper_group_key=group,
-                title="Seed",
-                authors_json=[],
-                topics_json=[],
-                keywords_json=[],
-                openalex_id=f"https://openalex.org/{work}",
-                provider_source="openalex",
-            )
-        )
+    db.add(_cached(SEED, SEED_GROUP, semantic_scholar_id=SEED_ID, cited_by_count=100))
+    db.add(_cached(SEED2, "group:seed2", semantic_scholar_id=SEED2_ID))
     await db.flush()
 
 
@@ -213,28 +181,60 @@ async def test_top_up_validation_limits(db, fake, seeds):
     assert too_many_pins.status_code == 422
 
 
-async def test_provider_failure_is_a_coded_502(db, fake, seeds):
-    fake.fail.add("W0")
+@pytest.mark.parametrize(
+    ("error", "reason", "retry_after"),
+    [
+        (ProviderError("provider_unavailable", "down"), "provider_unavailable", None),
+        (ProviderError("provider_rate_limited", "busy", retry_after=12), "rate_limited", 12),
+        (ProviderError("provider_not_configured", "no key"), "not_configured", None),
+        # Clients read Retry-After as a rate limit: an outage's wait stays out.
+        (
+            ProviderError("provider_unavailable", "busy", retry_after=30),
+            "provider_unavailable",
+            None,
+        ),
+    ],
+)
+async def test_provider_failure_is_a_coded_503(db, fake, seeds, error, reason, retry_after):
+    fake.fail[SEED_ID] = error
 
     async with _client(db) as client:
         response = await client.post("/api/v1/graph/related", json=_range_body())
 
-    assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "related_provider_unavailable"
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert (detail["code"], detail["reason"]) == ("related_provider_unavailable", reason)
+    assert detail.get("retry_after") == retry_after
+    assert response.headers.get("Retry-After") == (
+        None if retry_after is None else str(retry_after)
+    )
 
 
-async def test_top_up_is_502_only_when_every_source_fails(db, fake, seeds):
+async def test_a_list_still_being_ranked_is_a_200_without_nodes(db, fake, seeds, monkeypatch):
+    monkeypatch.setattr(settings, "graph_related_chunk_size", 100)
+    fake.add(SEED_ID, 1000)
+
+    async with _client(db) as client:
+        response = await client.post("/api/v1/graph/related", json=_range_body())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["reason"], body["scan_incomplete"], body["nodes"]) == ("ranking", True, [])
+    assert (body["scanned"], body["provider_total"]) == (400, 100)
+
+
+async def test_top_up_is_503_only_when_every_source_fails(db, fake, seeds):
     two = (
         {"source_key": SEED, "source_group_key": SEED_GROUP, "connected_group_keys": []},
-        {"source_key": "doi:10.1/seed2", "source_group_key": "group:seed2"},
+        {"source_key": SEED2, "source_group_key": "group:seed2"},
     )
-    fake.fail.add("W1")
+    fake.fail[SEED2_ID] = ProviderError("provider_unavailable", "down")
     async with _client(db) as client:
         partial = await client.post("/api/v1/graph/related/top-up", json=_top_up_body(*two))
-        fake.fail.add("W0")
-        # Another ordering, so W0's stored snapshot cannot answer.
+        fake.fail[SEED_ID] = ProviderError("provider_rate_limited", "busy", retry_after=8)
+        # The other direction, so the seed's stored snapshot cannot answer.
         failed = await client.post(
-            "/api/v1/graph/related/top-up", json=_top_up_body(*two, order="recent")
+            "/api/v1/graph/related/top-up", json=_top_up_body(*two, direction="cites")
         )
 
     assert partial.status_code == 200
@@ -242,8 +242,10 @@ async def test_top_up_is_502_only_when_every_source_fails(db, fake, seeds):
     assert (len(ok["added_group_keys"]), ok["error"]) == (30, None)
     assert (broken["added_group_keys"], broken["error"]) == ([], "provider_unavailable")
     assert partial.headers["X-RateLimit-Limit"] == "10"
-    assert failed.status_code == 502
+    assert failed.status_code == 503
     assert failed.json()["detail"]["code"] == "related_provider_unavailable"
+    assert failed.json()["detail"]["reason"] == "rate_limited"
+    assert failed.headers["Retry-After"] == "8"
 
 
 async def test_largest_top_up_payload_fits_the_body_limit(db, fake, seeds):
@@ -273,15 +275,10 @@ async def test_largest_top_up_payload_fits_the_body_limit(db, fake, seeds):
 
     assert response.status_code == 200
     assert len(response.json()["sources"]) == 20
-    assert fake.calls == 0
+    assert fake.page_calls == [] and fake.lookups == []
 
 
-async def test_base_graph_reports_range_defaults_and_ignores_order(db, seeds, monkeypatch):
-    async def no_references(_openalex_id):
-        return []
-
-    monkeypatch.setattr(registry, "get_openalex_reference_ids", no_references)
-
+async def test_base_graph_reports_range_defaults_and_ignores_order(db, seeds):
     async with _client(db) as client:
         default = await client.get(f"/api/v1/graph/paper/{SEED}")
         recent = await client.get(f"/api/v1/graph/paper/{SEED}", params={"order": "recent"})

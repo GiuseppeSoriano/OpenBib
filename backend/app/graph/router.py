@@ -35,11 +35,22 @@ Order = Literal["cited_by_count", "recent"]
 _ORDER_DOC = "Deprecated and ignored: ordering applies to POST /graph/related."
 
 
-def _provider_unavailable() -> ApiError:
+def _provider_unavailable(exc: related.RelatedProviderError) -> ApiError:
+    """503 ``related_provider_unavailable``; ``reason`` tells an outage, a
+    timeout, a rate limit (with ``Retry-After``) and a missing API key apart."""
+    extra: dict = {"reason": exc.kind}
+    headers = None
+    # Clients read a Retry-After on a 503 as a rate limit: an outage's
+    # suggested wait is not sent.
+    if exc.kind == "rate_limited" and exc.retry_after is not None:
+        extra["retry_after"] = exc.retry_after
+        headers = {"Retry-After": str(exc.retry_after)}
     return ApiError(
-        status.HTTP_502_BAD_GATEWAY,
+        status.HTTP_503_SERVICE_UNAVAILABLE,
         "related_provider_unavailable",
-        "The citation provider is unavailable. Try again in a moment.",
+        "Citation data from Semantic Scholar is unavailable. Try again in a moment.",
+        headers=headers,
+        **extra,
     )
 
 
@@ -52,9 +63,11 @@ async def related_range(
     db: DB,
     redis: Redis,
 ):
-    """One range of a node's citers or references: positions in the list of
-    unique papers minus the source and the caller's pinned groups. Public;
-    only signed-in callers get citation edges between saved papers stored."""
+    """One range of a node's citers or references: positions in the ranked
+    list of unique papers minus the source and the caller's pinned groups.
+    While Semantic Scholar's list is still being collected the response has
+    ``reason="ranking"`` and no nodes. Public; only signed-in callers get
+    citation edges between saved papers stored."""
     await enforce_rate_limit(
         redis,
         request,
@@ -81,7 +94,7 @@ async def related_range(
     try:
         return await related.related_range(db, redis, body, source, saved)
     except related.RelatedProviderError as exc:
-        raise _provider_unavailable() from exc
+        raise _provider_unavailable(exc) from exc
 
 
 @router.post("/related/top-up", response_model=TopUpResponse)
@@ -123,7 +136,7 @@ async def related_top_up(
     try:
         return await related.related_top_up(db, redis, body, sources, saved)
     except related.RelatedProviderError as exc:
-        raise _provider_unavailable() from exc
+        raise _provider_unavailable(exc) from exc
 
 
 @router.get("/library", response_model=GraphResponse)

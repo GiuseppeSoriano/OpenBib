@@ -12,7 +12,9 @@ from sqlalchemy import select
 
 from app.config import Settings, settings
 from app.dependencies import get_db
+from app.graph import related
 from app.graph import service as graph_service
+from app.graph.schemas import RelatedRangeRequest
 from app.main import create_app
 from app.papers import service
 from app.papers.models import CachedPaperMetadata
@@ -408,22 +410,43 @@ async def test_real_api_service_pipeline(provider, db):
     assert set(registry._instances) == {"semantic_scholar"}
 
 
-@pytest.mark.skip(reason="integration: ported in WP3")
-async def test_real_api_graph_pipeline(provider, db):
-    _p, responses, _calls = provider
+async def _related(db, redis, key: str, group: str, **body):
+    req = RelatedRangeRequest(source_key=key, source_group_key=group, **body)
+    source = await related.load_source(db, req.source_key, req.source_group_key)
+    return await related.related_range(db, redis, req, source, set())
+
+
+async def test_real_api_graph_pipeline(provider, db, redis_backend):
+    _p, responses, calls = provider
+    citer = {"paperId": "citer", "title": "Citer", "year": 2026, "citationCount": 3}
     responses.extend(
         [
-            {"data": [{"citingPaper": {"paperId": "citer", "title": "Citer", "year": 2026}}]},
-            {"data": [{"citedPaper": {"paperId": "citer"}}]},
-            {"data": []},
+            {"data": [{"citingPaper": citer}, {"citingPaper": {"paperId": None}}]},
+            [citer],
+            [
+                {"paperId": TITANS["paperId"], "references": []},
+                {"paperId": "citer", "references": [{"paperId": TITANS["paperId"]}]},
+            ],
         ]
     )
     stored = (await service.cache_papers(db, [map_paper(TITANS)]))[0]
-    paper = {"canonical_key": stored.canonical_key}
-    expanded = await graph_service.expand_graph(db, None, from_keys=[paper["canonical_key"]])
-    assert len(expanded.nodes) == 1 and len(expanded.edges) == 1
-    base = await graph_service.build_base_graph(db, None, [paper["canonical_key"], "s2:citer"])
-    assert len(base.edges) == 1
+
+    ranged = await _related(db, redis_backend, stored.canonical_key, stored.paper_group_key)
+
+    assert calls[0].url.path.endswith(f"/paper/{TITANS['paperId']}/citations")
+    assert calls[0].url.params["fields"] == RELATED_FIELDS
+    assert (calls[1].method, calls[1].url.path) == ("POST", "/graph/v1/paper/batch")
+    citer_group = build_paper_group_key("Citer", [])
+    assert ranged.group_keys == [citer_group] and ranged.reason is None
+    assert (ranged.provider_total, ranged.scanned, ranged.total_exact) == (341, 1, True)
+    assert [(e.source, e.target) for e in ranged.edges] == [(citer_group, stored.paper_group_key)]
+    assert ranged.nodes[0].selected_version.canonical_key == "s2:citer"
+    base = await graph_service.build_base_graph(
+        db, redis_backend, [stored.canonical_key, "s2:citer"]
+    )
+    assert calls[2].url.params["fields"] == "paperId,references.paperId"
+    assert [(e.source, e.target) for e in base.edges] == [(citer_group, stored.paper_group_key)]
+    assert base.edges_partial is False and len(calls) == 3
     assert set(registry._instances) == {"semantic_scholar"}
 
 
@@ -450,11 +473,8 @@ async def test_search_past_last_page_is_empty_but_other_400s_fail(provider):
     assert len(calls) == 2
 
 
-@pytest.mark.skip(reason="integration: ported in WP3")
-async def test_legacy_graph_uses_doi_and_updates_s2_identity(provider, db):
+async def test_graph_source_lookup_writes_the_s2_identity_back(provider, db, redis_backend):
     _p, responses, calls = provider
-    from app.providers.base import PaperMetadata
-
     legacy = PaperMetadata(
         canonical_key="doi:10.48550/arxiv.2501.00663",
         paper_group_key="group:legacy",
@@ -465,11 +485,15 @@ async def test_legacy_graph_uses_doi_and_updates_s2_identity(provider, db):
     )
     await service.cache_papers(db, [legacy])
     responses.extend([TITANS, {"data": []}])
-    await graph_service.expand_graph(db, None, from_keys=[legacy.canonical_key])
+
+    ranged = await _related(db, redis_backend, legacy.canonical_key, "group:legacy")
+
     assert calls[0].url.path.endswith("DOI:10.48550/arxiv.2501.00663")
+    assert calls[1].url.path.endswith(f"/paper/{TITANS['paperId']}/citations")
+    assert (ranged.group_keys, ranged.total_available, ranged.exhausted) == ([], 0, True)
     row = await service.get_cached_paper(db, legacy.canonical_key)
     assert row.semantic_scholar_id == TITANS["paperId"]
-    assert row.paper_group_key == "group:legacy"
+    assert (row.canonical_key, row.paper_group_key) == (legacy.canonical_key, "group:legacy")
 
 
 async def test_missing_key_api_error_is_not_cached(provider, db, monkeypatch):
