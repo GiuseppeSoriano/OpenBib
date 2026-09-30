@@ -21,8 +21,12 @@ from app.common.key_repair import rekey_user_paper
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
 from app.papers.models import READING_STATES, CachedPaperMetadata, UserPaperState, UserPaperTag
-from app.papers.service import cache_papers, cached_paper_to_read, get_cached_paper
-from app.providers import registry
+from app.papers.service import (
+    cached_paper_to_read,
+    get_cached_paper,
+    lookup_identifier,
+    store_paper,
+)
 
 
 async def _get_pin(
@@ -485,6 +489,10 @@ async def add_version(
     entry = await db.get(UserLibraryEntry, (user_id, paper_group_key))
     if entry is None:
         raise NotFoundError("Library entry not found")
+    # Pin the stored row's key, whichever of its aliases the client sent.
+    cached = await get_cached_paper(db, canonical_key)
+    if cached is not None:
+        canonical_key = cached.canonical_key
 
     existing = await db.execute(
         select(UserLibraryVersion).where(
@@ -559,6 +567,30 @@ async def remove_version(
     await db.flush()
 
 
+async def _blocking_rows(db: AsyncSession, user_id: uuid.UUID, pinned_keys: list[str]) -> list:
+    """Collection rows holding a pinned key in a collection the user can edit
+    (the same scope as ``_canonical_keys_in_collections``), by name."""
+    rows_q = await db.execute(
+        select(CollectionPaper, Collection.name, Collection.owner_id)
+        .join(Collection, Collection.id == CollectionPaper.collection_id)
+        .where(editable_by(user_id), CollectionPaper.paper_canonical_key.in_(pinned_keys))
+        .order_by(Collection.name, Collection.id)
+    )
+    return list(rows_q.all())
+
+
+async def _lock_collections(db: AsyncSession, collection_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """``SELECT … FOR UPDATE`` the collections in id order; returns the ids
+    that still exist."""
+    locked = await db.execute(
+        select(Collection.id)
+        .where(Collection.id.in_(collection_ids))
+        .order_by(Collection.id)
+        .with_for_update()
+    )
+    return set(locked.scalars().all())
+
+
 async def delete_entry(
     db: AsyncSession, user_id: uuid.UUID, paper_group_key: str, *, detach: bool = False
 ) -> None:
@@ -579,26 +611,35 @@ async def delete_entry(
         )
     )
     pinned_keys = [row[0] for row in pins_q.all()]
-    # Same editable-collections scope as _canonical_keys_in_collections.
-    blocking = []
-    if pinned_keys:
-        rows_q = await db.execute(
-            select(CollectionPaper, Collection.name)
-            .join(Collection, Collection.id == CollectionPaper.collection_id)
-            .where(
-                editable_by(user_id),
-                CollectionPaper.paper_canonical_key.in_(pinned_keys),
-            )
-            .order_by(Collection.name, Collection.id)
+    blocking = await _blocking_rows(db, user_id, pinned_keys) if pinned_keys else []
+    if blocking and detach:
+        # Lock the collections (id order, after the user row) like every
+        # collection writer, then re-read with edit rights re-checked: an
+        # editor removed meanwhile must not detach anything.
+        locked = await _lock_collections(
+            db, {row.CollectionPaper.collection_id for row in blocking}
         )
-        blocking = list(rows_q.all())
+        blocking = [
+            row
+            for row in await _blocking_rows(db, user_id, pinned_keys)
+            if row.CollectionPaper.collection_id in locked
+        ]
     if blocking and not detach:
-        collections = {str(row.CollectionPaper.collection_id): row.name for row in blocking}
+        # ``is_owner=false``: someone else's collection; detaching removes the
+        # paper for everyone who can see it.
+        collections = {
+            str(row.CollectionPaper.collection_id): {
+                "id": str(row.CollectionPaper.collection_id),
+                "name": row.name,
+                "is_owner": row.owner_id == user_id,
+            }
+            for row in blocking
+        }
         raise ApiError(
             status.HTTP_409_CONFLICT,
             "entry_in_collections",
             "This paper is still in one or more of your collections.",
-            collections=[{"id": cid, "name": name} for cid, name in collections.items()],
+            collections=list(collections.values()),
         )
     for row in blocking:
         await db.delete(row.CollectionPaper)
@@ -649,6 +690,30 @@ async def _editable_collection_ids(
     return {row[0] for row in (await db.execute(q)).all()}
 
 
+async def _lock_editable_collections(
+    db: AsyncSession, user_id: uuid.UUID, canonical_key: str
+) -> set[uuid.UUID]:
+    """Lock the collections holding ``canonical_key`` that the user may edit
+    (``SELECT … FOR UPDATE`` in id order, after the user row, like every
+    collection writer), then re-check edit rights with a fresh statement: an
+    editor removed while this request waited must not re-key the collection."""
+    holding = select(CollectionPaper.collection_id).where(
+        CollectionPaper.paper_canonical_key == canonical_key
+    )
+    locked = (
+        await db.execute(
+            select(Collection.id)
+            .where(Collection.id.in_(holding), editable_by(user_id))
+            .order_by(Collection.id)
+            .with_for_update()
+        )
+    ).scalars()
+    locked_ids = set(locked.all())
+    if not locked_ids:
+        return set()
+    return locked_ids & await _editable_collection_ids(db, user_id, canonical_key)
+
+
 def _not_in_library() -> ApiError:
     return ApiError(
         status.HTTP_404_NOT_FOUND,
@@ -659,7 +724,7 @@ def _not_in_library() -> ApiError:
 
 def _stored_target(stored_key: str) -> ParsedIdentifier:
     """What a stored key should become without a replacement: its normalized
-    DOI, or a ``hash:`` key (only useful when cached)."""
+    DOI or strong identifier, or a ``hash:`` key (only useful when cached)."""
     try:
         return parse_paper_identifier(normalize_paper_key(stored_key))
     except InvalidIdentifierError:
@@ -672,15 +737,18 @@ async def resolve_library_paper(
     """Retry resolution of a stored paper, or correct its identifier.
 
     Scope is the caller's own pin plus rows in collections they can edit;
-    other users' rows are never touched. A found paper is re-keyed to the
-    provider's key under its real group; with providers unavailable a legacy
-    key still moves to its normalized DOI (pending, synthetic group); a DOI
-    that does not exist changes nothing.
+    other users' rows are never touched. A paper found in the cache (through
+    any alias) or by the provider is re-keyed to the stored row's key under
+    its real group; with the provider unavailable a legacy key still moves
+    to its normalized DOI (pending, synthetic group), while other
+    identifiers change nothing; an identifier that does not exist changes
+    nothing.
 
     As in ``collections.service.add_paper``, no provider call happens while
     the per-user row lock is held: the scope is checked and committed first,
-    the DOI resolves with no transaction open, and the writes happen in a
-    short re-locked transaction that re-checks the scope.
+    the identifier resolves with no transaction open, and the writes happen
+    in a short re-locked transaction (user row, then the editable
+    collections) that re-checks the scope.
     """
     scope_key: str | None = None
     for key in dict.fromkeys((stored_key, normalize_paper_key(stored_key))):
@@ -697,33 +765,39 @@ async def resolve_library_paper(
     )
     cached = await get_cached_paper(db, parsed.canonical_key)
     status_ = "resolved"
+    lookup = None
     if cached is None:
-        if parsed.doi is None:
+        if parsed.lookup_id is None:
             # An unknown hash key: nothing can resolve it.
             if replacement is None:
                 raise InvalidIdentifierError(stored_key)
             return await _resolve_result(db, user_id, "not_found", scope_key, scope_key)
         await db.commit()
-        lookup = await registry.resolve_doi(parsed.doi)
+        lookup = await lookup_identifier(parsed)
         if lookup.status == "not_found":
             return await _resolve_result(db, user_id, "not_found", scope_key, scope_key)
+        if lookup.paper is None and parsed.doi is None:
+            # Only a DOI can be stored as pending: nothing to re-key yet.
+            return await _resolve_result(db, user_id, "unavailable", scope_key, scope_key)
 
-        from app.auth.service import lock_user
+    from app.auth.service import lock_user
 
-        await lock_user(db, user_id)
+    # Rows and edit rights may have changed while no lock was held. Locks go
+    # user row, collections, then the cached row (as in ``add_paper``), so
+    # the snapshot is stored only once the collections are locked.
+    await lock_user(db, user_id)
+    pin = await _get_pin(db, user_id, scope_key)
+    collection_ids = await _lock_editable_collections(db, user_id, scope_key)
+    if pin is None and not collection_ids:
+        raise _not_in_library()
+    if lookup is not None:
         if lookup.paper is not None:
-            stored = (await cache_papers(db, [lookup.paper]))[0]
-            cached = await get_cached_paper(db, stored.canonical_key)
+            cached = await store_paper(db, lookup.paper)
         else:
             status_ = "unavailable"
 
-    # Rows and edit rights may have changed while no lock was held.
-    pin = await _get_pin(db, user_id, scope_key)
-    collection_ids = await _editable_collection_ids(db, user_id, scope_key)
-    if pin is None and not collection_ids:
-        raise _not_in_library()
-
     new_key = cached.canonical_key if cached is not None else parsed.canonical_key
+    source_provider = cached.provider_source if cached is not None else None
     if cached is not None:
         target_group = cached.paper_group_key
     else:
@@ -748,6 +822,17 @@ async def resolve_library_paper(
             )
         )
         db.expire_all()
+        if moved.get("collection_papers"):
+            # Rows moved in a shared collection may have been added by someone
+            # else: every collection paper keeps a Library entry for its editor.
+            await ensure_entry_and_version(
+                db,
+                user_id,
+                target_group,
+                new_key,
+                source_provider,
+                authoritative_group=cached is not None,
+            )
     if cached is not None:
         await reanchor_pin(db, user_id, new_key, target_group)
     return await _resolve_result(db, user_id, status_, scope_key, new_key, moved)

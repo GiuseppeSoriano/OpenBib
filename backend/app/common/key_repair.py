@@ -13,6 +13,13 @@ It runs inside Alembic revision ``1d2e3f4a5b6c`` and from
 to the ORM models or to ``app.common.identifiers`` must not change what the
 migration does (``tests/test_key_repair.py`` checks normalizer parity).
 ``cached_paper_metadata`` is never modified.
+
+Keys of the other strong identifiers (``s2:``, ``arxiv:``, ``pmid:``,
+``pmcid:``, ``openalex:``) are left alone and not reported: they are valid
+as stored, and reads resolve them through the cache aliases. The repair is
+not alias-aware: a raw DOI whose paper is cached under an ``s2:`` key moves
+to its ``doi:`` form, not onto the ``s2:`` key; reads still find the paper
+through its DOI alias, and ``POST /library/resolve`` merges it later.
 """
 
 from __future__ import annotations
@@ -199,16 +206,21 @@ def _key_sources() -> list[sa.Select]:
     ]
 
 
+# Keys that are never re-keyed or reported: synthetic keys and the strong
+# identifiers other than DOIs, which are valid as stored.
+_PASS_THROUGH_PREFIXES = ("hash:", "group:", "s2:", "arxiv:", "pmid:", "pmcid:", "openalex:")
+
+
 def _candidate_keys(conn: Connection) -> list[str]:
-    """Every stored paper key that is neither a hash/group key nor the key of
-    a cached snapshot (provider keys are authoritative as they are)."""
+    """Every stored paper key that is neither a hash/group key, nor a strong
+    non-DOI identifier key, nor the key of a cached snapshot (provider keys
+    are authoritative as they are)."""
     keys = sa.union(*_key_sources()).subquery()
     stmt = (
         sa.select(keys.c.k)
         .where(
             keys.c.k.is_not(None),
-            sa.not_(keys.c.k.like("hash:%")),
-            sa.not_(keys.c.k.like("group:%")),
+            *(sa.not_(keys.c.k.like(f"{prefix}%")) for prefix in _PASS_THROUGH_PREFIXES),
             ~sa.exists().where(_cached.c.canonical_key == keys.c.k),
         )
         .order_by(keys.c.k)

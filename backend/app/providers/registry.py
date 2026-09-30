@@ -85,6 +85,9 @@ class DoiLookup:
     status: Literal["found", "not_found", "unavailable"]
     paper: PaperMetadata | None = None
     retry_after: int | None = None
+    # The provider's error code for an ``unavailable`` lookup, when it gave
+    # one (e.g. ``provider_not_configured``), so callers can report it.
+    code: str | None = None
 
 
 # Test override for the DOI resolution chain; ``None`` means the primary provider.
@@ -133,6 +136,7 @@ async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
         return DoiLookup("unavailable")
     failed = False
     retry_after: int | None = None
+    code: str | None = None
     for provider in chain:
         try:
             result = await provider.lookup_by_doi(doi)
@@ -142,6 +146,7 @@ async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
                 continue
             failed = True
             retry_after = exc.retry_after if retry_after is None else retry_after
+            code = exc.code if code is None else code
             logger.warning("Provider %s failed DOI lookup: %s", provider.name, exc.code)
             continue
         except Exception:
@@ -153,7 +158,7 @@ async def _resolve_doi_chain(doi: str, *, confirm_missing: bool) -> DoiLookup:
         if result:
             return DoiLookup("found", result)
     if failed:
-        return DoiLookup("unavailable", retry_after=retry_after)
+        return DoiLookup("unavailable", retry_after=retry_after, code=code)
     return await _confirm_miss(doi) if confirm_missing else DoiLookup("not_found")
 
 
@@ -194,7 +199,7 @@ async def _resolve_many(
             await asyncio.gather(*(one(doi) for doi in dois))
             return
         for doi in dois:
-            results[doi] = DoiLookup("unavailable", retry_after=exc.retry_after)
+            results[doi] = DoiLookup("unavailable", retry_after=exc.retry_after, code=exc.code)
         return
     except Exception:
         logger.warning("Batch DOI lookup failed", exc_info=True)
@@ -249,7 +254,7 @@ async def resolve_id(identifier: str) -> DoiLookup:
         if exc.code == "invalid_query":
             return DoiLookup("not_found")
         logger.warning("Identifier lookup failed: %s", exc.code)
-        return DoiLookup("unavailable", retry_after=exc.retry_after)
+        return DoiLookup("unavailable", retry_after=exc.retry_after, code=exc.code)
     except Exception:
         logger.warning("Identifier lookup failed for %s", identifier, exc_info=True)
         return DoiLookup("unavailable")

@@ -64,7 +64,10 @@ class PaperAdd(BaseModel):
     paper_canonical_key: str = Field(
         min_length=1,
         max_length=512,
-        description="DOI, doi:…, https://doi.org/… or an existing hash: key",
+        description=(
+            "DOI, doi:…, https://doi.org/…, s2:… or a semanticscholar.org link, an arXiv ID"
+            " or link, pmid:…, pmcid:PMC…, or an existing hash: key"
+        ),
     )
 
 
@@ -92,7 +95,8 @@ class CollectionPaperRead(BaseModel):
 class ImportLineResult(BaseModel):
     line: int  # 1-based index within the request list
     input: str
-    status: Literal["added", "duplicate", "invalid", "not_found", "unresolved"]
+    # ``unavailable``: not saved (the provider failed); the line can be retried.
+    status: Literal["added", "duplicate", "invalid", "not_found", "unresolved", "unavailable"]
     canonical_key: str | None = None
     title: str | None = None
 

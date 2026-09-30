@@ -7,14 +7,14 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date
 from itertools import zip_longest
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.exceptions import NotFoundError
-from app.common.identifiers import DOI_RE, ParsedIdentifier, normalize_paper_key
+from app.common.exceptions import ApiError, NotFoundError
+from app.common.identifiers import ParsedIdentifier, normalize_paper_key, parse_lookup_key
 from app.papers.models import (
     READING_STATES,
     CachedPaperMetadata,
@@ -26,6 +26,9 @@ from app.papers.schemas import PaperMetadataRead
 from app.providers.base import Author, PaperMetadata
 from app.providers.base import SearchResult as ProviderSearchResult
 from app.providers.identity import deduplicate, normalize_arxiv, normalize_doi
+
+if TYPE_CHECKING:
+    from app.providers.registry import DoiLookup
 
 
 def _version_number(version: str | None) -> int:
@@ -172,24 +175,37 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> list[Pa
     return stored
 
 
+# Alias prefix -> cached column, for keys that are not the row's own key.
+_ALIAS_FIELDS = {
+    "s2": "semantic_scholar_id",
+    "doi": "doi",
+    "arxiv": "arxiv_id",
+    "pmid": "pmid",
+    "pmcid": "pmcid",
+}
+
+
+def _alias_value(prefix: str, value: str) -> str:
+    # The same normalizers as ``identity.aliases``.
+    normalize = {
+        "doi": normalize_doi,
+        "arxiv": normalize_arxiv,
+        "s2": str.lower,
+        "pmcid": str.upper,
+    }.get(prefix)
+    return normalize(value.strip()) if normalize else value.strip()
+
+
 async def get_cached_paper(db: AsyncSession, canonical_key: str) -> CachedPaperMetadata | None:
     row = await db.get(CachedPaperMetadata, canonical_key)
     if row is not None:
         return row
     prefix, _, value = canonical_key.partition(":")
-    fields = {
-        "s2": "semantic_scholar_id",
-        "doi": "doi",
-        "arxiv": "arxiv_id",
-        "pmid": "pmid",
-        "pmcid": "pmcid",
-    }
-    if prefix not in fields:
+    if prefix not in _ALIAS_FIELDS:
         return None
-    value = {"doi": normalize_doi, "arxiv": normalize_arxiv}.get(prefix, str.strip)(value)
     result = await db.execute(
         select(CachedPaperMetadata)
-        .where(getattr(CachedPaperMetadata, fields[prefix]) == value)
+        .where(getattr(CachedPaperMetadata, _ALIAS_FIELDS[prefix]) == _alias_value(prefix, value))
         .order_by(CachedPaperMetadata.canonical_key)
         .limit(1)
     )
@@ -228,26 +244,80 @@ async def get_cached_papers_by_groups(
 class ResolvedPaper:
     status: Literal["found", "not_found", "unavailable"]
     row: CachedPaperMetadata | None = None
+    # Provider's Retry-After (seconds) for an ``unavailable`` lookup, if known.
+    retry_after: int | None = None
+    # Provider's error code for an ``unavailable`` lookup, if it gave one.
+    code: str | None = None
+
+
+async def lookup_identifier(parsed: ParsedIdentifier, *, confirm_missing: bool = True) -> DoiLookup:
+    """Ask the provider about ``parsed``; no database access, so callers can
+    run it with no transaction open. DOIs go through ``registry.resolve_doi``
+    (doi.org confirms a miss; a registered DOI the provider cannot describe is
+    ``unavailable`` and may be saved as pending); ``s2:``, ``arxiv:``,
+    ``pmid:`` and ``pmcid:`` through ``registry.resolve_id``, where a miss is
+    definitive. A ``hash:`` key is never looked up."""
+    from app.providers import registry
+
+    if parsed.doi is not None:
+        return await registry.resolve_doi(parsed.doi, confirm_missing=confirm_missing)
+    if parsed.lookup_id is None:
+        return registry.DoiLookup("not_found")
+    return await registry.resolve_id(parsed.lookup_id)
+
+
+async def store_paper(db: AsyncSession, paper: PaperMetadata) -> CachedPaperMetadata | None:
+    """Upsert a provider record and return the row it is stored as. The upsert
+    merges it into a row already holding one of its aliases and keeps that
+    row's key and group, so writes must use the returned row's keys (a DOI
+    found for a paper cached as ``s2:Y`` stays ``s2:Y``)."""
+    stored = (await cache_papers(db, [paper]))[0]
+    return await get_cached_paper(db, stored.canonical_key)
+
+
+_OPERATOR_CODES = {
+    "provider_not_configured": "Semantic Scholar is not configured on this server.",
+    "provider_key_rejected": "Semantic Scholar rejected this server's API key.",
+}
+
+
+def provider_unavailable(retry_after: int | None, code: str | None = None) -> ApiError:
+    """503 for an identifier the provider could not resolve right now
+    (nothing was saved). Keeps the provider's code: configuration problems
+    are reported as such and carry no ``Retry-After``; anything else is
+    ``provider_unavailable`` (or ``provider_rate_limited``) with a retry hint."""
+    from app.providers.semantic_scholar import DEFAULT_RETRY_AFTER, ProviderError
+
+    if code in _OPERATOR_CODES:
+        return ProviderError(code, _OPERATOR_CODES[code])
+    if code == "provider_rate_limited":
+        return ProviderError(
+            code,
+            "Semantic Scholar is rate limiting requests; please retry.",
+            retry_after=retry_after or DEFAULT_RETRY_AFTER,
+        )
+    return ProviderError(
+        "provider_unavailable",
+        "Semantic Scholar is unavailable; please retry.",
+        retry_after=retry_after or DEFAULT_RETRY_AFTER,
+    )
 
 
 async def resolve_identifier(db: AsyncSession, parsed: ParsedIdentifier) -> ResolvedPaper:
-    """Cached snapshot first, then the provider chain for DOIs (upserting the
-    snapshot). Only for callers that hold no per-user lock: write paths split
-    the provider call out of their transaction instead."""
+    """Cached snapshot first (alias-aware), then the provider for DOIs and the
+    other strong identifiers, upserting the snapshot. A DOI miss is not
+    confirmed with doi.org here: it is ``not_found``. Only for callers that
+    hold no per-user lock: write paths split the provider call out of their
+    transaction instead."""
     row = await get_cached_paper(db, parsed.canonical_key)
     if row is not None:
         return ResolvedPaper("found", row)
-    if parsed.doi is None:
+    if parsed.lookup_id is None:
         return ResolvedPaper("not_found")
-
-    from app.providers import registry
-
-    lookup = await registry.resolve_doi(parsed.doi, confirm_missing=False)
+    lookup = await lookup_identifier(parsed, confirm_missing=False)
     if lookup.paper is None:
-        return ResolvedPaper(lookup.status)
-    # The upsert may keep an older key for the same work (alias merge).
-    stored = (await cache_papers(db, [lookup.paper]))[0]
-    return ResolvedPaper("found", await get_cached_paper(db, stored.canonical_key))
+        return ResolvedPaper(lookup.status, retry_after=lookup.retry_after, code=lookup.code)
+    return ResolvedPaper("found", await store_paper(db, lookup.paper))
 
 
 async def _detail_from_row(db: AsyncSession, row: CachedPaperMetadata) -> dict:
@@ -268,27 +338,21 @@ async def get_paper_detail(
     db: AsyncSession, canonical_key: str, *, allow_lookup: bool = True
 ) -> dict:
     """Hydrate a single paper from the durable metadata snapshot, falling
-    back to a live stable-identifier lookup (which upserts the snapshot) on a
-    cache miss.
+    back to a live lookup of a DOI or another strong identifier (which
+    upserts the snapshot) on a cache miss.
 
     The key is normalized first, so a bare DOI or a DOI link resolves too.
-    hash:-keyed papers with no cached row cannot be re-fetched and 404.
+    A definitive miss, and a ``hash:`` key with no cached row, is a 404; a
+    provider that cannot answer right now is a 503 with ``Retry-After``.
     """
     key = normalize_paper_key(canonical_key)
     row = await get_cached_paper(db, key)
 
-    if row is None and allow_lookup and key.startswith("doi:"):
-        doi = key[len("doi:") :]
-        if DOI_RE.fullmatch(doi):
-            parsed = ParsedIdentifier(kind="doi", canonical_key=key, doi=doi, raw=canonical_key)
-            row = (await resolve_identifier(db, parsed)).row
-    elif row is None and allow_lookup and key.startswith(("s2:", "arxiv:", "pmid:", "pmcid:")):
-        from app.providers import registry
-
-        paper = await registry.lookup_by_id(key)
-        if paper is not None:
-            stored = (await cache_papers(db, [paper]))[0]
-            row = await get_cached_paper(db, stored.canonical_key)
+    if row is None and allow_lookup and (parsed := parse_lookup_key(key)) is not None:
+        resolved = await resolve_identifier(db, parsed)
+        if resolved.status == "unavailable":
+            raise provider_unavailable(resolved.retry_after, resolved.code)
+        row = resolved.row
 
     if row is None:
         raise NotFoundError(f"Paper not found: {key}")
@@ -307,22 +371,30 @@ async def get_cached_papers_by_keys(
     return {row.canonical_key: row for row in result.scalars().all()}
 
 
-async def get_cached_papers_by_dois(
-    db: AsyncSession, dois: set[str]
+async def get_cached_papers_by_aliases(
+    db: AsyncSession, keys: set[str]
 ) -> dict[str, CachedPaperMetadata]:
-    """Batched DOI-alias half of ``get_cached_paper``: per normalized DOI, the
-    row with the lowest canonical key, whatever key it is stored under."""
-    if not dois:
-        return {}
-    result = await db.execute(
-        select(CachedPaperMetadata)
-        .where(CachedPaperMetadata.doi.in_(dois))
-        .order_by(CachedPaperMetadata.canonical_key)
-    )
-    found: dict[str, CachedPaperMetadata] = {}
-    for row in result.scalars().all():
-        found.setdefault(row.doi, row)
-    return found
+    """Batched ``get_cached_paper``: per key, the row stored under it, else the
+    row with the lowest canonical key holding it as an alias (an ``s2:`` row
+    enriched with a DOI answers for that ``doi:`` key)."""
+    found = await get_cached_papers_by_keys(db, keys)
+    result = {key: found[key] for key in keys if key in found}
+    wanted: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for key in keys - result.keys():
+        prefix, _, value = key.partition(":")
+        if prefix in _ALIAS_FIELDS:
+            wanted[_ALIAS_FIELDS[prefix]][_alias_value(prefix, value)].append(key)
+    for field, by_value in wanted.items():
+        column = getattr(CachedPaperMetadata, field)
+        rows = await db.execute(
+            select(CachedPaperMetadata)
+            .where(column.in_(by_value))
+            .order_by(CachedPaperMetadata.canonical_key)
+        )
+        for row in rows.scalars().all():
+            for key in by_value.get(getattr(row, field), ()):
+                result.setdefault(key, row)
+    return result
 
 
 def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchResult:
@@ -357,6 +429,8 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
 
     raw_total = sum(len(r.papers) for r in results)
     provider_names = [r.provider for r in results if r.provider]
+    # The providers' own match counts, taken before deduplication shrinks the page.
+    estimates = [r.total_estimate for r in results if r.total_estimate is not None]
 
     return ProviderSearchResult(
         papers=ordered,
@@ -366,10 +440,24 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         provider="+".join(provider_names),
         providers=provider_names,
         has_more=any(result.has_more for result in results),
+        total_estimate=sum(estimates) if estimates else None,
+        window_capped=any(result.window_capped for result in results),
     )
 
 
-def build_search_response(result: ProviderSearchResult) -> dict:
+def build_search_response(
+    result: ProviderSearchResult,
+    *,
+    sort: Literal["relevance", "date", "citations"] = "relevance",
+    next_cursor: str | None = None,
+    filtered_locally: bool = False,
+    source: str | None = None,
+) -> dict:
+    """Group the served rows by ``paper_group_key`` in first-appearance
+    order (the provider's sort order) and flag possible other versions
+    among them (``papers.similarity``; never merged)."""
+    from app.papers.similarity import find_possible_versions
+
     grouped: dict[str, list[tuple[int, PaperMetadata]]] = defaultdict(list)
     for index, paper in enumerate(result.papers):
         grouped[paper.paper_group_key].append((index, paper))
@@ -414,9 +502,24 @@ def build_search_response(result: ProviderSearchResult) -> dict:
             }
         )
 
+    # One item per group, in ``ordered_group_keys`` order.
+    summaries = {
+        group_key: {
+            "paper_group_key": group_key,
+            "title": grouped[group_key][0][1].title,
+            "provider_sources": sorted(
+                {name for _, paper in grouped[group_key] for name in _provider_sources_for(paper)}
+            ),
+        }
+        for group_key in ordered_group_keys
+    }
+    related = find_possible_versions(result.papers)
+    for group_key, item in zip(ordered_group_keys, items, strict=True):
+        item["possible_versions"] = [summaries[other] for other in related.get(group_key, [])]
+
     providers_list = result.providers or ([result.provider] if result.provider else [])
 
-    return {
+    payload = {
         "items": items,
         "total_count": len(items),
         "raw_total_count": result.total_count,
@@ -424,7 +527,15 @@ def build_search_response(result: ProviderSearchResult) -> dict:
         "page": result.page,
         "page_size": result.page_size,
         "providers": providers_list,
+        "sort": sort,
+        "next_cursor": next_cursor,
+        "total_estimate": result.total_estimate,
+        "window_capped": result.window_capped,
+        "filtered_locally": filtered_locally,
     }
+    if source:
+        payload["source"] = source
+    return payload
 
 
 async def set_paper_state(

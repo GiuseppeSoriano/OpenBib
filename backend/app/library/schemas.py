@@ -91,8 +91,10 @@ class LibraryKeysResponse(BaseModel):
 
 class LibraryResolve(BaseModel):
     """Retry or correct a stored paper key. ``paper_canonical_key`` is the key
-    exactly as stored (not normalized); ``replacement`` is a corrected DOI,
-    DOI link or known ``hash:`` key."""
+    exactly as stored (not normalized); ``replacement`` is a corrected
+    identifier in any form a collection add accepts (DOI or DOI link, ``s2:``
+    key or Semantic Scholar link, arXiv ID, ``pmid:``/``pmcid:``, known
+    ``hash:`` key)."""
 
     paper_canonical_key: str = Field(min_length=1, max_length=512)
     replacement: str | None = Field(default=None, min_length=1, max_length=512)

@@ -369,6 +369,36 @@ async def test_keys_of_cached_snapshots_are_left_alone(db):
     assert await _rows(db, UserLibraryVersion.paper_canonical_key) == [("doi:10.1/Legacy",)]
 
 
+async def test_strong_identifier_keys_are_neither_repaired_nor_reported(db):
+    user_id = await _user(db)
+    coll_id = await _collection(db, user_id)
+    # Uncached, yet valid as stored: reads resolve them through cache aliases.
+    keys = [
+        "s2:" + "a" * 40,
+        "arxiv:2501.00663",
+        "pmid:31452104",
+        "pmcid:PMC2323736",
+        "openalex:W2100837269",
+    ]
+    for position, key in enumerate(keys):
+        db.add(
+            CollectionPaper(
+                collection_id=coll_id,
+                paper_canonical_key=key,
+                added_by=user_id,
+                position=position,
+            )
+        )
+        await _pinned(db, user_id, key, synthetic_group_key(key))
+    await db.flush()
+
+    report = await _repair(db)
+
+    assert (report.mapped, report.unrepairable) == (0, [])
+    assert await _rows(db, CollectionPaper.paper_canonical_key) == sorted((k,) for k in keys)
+    assert await _rows(db, UserLibraryVersion.paper_canonical_key) == sorted((k,) for k in keys)
+
+
 async def test_a_real_group_the_version_already_has_is_kept(db):
     user_id = await _user(db)
     db.add(_cached("doi:10.1/v2", "group:paper"))

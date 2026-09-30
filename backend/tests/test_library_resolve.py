@@ -7,8 +7,10 @@ import uuid
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import create_access_token, create_session, hash_password, utcnow
@@ -320,7 +322,7 @@ async def test_collections_the_caller_cannot_edit_are_untouched(db, monkeypatch)
     ) == sorted([(owner_id, RAW, synthetic_group_key(RAW)), (viewer_id, TNN, "group:gnn")])
 
 
-async def test_editor_without_a_pin_can_resolve_a_collection_row(db, monkeypatch):
+async def test_editor_without_a_pin_can_resolve_a_collection_row(db, engine, monkeypatch):
     found = DoiLookup("found", _paper(TNN, "group:gnn"))
     monkeypatch.setattr("app.providers.registry.resolve_doi", _resolver(found))
     owner_id, _owner_headers = await _user(db, "owner@example.com")
@@ -333,12 +335,24 @@ async def test_editor_without_a_pin_can_resolve_a_collection_row(db, monkeypatch
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["canonical_key"], body["paper_group_key"]) == (TNN, None)
+    # The moved row keeps a Library entry behind it for the editor.
+    assert (body["canonical_key"], body["paper_group_key"]) == (TNN, "group:gnn")
     assert await _rows(db, CollectionPaper.paper_canonical_key) == [(TNN,)]
     # The owner's own Library pin is theirs to resolve.
-    assert await _rows(db, UserLibraryVersion.user_id, UserLibraryVersion.paper_canonical_key) == [
-        (owner_id, RAW)
-    ]
+    assert await _rows(
+        db, UserLibraryVersion.user_id, UserLibraryVersion.paper_canonical_key
+    ) == sorted([(owner_id, RAW), (editor_id, TNN)])
+    assert await _rows(db, UserLibraryEntry.paper_group_key, user_id=editor_id) == [("group:gnn",)]
+    if ON_POSTGRES:
+        # The re-key ran under the collection row lock, still held by the
+        # uncommitted test session.
+        async with AsyncSession(engine) as other:
+            with pytest.raises(DBAPIError):
+                await other.execute(
+                    text("SELECT id FROM collections WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": shared},
+                )
+            await other.rollback()
 
 
 async def test_requires_authentication(db):
@@ -404,3 +418,144 @@ async def test_no_transaction_or_user_lock_is_held_during_resolution(db, engine,
     assert observed["in_transaction"] is False
     if ON_POSTGRES:
         assert observed["lock_free"] is True
+
+
+async def test_raw_doi_of_a_paper_cached_under_s2_moves_onto_that_key(db, monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr("app.providers.registry.resolve_doi", _resolver(DoiLookup("found"), calls))
+    user_id, headers = await _user(db)
+    coll_id = await _collection(db, user_id)
+    s2_key = "s2:" + "e" * 40
+    snapshot = _paper(TNN, "group:gnn")
+    snapshot.canonical_key = s2_key
+    snapshot.semantic_scholar_id = "e" * 40
+    await cache_papers(db, [snapshot])
+    await _stored(db, user_id, RAW, coll_id=coll_id)
+
+    async with _client(db) as client:
+        response = await client.post(RESOLVE, json={"paper_canonical_key": RAW}, headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["status"], body["canonical_key"], body["paper_group_key"]) == (
+        "resolved",
+        s2_key,
+        "group:gnn",
+    )
+    assert calls == []
+    assert await _rows(db, CollectionPaper.paper_canonical_key) == [(s2_key,)]
+    assert await _rows(
+        db, UserLibraryVersion.paper_canonical_key, UserLibraryVersion.paper_group_key
+    ) == [(s2_key, "group:gnn")]
+
+
+async def test_other_identifiers_resolve_or_change_nothing(db, monkeypatch):
+    user_id, headers = await _user(db)
+    coll_id = await _collection(db, user_id)
+    await _stored(db, user_id, "doi:not-a-doi", coll_id=coll_id)
+    s2_id = "f" * 40
+    record = PaperMetadata(
+        canonical_key=f"s2:{s2_id}",
+        paper_group_key="group:s2only",
+        title="Only on Semantic Scholar",
+        semantic_scholar_id=s2_id,
+        provider_source="semantic_scholar",
+    )
+    calls: list[str] = []
+
+    async def resolve_id(identifier: str):
+        calls.append(identifier)
+        return DoiLookup("found", record)
+
+    async with _client(db) as client:
+        # The autouse fixture leaves the provider unconfigured, and only a DOI
+        # may be kept as pending: nothing moves.
+        unavailable = await client.post(
+            RESOLVE,
+            json={"paper_canonical_key": "doi:not-a-doi", "replacement": "arXiv:2501.00663v2"},
+            headers=headers,
+        )
+        monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+        link = f"https://www.semanticscholar.org/paper/Only-on-S2/{s2_id.upper()}"
+        resolved = await client.post(
+            RESOLVE,
+            json={"paper_canonical_key": "doi:not-a-doi", "replacement": link},
+            headers=headers,
+        )
+
+    assert unavailable.status_code == 200
+    assert (unavailable.json()["status"], unavailable.json()["canonical_key"]) == (
+        "unavailable",
+        "doi:not-a-doi",
+    )
+    assert unavailable.json()["moved"] == {}
+    assert resolved.status_code == 200
+    assert (resolved.json()["status"], resolved.json()["canonical_key"]) == (
+        "resolved",
+        f"s2:{s2_id}",
+    )
+    assert calls == [f"s2:{s2_id}"]
+    assert await _rows(db, CollectionPaper.paper_canonical_key) == [(f"s2:{s2_id}",)]
+    assert await _rows(
+        db, UserLibraryVersion.paper_canonical_key, UserLibraryVersion.paper_group_key
+    ) == [(f"s2:{s2_id}", "group:s2only")]
+
+
+async def test_edit_rights_are_rechecked_after_resolution(db, monkeypatch):
+    owner_id, _owner_headers = await _user(db, "owner@example.com")
+    editor_id, headers = await _user(db, "editor@example.com")
+    shared = await _collection(db, owner_id, members=[(editor_id, "editor")])
+    await _stored(db, owner_id, RAW, coll_id=shared)
+
+    async def revoke_then_find(doi: str, **_kwargs):
+        # The owner removes the editor while the provider is answering.
+        await db.execute(
+            delete(CollectionMember).where(
+                CollectionMember.collection_id == shared, CollectionMember.user_id == editor_id
+            )
+        )
+        await db.commit()
+        return DoiLookup("found", _paper(TNN, "group:gnn"))
+
+    monkeypatch.setattr("app.providers.registry.resolve_doi", revoke_then_find)
+
+    async with _client(db) as client:
+        response = await client.post(RESOLVE, json={"paper_canonical_key": RAW}, headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "not_in_library"
+    assert await _rows(db, CollectionPaper.paper_canonical_key) == [(RAW,)]
+
+
+async def test_collections_are_locked_before_the_snapshot_is_stored(db, monkeypatch):
+    from app.library import service as library_service
+
+    order: list[str] = []
+    lock, store = library_service._lock_editable_collections, library_service.store_paper
+
+    async def recording_lock(*args):
+        order.append("collections")
+        return await lock(*args)
+
+    async def recording_store(*args):
+        order.append("snapshot")
+        return await store(*args)
+
+    monkeypatch.setattr(library_service, "_lock_editable_collections", recording_lock)
+    monkeypatch.setattr(library_service, "store_paper", recording_store)
+    monkeypatch.setattr(
+        "app.providers.registry.resolve_doi",
+        _resolver(DoiLookup("found", _paper(TNN, "group:gnn"))),
+    )
+    user_id, headers = await _user(db)
+    coll_id = await _collection(db, user_id)
+    await _stored(db, user_id, RAW, coll_id=coll_id)
+
+    async with _client(db) as client:
+        response = await client.post(RESOLVE, json={"paper_canonical_key": RAW}, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["canonical_key"] == TNN
+    # The lock order of adding a paper (user row, collections, cached row), so
+    # a concurrent add of the same paper cannot deadlock with this re-key.
+    assert order == ["collections", "snapshot"]

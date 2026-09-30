@@ -45,6 +45,17 @@ async def fake_resolve_doi(doi: str, **_kwargs) -> DoiLookup:
     return DoiLookup("found", _paper(f"doi:{doi}", f"group:{doi[-1]}", f"Paper {doi[-1]}"))
 
 
+def _batch(resolve, calls: list[list[str]] | None = None):
+    """A ``registry.resolve_dois`` stand-in built on a per-DOI resolver."""
+
+    async def resolve_dois(dois: list[str], **_kwargs) -> dict[str, DoiLookup]:
+        if calls is not None:
+            calls.append(list(dois))
+        return {doi: await resolve(doi) for doi in dois}
+
+    return resolve_dois
+
+
 async def _make_user(db, email: str) -> User:
     user = User(
         id=uuid.uuid4(),
@@ -91,7 +102,7 @@ async def _count(db, model, **filters) -> int:
 
 @pytest.mark.asyncio
 async def test_mixed_batch_gets_per_line_statuses(db, monkeypatch):
-    monkeypatch.setattr("app.providers.registry.resolve_doi", fake_resolve_doi)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", _batch(fake_resolve_doi))
     user, coll, headers = await _setup(db)
 
     async with _client(db) as client:
@@ -136,7 +147,7 @@ async def test_mixed_batch_gets_per_line_statuses(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reimport_is_all_duplicates_and_changes_nothing(db, monkeypatch):
-    monkeypatch.setattr("app.providers.registry.resolve_doi", fake_resolve_doi)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", _batch(fake_resolve_doi))
     user, coll, headers = await _setup(db)
 
     async with _client(db) as client:
@@ -160,7 +171,7 @@ async def test_alias_dois_resolving_to_one_record_are_deduped(db, monkeypatch):
     async def alias_resolve(doi: str, **_kwargs) -> DoiLookup:
         return DoiLookup("found", _paper("doi:10.1/primary", "group:primary", "Primary"))
 
-    monkeypatch.setattr("app.providers.registry.resolve_doi", alias_resolve)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", _batch(alias_resolve))
     _user, coll, headers = await _setup(db)
 
     async with _client(db) as client:
@@ -208,8 +219,8 @@ async def test_provider_outage_inserts_unresolved_rows(db):
 
 @pytest.mark.asyncio
 async def test_doi_cached_as_an_s2_alias_needs_no_provider(db, monkeypatch):
-    async def unexpected(doi: str, **_kwargs):
-        raise AssertionError(f"unexpected provider call for {doi}")
+    async def unexpected(value, **_kwargs):
+        raise AssertionError(f"unexpected provider call for {value}")
 
     s2_id = "b" * 40
     snapshot = _paper(f"s2:{s2_id}", "group:s2import", "Snapshot")
@@ -218,7 +229,8 @@ async def test_doi_cached_as_an_s2_alias_needs_no_provider(db, monkeypatch):
     enriched.semantic_scholar_id = s2_id
     await cache_papers(db, [snapshot])
     await cache_papers(db, [enriched])
-    monkeypatch.setattr("app.providers.registry.resolve_doi", unexpected)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", unexpected)
+    monkeypatch.setattr("app.providers.registry.resolve_id", unexpected)
     _user, coll, headers = await _setup(db)
 
     async with _client(db) as client:
@@ -247,13 +259,17 @@ async def test_resolution_budget_marks_unfinished_lines_unresolved(db, monkeypat
     import asyncio
 
     from app.config import settings
+    from app.providers import registry
 
-    async def slow(doi: str, **_kwargs):
-        if doi == "10.1/slow":
-            await asyncio.sleep(5)
-        return DoiLookup("found", _paper(f"doi:{doi}", f"group:{doi}", doi))
+    class Slow:
+        name = "slow"
 
-    monkeypatch.setattr("app.providers.registry.resolve_doi", slow)
+        async def lookup_by_doi(self, doi):
+            if doi == "10.1/slow":
+                await asyncio.sleep(5)
+            return _paper(f"doi:{doi}", f"group:{doi}", doi)
+
+    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [Slow()])
     monkeypatch.setattr(settings, "import_request_budget_seconds", 0.2)
     _user, coll, headers = await _setup(db)
 
@@ -332,7 +348,7 @@ async def test_no_transaction_or_user_lock_is_held_during_resolution(db, engine,
     user, coll, headers = await _setup(db)
     observed: dict[str, bool] = {}
 
-    async def resolve(doi: str, **_kwargs):
+    async def resolve(dois: list[str], **_kwargs):
         observed["in_transaction"] = db.in_transaction()
         if ON_POSTGRES:
             async with AsyncSession(engine) as other:
@@ -342,9 +358,9 @@ async def test_no_transaction_or_user_lock_is_held_during_resolution(db, engine,
                 )
                 observed["lock_free"] = locked.first() is not None
                 await other.rollback()
-        return await fake_resolve_doi(doi)
+        return {doi: await fake_resolve_doi(doi) for doi in dois}
 
-    monkeypatch.setattr("app.providers.registry.resolve_doi", resolve)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", resolve)
 
     async with _client(db) as client:
         response = await client.post(
@@ -357,3 +373,172 @@ async def test_no_transaction_or_user_lock_is_held_during_resolution(db, engine,
     assert observed["in_transaction"] is False
     if ON_POSTGRES:
         assert observed["lock_free"] is True
+
+
+@pytest.mark.asyncio
+async def test_dois_resolve_in_one_batch_and_only_misses_reach_doi_org(db, monkeypatch, s2_mock):
+    import json
+
+    from app.providers import registry
+
+    checked: list[str] = []
+
+    async def handle(doi: str) -> bool:
+        checked.append(doi)
+        return "zenodo" in doi
+
+    monkeypatch.setattr(registry, "doi_handle_exists", handle)
+    found = {
+        "paperId": "a" * 40,
+        "title": "Found in the batch",
+        "authors": [{"name": "Alice Smith"}],
+        "year": 2024,
+        "externalIds": {"DOI": "10.1/found"},
+    }
+    s2_mock.responses.append([found, None, None])
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        response = await client.post(
+            f"/api/v1/collections/{coll.id}/import/dois",
+            json={"dois": ["10.1/found", "10.1/gone", "10.5281/zenodo.1"]},
+            headers=headers,
+        )
+
+    assert [(r["status"], r["canonical_key"]) for r in response.json()["results"]] == [
+        ("added", "doi:10.1/found"),
+        ("not_found", "doi:10.1/gone"),
+        ("unresolved", "doi:10.5281/zenodo.1"),
+    ]
+    assert [call.method for call in s2_mock.calls] == ["POST"]
+    assert json.loads(s2_mock.calls[0].content)["ids"] == [
+        "DOI:10.1/found",
+        "DOI:10.1/gone",
+        "DOI:10.5281/zenodo.1",
+    ]
+    assert sorted(checked) == ["10.1/gone", "10.5281/zenodo.1"]
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 2
+
+
+@pytest.mark.asyncio
+async def test_other_identifiers_resolve_in_one_batch_and_are_never_pending(db, monkeypatch):
+    only_s2, titans = "a" * 40, "b" * 40
+    cached_only = _paper(f"s2:{only_s2}", "group:only", "Only on Semantic Scholar")
+    cached_only.semantic_scholar_id = only_s2
+    snapshot = _paper(f"s2:{titans}", "group:titans", "Titans")
+    snapshot.semantic_scholar_id = titans
+    await cache_papers(db, [cached_only, snapshot])
+    enriched = _paper("doi:10.48550/arxiv.2501.00663", "group:other", "Titans")
+    enriched.semantic_scholar_id = titans
+    enriched.arxiv_id = "2501.00663"
+    calls: list[list[str]] = []
+
+    async def papers_by_ids(ids: list[str]) -> list[PaperMetadata | None]:
+        calls.append(list(ids))
+        return [enriched if key == "arxiv:2501.00663" else None for key in ids]
+
+    async def unexpected(identifier: str) -> DoiLookup:
+        raise AssertionError(f"unexpected per-key lookup of {identifier}")
+
+    async def resolve_doi(doi: str) -> DoiLookup:
+        return DoiLookup("found", enriched)
+
+    monkeypatch.setattr("app.providers.registry.papers_by_ids", papers_by_ids)
+    monkeypatch.setattr("app.providers.registry.resolve_id", unexpected)
+    monkeypatch.setattr("app.providers.registry.resolve_dois", _batch(resolve_doi))
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        response = await client.post(
+            f"/api/v1/collections/{coll.id}/import/keys",
+            json={
+                "keys": [
+                    f"s2:{only_s2.upper()}",
+                    "arXiv:2501.00663v2",
+                    "pmid:404",
+                    "pmcid:PMC1",
+                    "https://arxiv.org/abs/2501.00663",
+                    "10.48550/arXiv.2501.00663",
+                ]
+            },
+            headers=headers,
+        )
+
+    body = response.json()
+    assert [(r["status"], r["canonical_key"]) for r in body["results"]] == [
+        ("added", f"s2:{only_s2}"),
+        ("added", f"s2:{titans}"),
+        ("not_found", "pmid:404"),
+        ("not_found", "pmcid:PMC1"),
+        ("duplicate", "arxiv:2501.00663"),
+        ("duplicate", f"s2:{titans}"),
+    ]
+    assert (body["added"], body["duplicate"], body["not_found"], body["total"]) == (2, 2, 2, 6)
+    # One batch call for every uncached non-DOI line, never one call per line.
+    assert calls == [["arxiv:2501.00663", "pmid:404", "pmcid:PMC1"]]
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failed_batch_leaves_other_identifiers_unavailable(db, s2_mock):
+    import json
+
+    import httpx
+
+    s2_mock.handler = lambda _request: httpx.Response(503)
+    _user, coll, headers = await _setup(db)
+    keys = [f"s2:{'c' * 40}", "arxiv:2501.00663", "pmid:31452104", "pmcid:PMC2323736"]
+
+    async with _client(db) as client:
+        response = await client.post(
+            f"/api/v1/collections/{coll.id}/import/keys", json={"keys": keys}, headers=headers
+        )
+
+    assert [(r["status"], r["canonical_key"]) for r in response.json()["results"]] == [
+        ("unavailable", key) for key in keys
+    ]
+    # Only the batch endpoint was called (with the provider's own retries).
+    assert {(call.method, call.url.path) for call in s2_mock.calls} == {
+        ("POST", "/graph/v1/paper/batch")
+    }
+    assert json.loads(s2_mock.calls[0].content)["ids"] == [
+        "c" * 40,
+        "ARXIV:2501.00663",
+        "PMID:31452104",
+        "PMCID:2323736",
+    ]
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_batch_falls_back_to_one_lookup_per_key(db, monkeypatch):
+    from app.providers.semantic_scholar import ProviderError
+
+    found = _paper(f"s2:{'e' * 40}", "group:bypmid", "Found by PMID")
+    found.semantic_scholar_id = "e" * 40
+    found.pmid = "1"
+    calls: list[str] = []
+
+    async def papers_by_ids(_ids: list[str]):
+        raise ProviderError("invalid_query", "Unreadable batch.", 422)
+
+    async def resolve_id(identifier: str) -> DoiLookup:
+        calls.append(identifier)
+        return DoiLookup("found", found) if identifier == "pmid:1" else DoiLookup("not_found")
+
+    monkeypatch.setattr("app.providers.registry.papers_by_ids", papers_by_ids)
+    monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        response = await client.post(
+            f"/api/v1/collections/{coll.id}/import/keys",
+            json={"keys": ["pmid:1", "pmid:2"]},
+            headers=headers,
+        )
+
+    assert [(r["status"], r["canonical_key"]) for r in response.json()["results"]] == [
+        ("added", f"s2:{'e' * 40}"),
+        ("not_found", "pmid:2"),
+    ]
+    assert calls == ["pmid:1", "pmid:2"]

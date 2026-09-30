@@ -161,6 +161,44 @@ async def test_library_save_uses_the_cached_group_over_the_client_group(db):
 
 
 @pytest.mark.asyncio
+async def test_library_save_pins_the_stored_key_of_an_alias(db):
+    user = await _make_user(db)
+    headers = await _auth(db, user)
+    s2_key = "s2:" + "a" * 40
+    snapshot = _paper(s2_key, "group:alias")
+    snapshot.doi, snapshot.semantic_scholar_id, snapshot.pmcid = "10.1/alias", "a" * 40, "PMC77"
+    await cache_papers(db, [snapshot])
+
+    async with _client(db) as client:
+        by_doi = await client.post(
+            "/api/v1/library/entries",
+            json={
+                "paper_group_key": "group:client",
+                "paper_canonical_key": "https://doi.org/10.1/ALIAS",
+            },
+            headers=headers,
+        )
+        # A PMCID in any case finds the ``PMC<digits>`` alias.
+        by_pmcid = await client.post(
+            "/api/v1/library/entries",
+            json={"paper_group_key": "group:client", "paper_canonical_key": "pmcid:pmc77"},
+            headers=headers,
+        )
+
+    for saved in (by_doi, by_pmcid):
+        assert saved.status_code == 201
+        assert saved.json()["paper_group_key"] == "group:alias"
+        assert saved.json()["primary_canonical_key"] == s2_key
+    pins = await db.execute(
+        select(UserLibraryVersion.paper_canonical_key, UserLibraryVersion.paper_group_key).where(
+            UserLibraryVersion.user_id == user.id
+        )
+    )
+    assert pins.all() == [(s2_key, "group:alias")]
+    assert await db.get(UserLibraryEntry, (user.id, "group:client")) is None
+
+
+@pytest.mark.asyncio
 async def test_library_save_keeps_an_existing_pin_for_uncached_papers(db):
     user = await _make_user(db)
     headers = await _auth(db, user)
@@ -247,7 +285,9 @@ async def test_delete_entry_conflict_and_detach_over_http(db):
 
     assert blocked.status_code == 409
     assert blocked.json()["detail"]["code"] == "entry_in_collections"
-    assert blocked.json()["detail"]["collections"] == [{"id": str(coll.id), "name": "Reading list"}]
+    assert blocked.json()["detail"]["collections"] == [
+        {"id": str(coll.id), "name": "Reading list", "is_owner": True}
+    ]
     assert detached.status_code == 204
     assert await db.get(UserLibraryEntry, (user.id, "group:x")) is None
     assert await db.get(CollectionPaper, (coll.id, "doi:10.1/x")) is None

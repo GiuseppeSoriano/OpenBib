@@ -237,3 +237,71 @@ async def test_detail_normalizes_legacy_markup_in_cached_rows(db):
     assert payload["abstract"] == "Background: Old & raw.\n\nResults: Still works."
     assert payload["versions"][0]["abstract"] == payload["abstract"]
     assert payload["paper_group_key"] == "group:legacy"
+
+
+@pytest.mark.asyncio
+async def test_unavailable_provider_is_a_503_with_retry_after_not_a_404(db, monkeypatch):
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        # The autouse fixture leaves the provider unconfigured: an operator
+        # problem, reported as such and with no retry hint.
+        unconfigured = await client.get("/api/v1/papers/doi:10.9/unconfigured")
+
+        async def resolve_doi(doi, *, confirm_missing=True):
+            return DoiLookup("unavailable", retry_after=12)
+
+        async def resolve_id(identifier):
+            return DoiLookup("unavailable", code="provider_unavailable")
+
+        monkeypatch.setattr("app.providers.registry.resolve_doi", resolve_doi)
+        monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+        by_doi = await client.get("/api/v1/papers/doi:10.9/down")
+        by_s2 = await client.get("/api/v1/papers/s2:" + "0" * 40)
+
+    assert unconfigured.status_code == 503
+    assert unconfigured.json()["detail"]["code"] == "provider_not_configured"
+    assert "retry-after" not in unconfigured.headers
+    for response, wait in ((by_doi, "12"), (by_s2, "30")):
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "provider_unavailable"
+        assert response.headers["retry-after"] == wait
+
+
+@pytest.mark.asyncio
+async def test_strong_keys_resolve_to_the_stored_row(db, monkeypatch):
+    s2_id = "5" * 40
+    snapshot = _paper(f"s2:{s2_id}", "group:titans", "Titans")
+    snapshot.semantic_scholar_id = s2_id
+    await cache_papers(db, [snapshot])
+    enriched = _paper("doi:10.48550/arxiv.2501.00663", "group:other", "Titans")
+    enriched.semantic_scholar_id = s2_id
+    looked_up: list[str] = []
+
+    async def resolve_id(identifier: str):
+        looked_up.append(identifier)
+        if identifier == "pmid:404":
+            return DoiLookup("not_found")
+        return DoiLookup("found", enriched)
+
+    monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        found = await client.get("/api/v1/papers/arxiv:2501.00663v2")
+        by_doi = await client.get("/api/v1/papers/10.48550/arXiv.2501.00663")
+        missing = await client.get("/api/v1/papers/pmid:404")
+
+    assert found.status_code == 200
+    assert (found.json()["canonical_key"], found.json()["paper_group_key"]) == (
+        f"s2:{s2_id}",
+        "group:titans",
+    )
+    # The DOI is now an alias of the stored row: no second lookup.
+    assert by_doi.json()["canonical_key"] == f"s2:{s2_id}"
+    assert missing.status_code == 404
+    assert looked_up == ["arxiv:2501.00663", "pmid:404"]

@@ -2,21 +2,29 @@
 
 Dev-only: refuses to run when ENVIRONMENT=production (exit code 2). No
 provider is called; papers are synthetic ``doi:10.5555/openbib-demo.*`` rows
-(10.5555 is the DOI test prefix), apart from the audit paper of
-``--legacy-raw-doi``. The user must already exist.
+(10.5555 is the DOI test prefix), apart from one DOI-less Semantic Scholar
+record (an ``s2:`` key) and the audit paper of ``--legacy-raw-doi``. The
+users must already exist.
 
     docker compose exec api python -m scripts.seed_demo_library \\
         --email audit@example.com --papers 400 --collections 4 --long-data
     docker compose exec api python -m scripts.seed_demo_library \\
         --email audit@example.com --legacy-raw-doi
+    docker compose exec api python -m scripts.seed_demo_library \\
+        --email audit@example.com --long-data --share-with editor@example.com
 
 --papers N        cached metadata, Library entries, reading states, tags, notes
 --collections N   spread the seeded papers over N demo collections
 --long-data       a 200-character collection name, a 300-character title with
                   a 180-character unbroken token, 60 authors, missing metadata,
                   v1/v2/published versions, two same-year Crossref preprints
-                  without a version, a 5,000-character note, an HTML abstract
-                  and an unresolved entry with a ~200-character DOI
+                  without a version, a 5,000-character note, an HTML abstract,
+                  a DOI-less Semantic Scholar record and an unresolved entry
+                  with a ~200-character DOI
+--share-with EMAIL
+                  share the long-data collection: that existing, verified
+                  account becomes an editor, and a read link is enabled and
+                  printed
 --legacy-raw-doi  the pre-normalization key shapes from the UI audit, which
                   migration 1d2e3f4a5b6c repairs: run it with the database at
                   c7d8e9f0a1b2 (``alembic downgrade c7d8e9f0a1b2``)
@@ -29,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import sys
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -40,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # even when running outside the FastAPI app entrypoint.
 from app.auth import models as _auth_models  # noqa: F401
 from app.collections.models import Collection, CollectionMember, CollectionPaper
+from app.collections.sharing import read_link
 from app.common.canonical import build_paper_group_key
 from app.common.identifiers import synthetic_group_key
 from app.config import settings
@@ -66,6 +76,9 @@ LEGACY_KEYS = (
 )
 # What the repair turns the legacy keys into, so --reset also finds them.
 REPAIRED_KEYS = ("doi:10.1000/xyz123",)
+# A DOI-less record: Semantic Scholar keys it by its 40-hex paperId.
+S2_DEMO_ID = hashlib.sha1(b"openbib-demo-s2").hexdigest()
+S2_DEMO_KEY = f"s2:{S2_DEMO_ID}"
 
 TOPICS = (
     "graph neural networks",
@@ -174,7 +187,7 @@ def _paper(
         paper_group_key=group or build_paper_group_key(title, names),
         title=title,
         authors=_authors(names),
-        doi=key.removeprefix("doi:"),
+        doi=key.removeprefix("doi:") if key.startswith("doi:") else None,
         provider_source=provider_source,
         **fields,
     )
@@ -458,6 +471,18 @@ async def seed_long_data(db: AsyncSession, user: User) -> Counter[str]:
             venue="PLOS ONE",
             provider_source="europepmc",
         ),
+        _paper(
+            S2_DEMO_KEY,
+            "A Semantic Scholar record without a DOI",
+            ["Amara Chen", "Hiroshi Kowalski"],
+            abstract="Keyed by its Semantic Scholar paperId: there is no DOI to show or resolve.",
+            publication_date=date(2020, 4, 1),
+            venue="Workshop on Scholarly Metadata",
+            semantic_scholar_id=S2_DEMO_ID,
+            abstract_url=f"https://www.semanticscholar.org/paper/{S2_DEMO_ID}",
+            cited_by_count=12,
+            provider_source="semantic_scholar",
+        ),
     ]
     await cache_papers(db, papers)
     counts["cached_papers"] += len(papers)
@@ -492,6 +517,29 @@ async def seed_long_data(db: AsyncSession, user: User) -> Counter[str]:
     await _add_to_collection(db, coll, user, UNRESOLVED_LONG_KEY, counts)
     await db.flush()
     return counts
+
+
+async def seed_sharing(
+    db: AsyncSession, user: User, editor_email: str
+) -> tuple[Counter[str], str | None]:
+    """Share the long-data collection: ``editor_email`` (an existing,
+    verified account) becomes an editor and a read link is enabled. Returns
+    the counts and the read-link URL (``None`` when the editor is unknown)."""
+    counts: Counter[str] = Counter()
+    editor = await _find_user(db, editor_email)
+    if editor is None or editor.email_verified_at is None or editor.id == user.id:
+        return counts, None
+    coll = await _collection(db, user, LONG_COLLECTION_NAME, counts)
+    member = await db.get(CollectionMember, (coll.id, editor.id))
+    if member is None:
+        db.add(CollectionMember(collection_id=coll.id, user_id=editor.id, role="editor"))
+        counts["editors"] += 1
+    elif member.role != "editor":
+        member.role = "editor"
+        counts["editors"] += 1
+    await db.flush()
+    link = await read_link(db, coll.id, user.id, "enable")
+    return counts, link["url"]
 
 
 async def seed_legacy_raw_doi(db: AsyncSession, user: User) -> Counter[str]:
@@ -554,7 +602,7 @@ async def reset_demo_data(db: AsyncSession, user: User) -> Counter[str]:
     )
     counts["collections"] = result.rowcount or 0
 
-    named = (*LEGACY_KEYS, *REPAIRED_KEYS)
+    named = (*LEGACY_KEYS, *REPAIRED_KEYS, S2_DEMO_KEY)
 
     def demo(column):
         return or_(column.like(f"{DEMO_PREFIX}%"), column.in_(named))
@@ -655,6 +703,16 @@ async def run(args: argparse.Namespace) -> int:
                 _print_counts("Long data", await seed_long_data(db, user))
             if args.legacy_raw_doi:
                 _print_counts("Legacy raw-DOI shapes", await seed_legacy_raw_doi(db, user))
+            if args.share_with:
+                counts, url = await seed_sharing(db, user, args.share_with)
+                if url is None:
+                    await db.rollback()
+                    print(
+                        f"No other verified user with email {args.share_with!r}.", file=sys.stderr
+                    )
+                    return 1
+                _print_counts("Sharing", counts)
+                print(f"Read link: {url}")
             await db.commit()
         except Exception:
             await db.rollback()
@@ -672,12 +730,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collections", type=int, default=0, metavar="N")
     parser.add_argument("--long-data", action="store_true")
     parser.add_argument("--legacy-raw-doi", action="store_true")
+    parser.add_argument("--share-with", metavar="EMAIL", help="Existing account to add as editor")
     parser.add_argument("--reset", action="store_true")
     args = parser.parse_args(argv)
     if args.papers < 0 or args.collections < 0:
         parser.error("--papers and --collections must not be negative")
-    if not (args.papers or args.collections or args.long_data or args.legacy_raw_doi or args.reset):
-        parser.error("nothing to do: pass --papers, --long-data, --legacy-raw-doi or --reset")
+    if not (
+        args.papers
+        or args.collections
+        or args.long_data
+        or args.legacy_raw_doi
+        or args.share_with
+        or args.reset
+    ):
+        parser.error(
+            "nothing to do: pass --papers, --long-data, --legacy-raw-doi, --share-with or --reset"
+        )
     return asyncio.run(run(args))
 
 

@@ -76,14 +76,15 @@ async def get_entry(paper_group_key: str, user: CurrentUser, db: DB):
 @router.post("/entries", response_model=LibraryEntryRead, status_code=201)
 async def ensure_entry(body: LibraryEntryEnsure, user: CurrentUser, db: DB):
     """Save a paper to the Library. Cached metadata is authoritative for the
-    group: a client-supplied group that disagrees with it is ignored, and the
-    entry that actually holds the paper is returned."""
+    key and group: an alias key (a DOI of a paper cached as ``s2:``) is pinned
+    under the stored key, a client-supplied group that disagrees is ignored,
+    and the entry that actually holds the paper is returned."""
     cached = await get_cached_paper(db, body.paper_canonical_key)
     entry, _ = await service.ensure_entry_and_version(
         db,
         user.id,
         cached.paper_group_key if cached is not None else body.paper_group_key,
-        body.paper_canonical_key,
+        cached.canonical_key if cached is not None else body.paper_canonical_key,
         body.source_provider,
         authoritative_group=cached is not None,
     )
@@ -103,11 +104,13 @@ async def resolve_paper(
     can edit, or correct its identifier with ``replacement`` (same forms as
     adding a paper).
 
-    ``resolved``: the paper is stored under its canonical key and real Library
-    group, merged with any row already there. ``unavailable``: providers did
-    not answer; a legacy key still moves to its normalized ``doi:`` form.
-    ``not_found``: nothing changed. Only your own rows and rows in collections
-    you can edit are re-keyed. Errors: 404 ``not_in_library``; 422
+    ``resolved``: the paper is stored under the cached row's key (found
+    through any alias) and real Library group, merged with any row already
+    there. ``unavailable``: the provider did not answer; a legacy key still
+    moves to its normalized ``doi:`` form, other identifiers change nothing.
+    ``not_found``: nothing changed. Only your own rows and rows in
+    collections you can edit are re-keyed; you get a Library entry for moved
+    collection rows. Errors: 404 ``not_in_library``; 422
     ``invalid_identifier``.
     """
     await enforce_rate_limit(
@@ -158,9 +161,10 @@ async def delete_entry(
     db: DB,
     detach: bool = Query(False),
 ):
-    """409 ``entry_in_collections`` (with the collections) while a pinned
-    version is still in one of your collections; ``detach=true`` removes it
-    from them first."""
+    """409 ``entry_in_collections`` with ``collections=[{id, name,
+    is_owner}]`` while a pinned version is still in a collection you can
+    edit; ``detach=true`` removes it from them first (for every member of a
+    shared collection)."""
     await service.delete_entry(db, user.id, paper_group_key, detach=detach)
 
 

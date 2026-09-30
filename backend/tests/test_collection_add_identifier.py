@@ -406,3 +406,165 @@ async def test_no_transaction_or_user_lock_is_held_during_resolution(db, engine,
     assert observed["in_transaction"] is False
     if ON_POSTGRES:
         assert observed["lock_free"] is True
+
+
+def _s2_only(s2_id: str, group_key: str, title: str) -> PaperMetadata:
+    """A DOI-less Semantic Scholar record, keyed by its paperId."""
+    return PaperMetadata(
+        canonical_key=f"s2:{s2_id}",
+        paper_group_key=group_key,
+        title=title,
+        authors=[Author(name="Ali Rahimi")],
+        semantic_scholar_id=s2_id,
+        provider_source="semantic_scholar",
+    )
+
+
+async def _unexpected(value, **_kwargs):
+    raise AssertionError(f"unexpected provider call for {value}")
+
+
+@pytest.mark.asyncio
+async def test_cached_s2_key_and_link_are_added_without_a_provider_call(db, monkeypatch):
+    s2_id = "c" * 40
+    await cache_papers(db, [_s2_only(s2_id, "group:s2only", "A DOI-less search result")])
+    monkeypatch.setattr("app.providers.registry.resolve_doi", _unexpected)
+    monkeypatch.setattr("app.providers.registry.resolve_id", _unexpected)
+    user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        added = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": f"S2:{s2_id.upper()}"},
+            headers=headers,
+        )
+        again = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": f"https://www.semanticscholar.org/paper/Slug/{s2_id}"},
+            headers=headers,
+        )
+
+    assert added.status_code == 201
+    assert (added.json()["paper_canonical_key"], added.json()["resolved"]) == (f"s2:{s2_id}", True)
+    assert again.status_code == 409
+    assert again.json()["detail"]["canonical_key"] == f"s2:{s2_id}"
+    pin = await db.get(UserLibraryVersion, (user.id, f"s2:{s2_id}"))
+    assert pin.paper_group_key == "group:s2only"
+
+
+@pytest.mark.asyncio
+async def test_strong_identifiers_are_stored_under_the_cached_rows_key(db, monkeypatch):
+    s2_id = "d" * 40
+    await cache_papers(db, [_s2_only(s2_id, "group:titans", "Titans")])
+    enriched = _s2_only(s2_id, "group:other", "Titans")
+    enriched.canonical_key = "doi:10.48550/arxiv.2501.00663"
+    enriched.doi = "10.48550/arxiv.2501.00663"
+    enriched.arxiv_id = "2501.00663"
+    calls: list[str] = []
+
+    async def resolve_id(identifier: str):
+        calls.append(identifier)
+        return DoiLookup("found", enriched)
+
+    monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+    user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        added = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "https://arxiv.org/abs/2501.00663v1"},
+            headers=headers,
+        )
+        by_doi = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "10.48550/arXiv.2501.00663"},
+            headers=headers,
+        )
+
+    assert calls == ["arxiv:2501.00663"]
+    assert added.status_code == 201
+    assert added.json()["paper_canonical_key"] == f"s2:{s2_id}"
+    assert added.json()["paper_group_key"] == "group:titans"
+    # The DOI is now a cached alias of the s2: row: one record, no second row.
+    assert by_doi.status_code == 409
+    assert by_doi.json()["detail"]["canonical_key"] == f"s2:{s2_id}"
+    pin = await db.get(UserLibraryVersion, (user.id, f"s2:{s2_id}"))
+    assert pin.paper_group_key == "group:titans"
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_doi_found_for_a_paper_cached_under_s2_dedupes_onto_it(db, monkeypatch):
+    s2_id = "e" * 40
+    await cache_papers(db, [_s2_only(s2_id, "group:snap", "Snapshot")])
+    enriched = _paper("doi:10.1/new", "group:new", "Snapshot")
+    enriched.semantic_scholar_id = s2_id
+    monkeypatch.setattr(
+        "app.providers.registry.resolve_doi", _resolver(DoiLookup("found", enriched))
+    )
+    _user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        added = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "10.1/new"},
+            headers=headers,
+        )
+        again = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": f"s2:{s2_id}"},
+            headers=headers,
+        )
+
+    assert added.status_code == 201
+    assert (added.json()["paper_canonical_key"], added.json()["paper_group_key"]) == (
+        f"s2:{s2_id}",
+        "group:snap",
+    )
+    assert again.status_code == 409
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_other_identifiers_are_never_pending(db, monkeypatch):
+    user, coll, headers = await _setup(db)
+
+    async with _client(db) as client:
+        # The autouse fixture leaves the provider unconfigured.
+        unconfigured = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "s2:" + "0" * 40},
+            headers=headers,
+        )
+
+        async def resolve_id(identifier: str):
+            if identifier == "pmid:404":
+                return DoiLookup("not_found")
+            return DoiLookup("unavailable", retry_after=7)
+
+        monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+        missing = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "PMID: 404"},
+            headers=headers,
+        )
+        busy = await client.post(
+            f"/api/v1/collections/{coll.id}/papers",
+            json={"paper_canonical_key": "pmcid:pmc9"},
+            headers=headers,
+        )
+
+    assert unconfigured.status_code == 503
+    assert unconfigured.json()["detail"]["code"] == "provider_not_configured"
+    assert "retry-after" not in unconfigured.headers
+    assert missing.status_code == 422
+    assert missing.json()["detail"] == {
+        "code": "identifier_not_found",
+        "message": missing.json()["detail"]["message"],
+        "value": "pmid:404",
+    }
+    assert busy.status_code == 503
+    assert busy.headers["retry-after"] == "7"
+    assert busy.json()["detail"]["retry_after"] == 7
+    assert await _count(db, CollectionPaper, collection_id=coll.id) == 0
+    assert await _count(db, UserLibraryEntry, user_id=user.id) == 0

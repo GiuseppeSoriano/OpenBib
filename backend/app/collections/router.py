@@ -99,12 +99,17 @@ async def add_paper(
     redis: Redis,
 ):
     """Add a paper by DOI — bare (``10.1038/nature14539``), ``doi:``/``DOI``
-    prefixed, or a ``https://doi.org/`` link — or by an existing ``hash:`` key.
+    prefixed, or a ``https://doi.org/`` link — by Semantic Scholar key
+    (``s2:<paperId>``) or link, arXiv ID or link, ``pmid:``/``pmcid:`` key,
+    or by an existing ``hash:`` key.
 
-    The DOI is resolved before saving. ``resolved=false`` means providers were
-    unavailable and the paper was stored as pending. Errors: 409
-    ``already_in_collection``; 422 ``invalid_identifier``, ``doi_not_found``
-    or ``unknown_paper_key``.
+    The identifier is resolved before saving (a cached paper is added under
+    its stored key). ``resolved=false`` means the provider could not describe
+    a DOI and the paper was stored as pending; other identifiers are never
+    pending. Errors: 409 ``already_in_collection``; 422
+    ``invalid_identifier``, ``doi_not_found``, ``identifier_not_found`` or
+    ``unknown_paper_key``; 503 ``provider_unavailable`` with ``Retry-After``
+    (nothing saved).
     """
     await enforce_rate_limit(
         redis,
@@ -190,7 +195,8 @@ async def import_dois(
 ):
     """Import up to 500 identifiers (same forms as adding a single paper).
     Blank lines are ignored; every other line gets a result: ``added``,
-    ``duplicate``, ``invalid``, ``not_found`` or ``unresolved`` (pending)."""
+    ``duplicate``, ``invalid``, ``not_found``, ``unresolved`` (a pending DOI)
+    or ``unavailable`` (not saved; retry the line)."""
     from app.collections.import_export import import_identifiers
 
     await _limit_import(redis, request, response, user.id)
@@ -207,7 +213,8 @@ async def import_keys(
     db: DB,
     redis: Redis,
 ):
-    """Import ``doi:``/``hash:`` keys; validated exactly like ``/import/dois``."""
+    """Import paper keys (``doi:``, ``s2:``, ``hash:``, …); validated exactly
+    like ``/import/dois``."""
     from app.collections.import_export import import_identifiers
 
     await _limit_import(redis, request, response, user.id)

@@ -8,6 +8,12 @@ back and prints the per-table counts plus the first unrepairable keys (such
 as ``doi:not-a-doi``, which only the user can correct). ``--apply`` commits;
 take a database backup first. Both are idempotent: once the repair has run,
 the dry run reports ``keys mapped: 0``.
+
+Keys of the other strong identifiers (``s2:``, ``arxiv:``, ``pmid:``,
+``pmcid:``, ``openalex:``) are valid as stored: they are neither repaired
+nor reported. A raw DOI whose paper is cached under an ``s2:`` key moves to
+its ``doi:`` form, which reads resolve through the DOI alias; the user's
+``POST /library/resolve`` then merges it onto the ``s2:`` key.
 """
 
 from __future__ import annotations

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.collections.models import Collection, CollectionPaper
+from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.service import add_paper as add_paper_to_collection
 from app.collections.service import get_user_stats
 from app.common.exceptions import ConflictError, NotFoundError
@@ -19,9 +22,12 @@ from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
 from app.papers import service as paper_service
 from app.papers.models import CachedPaperMetadata, UserPaperState, UserPaperTag
+from app.providers.base import PaperMetadata
 from app.users.models import User
 
 pytestmark = pytest.mark.asyncio
+
+ON_POSTGRES = os.getenv("TEST_DB_URL", "").startswith("postgresql")
 
 
 async def _make_user(db, email="alice@example.com"):
@@ -104,7 +110,58 @@ async def test_delete_entry_blocked_when_version_in_collection(db):
         await library_service.delete_entry(db, user.id, "group:z")
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "entry_in_collections"
-    assert exc_info.value.detail["collections"] == [{"id": str(coll.id), "name": "My Coll"}]
+    assert exc_info.value.detail["collections"] == [
+        {"id": str(coll.id), "name": "My Coll", "is_owner": True}
+    ]
+
+
+async def test_delete_conflict_lists_shared_collections_the_user_does_not_own(db):
+    owner = await _make_user(db, "owner@example.com")
+    editor = await _make_user(db, "editor@example.com")
+    shared = await _make_collection(db, owner.id, name="Shared")
+    read_only = await _make_collection(db, owner.id, name="Read only")
+    db.add_all(
+        [
+            CollectionMember(collection_id=shared.id, user_id=editor.id, role="editor"),
+            CollectionMember(collection_id=read_only.id, user_id=editor.id, role="viewer"),
+        ]
+    )
+    await _cache_paper(db, "doi:10.1/shared", "group:shared")
+    await add_paper_to_collection(db, shared.id, editor.id, "doi:10.1/shared")
+    db.add(CollectionPaper(collection_id=read_only.id, paper_canonical_key="doi:10.1/shared"))
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await library_service.delete_entry(db, editor.id, "group:shared")
+
+    # Only collections the user can detach from block; is_owner warns that
+    # detaching also removes the paper for the owner's collaborators.
+    assert exc_info.value.detail["collections"] == [
+        {"id": str(shared.id), "name": "Shared", "is_owner": False}
+    ]
+
+
+async def test_add_version_pins_the_stored_key_of_an_alias(db):
+    user = await _make_user(db)
+    s2_id = "d" * 40
+    await paper_service.cache_papers(
+        db,
+        [
+            PaperMetadata(
+                canonical_key=f"s2:{s2_id}",
+                paper_group_key="group:alias",
+                title="Alias",
+                doi="10.1/alias",
+                semantic_scholar_id=s2_id,
+                provider_source="semantic_scholar",
+            )
+        ],
+    )
+    await library_service.ensure_entry_and_version(db, user.id, "group:alias", f"s2:{s2_id}")
+
+    pin = await library_service.add_version(db, user.id, "group:alias", "doi:10.1/alias")
+
+    assert pin.paper_canonical_key == f"s2:{s2_id}"
 
 
 async def test_delete_entry_with_detach_removes_it_from_collections(db):
@@ -117,6 +174,50 @@ async def test_delete_entry_with_detach_removes_it_from_collections(db):
 
     assert (await db.get(UserLibraryEntry, (user.id, "group:z"))) is None
     assert (await db.get(CollectionPaper, (coll.id, "doi:10.1/z"))) is None
+
+
+async def test_detach_locks_the_collections_it_removes_rows_from(db, engine):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await _cache_paper(db, "doi:10.1/z", "group:z")
+    await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
+    await db.commit()
+
+    await library_service.delete_entry(db, user.id, "group:z", detach=True)
+
+    assert (await db.get(CollectionPaper, (coll.id, "doi:10.1/z"))) is None
+    if ON_POSTGRES:
+        # Still held by the uncommitted test session, like every collection writer's lock.
+        async with AsyncSession(engine) as other:
+            with pytest.raises(DBAPIError):
+                await other.execute(
+                    text("SELECT id FROM collections WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": coll.id},
+                )
+            await other.rollback()
+
+
+async def test_detach_rechecks_edit_rights_under_the_collection_lock(db, monkeypatch):
+    owner = await _make_user(db, "owner@example.com")
+    editor = await _make_user(db, "editor@example.com")
+    shared = await _make_collection(db, owner.id, name="Shared")
+    db.add(CollectionMember(collection_id=shared.id, user_id=editor.id, role="editor"))
+    await _cache_paper(db, "doi:10.1/shared", "group:shared")
+    await add_paper_to_collection(db, shared.id, editor.id, "doi:10.1/shared")
+    lock = library_service._lock_collections
+
+    async def revoke_then_lock(session, collection_ids):
+        # The owner removes the editor between the first read and the lock.
+        await session.execute(delete(CollectionMember).where(CollectionMember.user_id == editor.id))
+        return await lock(session, collection_ids)
+
+    monkeypatch.setattr(library_service, "_lock_collections", revoke_then_lock)
+
+    await library_service.delete_entry(db, editor.id, "group:shared", detach=True)
+
+    # The owner's collection keeps the paper; only the editor's own entry is gone.
+    assert (await db.get(CollectionPaper, (shared.id, "doi:10.1/shared"))) is not None
+    assert (await db.get(UserLibraryEntry, (editor.id, "group:shared"))) is None
 
 
 async def test_unresolved_entry_outside_collections_can_be_deleted(db):

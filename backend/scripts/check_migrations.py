@@ -221,6 +221,8 @@ KEY_REPAIR_FROM = "c7d8e9f0a1b2"
 KEY_REPAIR_PARENT = "f8a9b0c1d2e3"
 TNN = "doi:10.1109/tnn.2008.2005605"
 RAW_KEYS = ("10.1109/tnn.2008.2005605", "https://dx.doi.org/10.1109/TNN.2008.2005605")
+# A Semantic Scholar key with no cached row: valid as stored, never repaired or reported.
+S2_KEY = "s2:" + "c" * 40
 
 
 def synthetic_group(key):
@@ -229,7 +231,8 @@ def synthetic_group(key):
 
 def seed_legacy_keys():
     """The audit shape at c7d8: raw and doi: rows for one paper, conflicting
-    states, a duplicate tag and a note on the raw key, plus an invalid key."""
+    states, a duplicate tag and a note on the raw key, plus an invalid key
+    and an uncached ``s2:`` key."""
     user_id, collection_id = str(uuid.uuid4()), str(uuid.uuid4())
     statements = [
         (
@@ -249,7 +252,7 @@ def seed_legacy_keys():
             {"k": TNN},
         ),
     ]
-    keys = [(RAW_KEYS[0], 0), (TNN, 1), (RAW_KEYS[1], 2), ("doi:not-a-doi", 3)]
+    keys = [(RAW_KEYS[0], 0), (TNN, 1), (RAW_KEYS[1], 2), ("doi:not-a-doi", 3), (S2_KEY, 4)]
     for key, position in keys:
         group = "group:gnn" if key == TNN else synthetic_group(key)
         statements += [
@@ -291,18 +294,20 @@ def assert_key_repair():
     assert [(row["paper_canonical_key"], row["position"]) for row in rows] == [
         (TNN, 0),
         ("doi:not-a-doi", 3),
+        (S2_KEY, 4),
     ], rows
+    kept = [("doi:not-a-doi", synthetic_group("doi:not-a-doi")), (S2_KEY, synthetic_group(S2_KEY))]
     entries = asyncio.run(
         sql("SELECT paper_group_key, primary_canonical_key FROM user_library_entries")
     )
     assert sorted(
         (row["paper_group_key"], row["primary_canonical_key"]) for row in entries
-    ) == sorted([("group:gnn", TNN), (synthetic_group("doi:not-a-doi"), "doi:not-a-doi")]), entries
+    ) == sorted([("group:gnn", TNN), *((group, key) for key, group in kept)]), entries
     pins = asyncio.run(
         sql("SELECT paper_canonical_key, paper_group_key FROM user_library_versions")
     )
     assert sorted((row["paper_canonical_key"], row["paper_group_key"]) for row in pins) == sorted(
-        [(TNN, "group:gnn"), ("doi:not-a-doi", synthetic_group("doi:not-a-doi"))]
+        [(TNN, "group:gnn"), *kept]
     ), pins
     states = asyncio.run(sql("SELECT paper_canonical_key, state FROM user_paper_states"))
     assert [(row["paper_canonical_key"], row["state"]) for row in states] == [(TNN, "reading")]

@@ -1,4 +1,4 @@
-"""Import service — DOI / canonical-key list import.
+"""Import service — identifier list import.
 
 Export lives in the Zotero one-way sync (app/zotero) — the BibTeX export
 was removed in favour of the Zotero-first integration strategy."""
@@ -6,6 +6,7 @@ was removed in favour of the Zotero-first integration strategy."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import Counter
 
@@ -20,40 +21,77 @@ from app.collections.service import (
 from app.common.exceptions import InvalidIdentifierError
 from app.common.identifiers import ParsedIdentifier, parse_paper_identifier
 from app.config import settings
-from app.papers.service import (
-    cache_papers,
-    get_cached_paper,
-    get_cached_papers_by_dois,
-    get_cached_papers_by_keys,
-)
+from app.papers.models import CachedPaperMetadata
+from app.papers.service import get_cached_papers_by_aliases, store_paper
 from app.providers import registry
 from app.providers.registry import DoiLookup
+from app.providers.semantic_scholar import ProviderError
+
+logger = logging.getLogger(__name__)
 
 
-async def _resolve_dois(dois: list[str]) -> dict[str, DoiLookup]:
-    """Resolve DOIs over the network only, with bounded concurrency and one
-    overall budget; anything unfinished when it runs out is ``unavailable``."""
-    semaphore = asyncio.Semaphore(max(1, settings.import_resolve_concurrency))
+async def _resolve_each(identifiers: list[str], deadline: float) -> dict[str, DoiLookup]:
+    """``registry.resolve_id`` one key at a time until ``deadline`` (the
+    provider's limiter serializes the calls anyway, and queueing them all at
+    once would stall every other request); the rest stay ``unavailable``."""
+    loop = asyncio.get_running_loop()
+    lookups = {key: DoiLookup("unavailable") for key in identifiers}
+    for key in identifiers:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        try:
+            lookups[key] = await asyncio.wait_for(registry.resolve_id(key), timeout=remaining)
+        except TimeoutError:
+            break
+    return lookups
 
-    async def resolve(doi: str) -> DoiLookup:
-        async with semaphore:
-            return await registry.resolve_doi(doi)
 
-    tasks = {doi: asyncio.create_task(resolve(doi)) for doi in dict.fromkeys(dois)}
-    if not tasks:
+async def _resolve_ids(identifiers: list[str], budget: float) -> dict[str, DoiLookup]:
+    """Strong keys (``s2:``, ``arxiv:``, ``pmid:``, ``pmcid:``) through one
+    batch lookup (500 per provider call) within ``budget``: a miss is
+    definitive and a failed call leaves every key ``unavailable``. Only a
+    batch the provider cannot read falls back to one lookup per key."""
+    if not identifiers:
         return {}
-    _done, pending = await asyncio.wait(
-        tasks.values(), timeout=settings.import_request_budget_seconds
-    )
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
+    deadline = asyncio.get_running_loop().time() + budget
+    try:
+        papers = await asyncio.wait_for(registry.papers_by_ids(identifiers), timeout=budget)
+    except ProviderError as exc:
+        if exc.code == "invalid_query":
+            return await _resolve_each(identifiers, deadline)
+        logger.warning("Batch identifier lookup failed: %s", exc.code)
+        return {key: DoiLookup("unavailable", retry_after=exc.retry_after) for key in identifiers}
+    except Exception:
+        # A timeout, a transport failure or an invalid response.
+        logger.warning("Batch identifier lookup failed", exc_info=True)
+        return {key: DoiLookup("unavailable") for key in identifiers}
     return {
-        doi: task.result()
-        if task.done() and not task.cancelled() and task.exception() is None
-        else DoiLookup("unavailable")
-        for doi, task in tasks.items()
+        key: DoiLookup("found", paper) if paper is not None else DoiLookup("not_found")
+        for key, paper in zip(identifiers, papers, strict=True)
     }
+
+
+async def _resolve(parsed: list[ParsedIdentifier]) -> dict[str, DoiLookup]:
+    """Provider lookups per canonical key, with no transaction open. DOIs go
+    through one ``registry.resolve_dois`` call (batch lookups, then doi.org
+    checks for the misses only), the other identifiers through one
+    ``registry.papers_by_ids`` batch; both share the import request budget."""
+    budget = settings.import_request_budget_seconds
+    dois = [p.doi for p in parsed if p.doi is not None]
+    others = [p.canonical_key for p in parsed if p.doi is None]
+    lookups: dict[str, DoiLookup] = {}
+
+    async def resolve_dois() -> None:
+        if dois:
+            found = await registry.resolve_dois(dois, timeout=budget)
+            lookups.update({f"doi:{doi}": lookup for doi, lookup in found.items()})
+
+    async def resolve_ids() -> None:
+        lookups.update(await _resolve_ids(others, budget))
+
+    await asyncio.gather(resolve_dois(), resolve_ids())
+    return lookups
 
 
 def _line(
@@ -74,14 +112,18 @@ async def import_identifiers(
     user_id: uuid.UUID,
     lines: list[str],
 ) -> dict:
-    """Import identifiers (one per list item) into a collection with a result
-    per non-blank line: ``added``, ``duplicate`` (within the batch or already
-    in the collection), ``invalid``, ``not_found`` (never inserted) or
-    ``unresolved`` (inserted as pending while providers are unavailable).
+    """Import identifiers (one per list item, the forms ``add_paper``
+    accepts) into a collection with a result per non-blank line: ``added``,
+    ``duplicate`` (within the batch or already in the collection),
+    ``invalid``, ``not_found`` (never inserted), ``unresolved`` (a DOI
+    inserted as pending while the provider cannot describe it) or
+    ``unavailable`` (any other identifier the provider could not resolve
+    right now: not saved, retry the line later).
 
-    Same transaction shape as ``service.add_paper``: validate and pre-dedupe,
-    commit, resolve DOIs concurrently with no transaction open, then write
-    the rows one by one in a short transaction.
+    Same transaction shape as ``service.add_paper``: validate and pre-dedupe
+    (cached papers, through any alias, need no provider call), commit,
+    resolve with no transaction open, then write the rows one by one in a
+    short transaction, always under the stored row's key.
     """
     await require_edit(db, collection_id, user_id)
 
@@ -102,62 +144,54 @@ async def import_identifiers(
         seen.add(parsed.canonical_key)
         candidates.append((line_no, raw, parsed))
 
-    cached = await get_cached_papers_by_keys(db, seen)
-    # Like add_paper's get_cached_paper: a DOI may be cached as an alias of
-    # another key (an ``s2:`` row enriched with that DOI).
-    stored_keys: dict[str, str] = {}
-    uncached_dois = {
-        parsed.doi: parsed.canonical_key
-        for _, _, parsed in candidates
-        if parsed.doi and parsed.canonical_key not in cached
-    }
-    for doi, row in (await get_cached_papers_by_dois(db, set(uncached_dois))).items():
-        stored_keys[uncached_dois[doi]] = row.canonical_key
-        cached[row.canonical_key] = row
-    present = await keys_in_collection(db, collection_id, seen | set(stored_keys.values()))
+    # Parsed key -> stored row; an alias (a DOI of an ``s2:`` row) counts.
+    cached: dict[str, CachedPaperMetadata] = await get_cached_papers_by_aliases(db, seen)
+    present = await keys_in_collection(
+        db, collection_id, seen | {row.canonical_key for row in cached.values()}
+    )
     to_resolve = [
-        parsed.doi
+        parsed
         for _, _, parsed in candidates
-        if parsed.doi
+        if parsed.lookup_id is not None
         and parsed.canonical_key not in cached
-        and parsed.canonical_key not in stored_keys
         and parsed.canonical_key not in present
     ]
     lookups: dict[str, DoiLookup] = {}
     if to_resolve:
         await db.commit()
-        lookups = await _resolve_dois(to_resolve)
+        lookups = await _resolve(to_resolve)
         await reopen_for_write(db, collection_id, user_id)
-        # Alias DOIs can resolve to the same provider record.
-        found = list(
-            {
-                lookup.paper.canonical_key: lookup.paper
-                for lookup in lookups.values()
-                if lookup.paper is not None
-            }.values()
+        # One upsert per provider record (alias lines can share one); the
+        # stored row may keep an older key and group for the same work.
+        stored: dict[str, CachedPaperMetadata | None] = {}
+        for key, lookup in lookups.items():
+            if lookup.paper is None:
+                continue
+            record = lookup.paper.canonical_key
+            if record not in stored:
+                stored[record] = await store_paper(db, lookup.paper)
+            if stored[record] is not None:
+                cached[key] = stored[record]
+        present = await keys_in_collection(
+            db, collection_id, seen | {row.canonical_key for row in cached.values()}
         )
-        await cache_papers(db, found)
-        # The upsert may keep an older key for the same work (alias merge).
-        for paper in found:
-            row = await get_cached_paper(db, paper.canonical_key)
-            if row is not None:
-                stored_keys[paper.canonical_key] = row.canonical_key
-                cached[row.canonical_key] = row
-        present = await keys_in_collection(db, collection_id, seen | set(stored_keys.values()))
 
     for line_no, raw, parsed in candidates:
         key = parsed.canonical_key
-        if key not in present:
-            key = stored_keys.get(key, key)
         row = cached.get(key)
-        if key not in present and row is None:
-            lookup = lookups.get(parsed.doi) if parsed.doi else None
-            if lookup is None or lookup.status == "not_found":
+        if key not in present and row is not None:
+            key = row.canonical_key
+        elif row is None and key not in present:
+            lookup = lookups.get(key) or DoiLookup(
+                "not_found" if parsed.lookup_id is None else "unavailable"
+            )
+            if lookup.status == "not_found":
                 results[line_no] = _line(line_no, raw, "not_found", key)
                 continue
-            if lookup.paper is not None:
-                key = stored_keys.get(lookup.paper.canonical_key, lookup.paper.canonical_key)
-                row = cached.get(key)
+            if parsed.doi is None:
+                # Only a DOI can be saved as pending.
+                results[line_no] = _line(line_no, raw, "unavailable", key)
+                continue
         if key in present:
             results[line_no] = _line(line_no, raw, "duplicate", key)
             continue

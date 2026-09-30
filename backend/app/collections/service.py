@@ -11,10 +11,20 @@ from app.collections.access import accessible_to, authorize
 from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.schemas import CollectionCreate, CollectionUpdate
 from app.common.exceptions import ApiError, ForbiddenError, NotFoundError
-from app.common.identifiers import normalize_paper_key, parse_paper_identifier, synthetic_group_key
+from app.common.identifiers import (
+    ParsedIdentifier,
+    normalize_paper_key,
+    parse_paper_identifier,
+    synthetic_group_key,
+)
 from app.papers.models import CachedPaperMetadata
-from app.papers.service import cache_papers, cached_paper_to_read, get_cached_paper
-from app.providers import registry
+from app.papers.service import (
+    cached_paper_to_read,
+    get_cached_paper,
+    lookup_identifier,
+    provider_unavailable,
+    store_paper,
+)
 
 
 async def get_collection_or_404(db: AsyncSession, collection_id: uuid.UUID) -> Collection:
@@ -216,16 +226,39 @@ async def _add_paper_core(
     return _paper_row(cp, cached)
 
 
+def _identifier_not_found(parsed: ParsedIdentifier) -> ApiError:
+    if parsed.doi is not None:
+        return ApiError(
+            http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "doi_not_found",
+            "No paper is registered under this DOI.",
+            doi=parsed.doi,
+        )
+    return ApiError(
+        http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "identifier_not_found",
+        "Semantic Scholar has no paper with this identifier.",
+        value=parsed.canonical_key,
+    )
+
+
 async def add_paper(
     db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID, raw_key: str
 ) -> dict:
-    """Add a paper by DOI (bare, ``doi:``, ``DOI``-labelled or a doi.org link)
-    or by an existing ``hash:`` key, and return it as a list row.
+    """Add a paper by DOI (bare, ``doi:``, ``DOI``-labelled or a doi.org link),
+    Semantic Scholar key or link, arXiv ID or link, ``pmid:``/``pmcid:`` key,
+    or by a known ``hash:`` key, and return it as a list row.
+
+    A cached paper (found through any alias) is added under its stored key.
+    Otherwise the identifier is resolved first: only a DOI can be stored as
+    pending when the provider cannot describe it; any other identifier is
+    saved once resolved, or fails (422 ``identifier_not_found``, 503 with
+    ``Retry-After``) with nothing written.
 
     No provider call happens while the request holds the per-user row lock:
-    authorize, parse and pre-dedupe, then commit; resolve the DOI with no
+    authorize, parse and pre-dedupe, then commit; resolve with no
     transaction open; then write in a short transaction that re-checks edit
-    rights and duplicates (the provider may answer with an alias key).
+    rights and duplicates (the stored row may carry an alias key).
     """
     await require_edit(db, collection_id, user_id)
     parsed = parse_paper_identifier(raw_key)
@@ -241,7 +274,7 @@ async def add_paper(
     ):
         raise _already_in_collection(cached.canonical_key)
     if cached is None:
-        if parsed.doi is None:
+        if parsed.lookup_id is None:
             raise ApiError(
                 http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "unknown_paper_key",
@@ -249,18 +282,14 @@ async def add_paper(
                 value=raw_key[:200],
             )
         await db.commit()
-        lookup = await registry.resolve_doi(parsed.doi)
+        lookup = await lookup_identifier(parsed)
         if lookup.status == "not_found":
-            raise ApiError(
-                http_status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "doi_not_found",
-                "No paper is registered under this DOI.",
-                doi=parsed.doi,
-            )
+            raise _identifier_not_found(parsed)
+        if lookup.paper is None and parsed.doi is None:
+            raise provider_unavailable(lookup.retry_after, lookup.code)
         await reopen_for_write(db, collection_id, user_id)
         if lookup.paper is not None:
-            stored = (await cache_papers(db, [lookup.paper]))[0]
-            cached = await get_cached_paper(db, stored.canonical_key)
+            cached = await store_paper(db, lookup.paper)
         candidates = {parsed.canonical_key} | ({cached.canonical_key} if cached else set())
         present = await keys_in_collection(db, collection_id, candidates)
         if present:

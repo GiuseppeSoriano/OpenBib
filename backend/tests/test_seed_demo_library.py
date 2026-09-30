@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 from sqlalchemy import func, select
 
-from app.collections.models import Collection, CollectionPaper
+from app.auth.service import utcnow
+from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.common.key_repair import repair_paper_keys
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
@@ -94,6 +95,42 @@ async def test_legacy_shapes_are_the_ones_the_repair_merges(db):
     ).scalars().all() == ["reading"]
     assert await _count(db, UserPaperTag.tag, user_id=user_id) == 1
     assert await _count(db, UserLibraryEntry.paper_group_key, user_id=user_id) == 3
+
+
+async def test_long_data_has_a_doi_less_s2_paper_and_sharing_adds_an_editor_and_a_link(db):
+    user = await _user(db)
+    editor = User(
+        id=uuid.uuid4(),
+        email="editor@example.com",
+        password_hash="x",
+        display_name="Editor",
+        email_verified_at=utcnow(),
+    )
+    db.add(editor)
+    await db.flush()
+
+    await seed.seed_long_data(db, user)
+    counts, url = await seed.seed_sharing(db, user, "editor@example.com")
+    again, again_url = await seed.seed_sharing(db, user, "editor@example.com")
+    unknown = await seed.seed_sharing(db, user, "nobody@example.com")
+
+    s2 = await db.get(CachedPaperMetadata, seed.S2_DEMO_KEY)
+    assert (s2.doi, s2.semantic_scholar_id) == (None, seed.S2_DEMO_ID)
+    assert len(seed.S2_DEMO_ID) == 40
+    coll = (
+        await db.execute(select(Collection).where(Collection.name == seed.LONG_COLLECTION_NAME))
+    ).scalar_one()
+    assert await db.get(CollectionPaper, (coll.id, seed.S2_DEMO_KEY)) is not None
+    assert await db.get(UserLibraryVersion, (user.id, seed.S2_DEMO_KEY)) is not None
+    assert (counts["editors"], again["editors"]) == (1, 0)
+    assert (await db.get(CollectionMember, (coll.id, editor.id))).role == "editor"
+    assert f"/collections/{coll.id}#share=" in url
+    assert again_url == url
+    assert unknown == ({}, None)
+
+    await seed.reset_demo_data(db, user)
+
+    assert await db.get(UserLibraryVersion, (user.id, seed.S2_DEMO_KEY)) is None
 
 
 def test_refuses_to_run_in_production(monkeypatch):
