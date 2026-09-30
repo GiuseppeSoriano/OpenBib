@@ -18,7 +18,7 @@ import GraphLegend from "@/components/graph/GraphLegend";
 import GraphNodePopup from "@/components/graph/GraphNodePopup";
 import GraphPaperList from "@/components/graph/GraphPaperList";
 import GraphSelectionSummary from "@/components/graph/GraphSelectionSummary";
-import { errorText, noticeText } from "@/components/graph/GraphStatus";
+import { errorText, noticeText, rankingStallText } from "@/components/graph/GraphStatus";
 import type { RangeSelection } from "@/components/graph/RangeNavigator";
 import { GraphCatalog, syncForceData } from "@/components/graph/graphCatalog";
 import {
@@ -28,6 +28,7 @@ import {
   rangeControls,
   type ExplorationError,
   type Notice,
+  type RankingStall,
 } from "@/components/graph/graphExploration";
 import { EMPTY_GRAPH, type ForceGraphData } from "@/components/graph/mergeGraph";
 import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
@@ -230,7 +231,12 @@ function GraphExplorer({
   };
 
   const sheetOpen = compact && controlsOpen;
-  const openSheet = (opener: HTMLElement | null, tab?: GraphSheetTab) => {
+  // Leaving compact unmounts the sheet: close it too, so it never reopens
+  // (and takes focus) by itself when the screen turns compact again.
+  useEffect(() => {
+    if (!compact) setControlsOpen(false);
+  }, [compact]);
+  const openSheet =(opener: HTMLElement | null, tab?: GraphSheetTab) => {
     sheetReturnRef.current = opener;
     if (tab) setSheetTab(tab);
     setControlsOpen(true);
@@ -263,21 +269,24 @@ function GraphExplorer({
 
   // The page behind an open sheet is inert, so the summary's live status is
   // not announced there: report new errors and notices as toasts instead.
-  const lastStatusRef = useRef<{ error: ExplorationError | null; notice: Notice | null }>({
+  const lastStatusRef = useRef<{ error: ExplorationError | null; notice: Notice | null; stall: RankingStall | null }>({
     error: null,
     notice: null,
+    stall: null,
   });
   useEffect(() => {
-    const { error, notice } = state;
+    const { error, notice, rankingStall: stall } = state;
     const last = lastStatusRef.current;
-    lastStatusRef.current = { error, notice };
+    lastStatusRef.current = { error, notice, stall };
     if (!sheetOpen) return;
     if (error && error !== last.error) toast(errorText(error, t, error.retryAfter ?? 0), "error");
+    else if (stall && stall !== last.stall) toast(rankingStallText(stall, t), "info");
     else if (notice && notice !== last.notice) toast(noticeText(notice, t), "info");
   }, [state, sheetOpen, toast, t]);
 
   const expandActive = !!state.expand && state.expand.phase !== "confirm";
-  const showSummary = !!selectedNode || !!state.pending || !!state.error || !!state.notice || expandActive;
+  const showSummary =
+    !!selectedNode || !!state.pending || !!state.error || !!state.rankingStall || !!state.notice || expandActive;
 
   let baseState = null;
   if (unavailable) {
@@ -381,6 +390,7 @@ function GraphExplorer({
           onCancelExpand={exploration.cancelExpand}
           onRetry={exploration.retry}
           onDismiss={exploration.dismissNotice}
+          onContinueRanking={exploration.continueRanking}
         />
       )}
 
@@ -396,6 +406,7 @@ function GraphExplorer({
           onViewDetails={() => selectedNode && setDetailsKey(selectedNode.selected_version.canonical_key)}
           onRetry={exploration.retry}
           onDismiss={exploration.dismissNotice}
+          onContinueRanking={exploration.continueRanking}
           onCancelExpand={exploration.cancelExpand}
         />
       )}

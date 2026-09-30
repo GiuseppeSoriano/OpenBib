@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isCancel } from "axios";
 import { graph as graphApi } from "@/lib/api";
-import { apiStatus, retryAfterSeconds } from "@/lib/apiError";
+import { apiErrorCode, apiErrorDetail, apiStatus, retryAfterSeconds } from "@/lib/apiError";
 import type { GraphCatalog } from "@/components/graph/graphCatalog";
 import {
   buildRangeRequest,
@@ -10,6 +10,7 @@ import {
   explorationReducer,
   initialExplorationState,
   MAX_AUTO_CONTINUE,
+  MAX_RANKING_CONTINUE,
   modeSwitchAutoLoad,
   planTopUp,
   TOPUP_CHUNK,
@@ -41,6 +42,8 @@ export interface GraphExploration {
   confirmExpand(): void;
   cancelExpand(): void;
   retry(): void;
+  /** Resume a range whose provider list was still being ranked. */
+  continueRanking(): void;
   dismissNotice(): void;
   versionChanged(groupId: string, canonicalKey: string): void;
 }
@@ -49,8 +52,25 @@ export function errorKind(err: unknown): ErrorKind {
   const status = apiStatus(err);
   if (status === null) return "network";
   if (status === 429) return "rate_limited";
-  if (status === 502) return "provider";
+  // A rate-limited provider answers 503 with Retry-After: wait, then retry.
+  if (status === 503 && (apiErrorCode(err) === "provider_rate_limited" || retryAfterSeconds(err) !== null)) {
+    return "rate_limited";
+  }
+  if (status === 502 || status === 503) return "provider";
   return "server";
+}
+
+/** Scan progress carried from an incomplete response to its re-request. */
+type ScanProgress = Pick<PendingRange, "scanned" | "providerTotal" | "ranking">;
+
+const NO_PROGRESS: ScanProgress = { scanned: null, providerTotal: null };
+
+/** Seconds to wait before retrying a rate-limited request, when the server said. */
+function retryAfterOf(err: unknown): number | null {
+  const header = retryAfterSeconds(err);
+  if (header !== null) return header;
+  const extra = apiErrorDetail(err)?.retry_after;
+  return typeof extra === "number" && Number.isFinite(extra) && extra >= 0 ? Math.ceil(extra) : null;
 }
 
 /**
@@ -116,16 +136,13 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         type: "requestFailed",
         id,
         kind,
-        retryAfter: kind === "rate_limited" ? retryAfterSeconds(err) : null,
+        retryAfter: kind === "rate_limited" ? retryAfterOf(err) : null,
         now: Date.now(),
+        cause: err,
       });
     };
 
-    const startRange = (
-      spec: RangeRequestSpec,
-      autoContinue = 0,
-      progress: { scanned: number | null; providerTotal: number | null } = { scanned: null, providerTotal: null },
-    ) => {
+    const startRange = (spec: RangeRequestSpec, autoContinue = 0, progress: ScanProgress = NO_PROGRESS) => {
       const sourceKey = catalog.sourceKey(spec.sourceId);
       const { body, capped } = buildRangeRequest(stateRef.current, spec, sourceKey);
       const pending: PendingRange = { ...spec, ...stamp(), sourceKey, autoContinue, ...progress };
@@ -134,10 +151,32 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
       graphApi.related(body, { signal }).then(
         (response) => {
           if (!isPending(pending.id)) return;
+          const next = { scanned: response.scanned, providerTotal: response.provider_total };
+          // The provider's list is still being collected and ranked (no
+          // nodes yet): ask again while the scan advances, then let the user
+          // decide whether to keep waiting.
+          if (response.scan_incomplete && response.reason === "ranking") {
+            // Collection stops at max_results, and the provider's own count
+            // can trail the records it lists: "about M" is what gets ranked.
+            const ranked = {
+              scanned: response.scanned,
+              providerTotal:
+                response.provider_total === null
+                  ? null
+                  : Math.min(Math.max(response.provider_total, response.scanned), response.max_results),
+            };
+            const advanced = progress.scanned === null || response.scanned > progress.scanned;
+            if (advanced && autoContinue < MAX_RANKING_CONTINUE) {
+              startRange(spec, autoContinue + 1, { ...ranked, ranking: true });
+            } else {
+              dispatch({ type: "rankingStalled", id: pending.id, ...ranked });
+            }
+            return;
+          }
           // The server stopped scanning at its deadline: continue the scan
           // (the snapshot grows server-side) before showing the range.
           if (response.scan_incomplete && autoContinue < MAX_AUTO_CONTINUE) {
-            startRange(spec, autoContinue + 1, { scanned: response.scanned, providerTotal: response.provider_total });
+            startRange(spec, autoContinue + 1, next);
             return;
           }
           addToCatalog(response);
@@ -161,7 +200,7 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         (response) => {
           if (!isPending(pending.id)) return;
           addToCatalog(response);
-          dispatch({ type: "topUpLoaded", id: pending.id, response });
+          dispatch({ type: "topUpLoaded", id: pending.id, response, now: Date.now() });
           pump();
         },
         (err: unknown) => fail(pending.id, err),
@@ -269,6 +308,12 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         const request = current.error?.request;
         if (request?.kind === "range") startRange(request);
       },
+      continueRanking() {
+        const stall = stateRef.current.rankingStall;
+        if (!stall) return;
+        const { scanned, providerTotal } = stall;
+        startRange(stall.request, 0, { scanned, providerTotal, ranking: true });
+      },
       dismissNotice() {
         dispatch({ type: "dismissNotice" });
       },
@@ -311,6 +356,7 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
     confirmExpand: actions.confirmExpand,
     cancelExpand: actions.cancelExpand,
     retry: actions.retry,
+    continueRanking: actions.continueRanking,
     dismissNotice: actions.dismissNotice,
     versionChanged: actions.versionChanged,
   };

@@ -149,8 +149,29 @@ function rangeResponse(body: RelatedRangeRequest, { total = 1000, exact = true, 
   };
 }
 
-function httpError(status: number, headers: Record<string, string> = {}) {
-  return Object.assign(new Error(`HTTP ${status}`), { response: { status, data: {}, headers } });
+function httpError(status: number, headers: Record<string, string> = {}, data: unknown = {}) {
+  return Object.assign(new Error(`HTTP ${status}`), { response: { status, data, headers } });
+}
+
+function codedError(status: number, code: string, headers: Record<string, string> = {}) {
+  return httpError(status, headers, { detail: { code, message: "server text" } });
+}
+
+/** The related list is still being collected and ranked: no nodes yet. */
+function rankingResponse(body: RelatedRangeRequest, scanned: number): RelatedRangeResponse {
+  return {
+    ...rangeResponse(body),
+    nodes: [],
+    edges: [],
+    group_keys: [],
+    range_end: body.range_start,
+    total_available: 0,
+    total_exact: false,
+    provider_total: 9898,
+    scanned,
+    scan_incomplete: true,
+    reason: "ranking",
+  };
 }
 
 function deferred<T>() {
@@ -299,7 +320,7 @@ describe("GraphPage (desktop)", () => {
     });
     expect(await within(ranges()).findByRole("button", { name: "Show results 1 to 30" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByText("1–30 of 1,000")).toBeInTheDocument();
-    expect(screen.getByText(/Totals count what the citation provider can list/)).toBeInTheDocument();
+    expect(screen.getByText(/Totals count what Semantic Scholar can list/)).toBeInTheDocument();
     expect(within(screen.getByRole("complementary", { name: "Papers on the graph" })).getByText("Related 1")).toBeInTheDocument();
   });
 
@@ -346,13 +367,17 @@ describe("GraphPage (desktop)", () => {
     await ready();
     selectSeed();
     await loadFirstRange();
-    expect(screen.getByText("1–30 · first 10,000 of 50,000")).toBeInTheDocument();
+    expect(
+      screen.getByText("1–30 · top of the first 10,000 returned by Semantic Scholar (about 50,000 in all)"),
+    ).toBeInTheDocument();
 
     const { default: i18n } = await import("@/i18n");
     await act(async () => {
       await i18n.changeLanguage("it");
     });
-    expect(screen.getByText("1–30 · primi 10.000 di 50.000")).toBeInTheDocument();
+    expect(
+      screen.getByText("1–30 · migliori tra i primi 10.000 restituiti da Semantic Scholar (circa 50.000 in tutto)"),
+    ).toBeInTheDocument();
   });
 
   it("ignores a late response after an order switch and reloads 1–30 without rebuilding the graph", async () => {
@@ -409,6 +434,83 @@ describe("GraphPage (desktop)", () => {
     expect(within(bar()).getByRole("button", { name: "Try again" })).toBeDisabled();
   });
 
+  it("shows coded related-paper errors, with a countdown when the provider is rate limited", async () => {
+    api.related
+      .mockImplementationOnce(() => Promise.reject(codedError(503, "related_provider_unavailable")))
+      .mockImplementationOnce(() => Promise.reject(codedError(503, "provider_rate_limited", { "retry-after": "20" })));
+    renderGraph();
+    await ready();
+    selectSeed();
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    expect(
+      await within(bar()).findByText("Citation data from Semantic Scholar is unavailable right now. Please try again later."),
+    ).toBeInTheDocument();
+    fireEvent.click(within(bar()).getByRole("button", { name: "Try again" }));
+
+    expect(
+      await within(bar()).findByText("Semantic Scholar is receiving too many requests. Try again in 20 s."),
+    ).toBeInTheDocument();
+    expect(within(bar()).getByRole("button", { name: "Try again" })).toBeDisabled();
+    expect(screen.queryByText(/server text/)).toBeNull();
+  });
+
+  it("tells a missing Semantic Scholar key apart from an outage", async () => {
+    const detail = { code: "related_provider_unavailable", message: "server text", reason: "not_configured" };
+    api.related.mockImplementationOnce(() => Promise.reject(httpError(503, {}, { detail })));
+    renderGraph();
+    await ready();
+    selectSeed();
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    expect(await within(bar()).findByText(/set SEMANTIC_SCHOLAR_API_KEY\.$/)).toBeInTheDocument();
+    expect(within(bar()).queryByText(/try again later/i)).toBeNull();
+  });
+
+  it("keeps asking while the provider list is ranked, then offers Continue", async () => {
+    const held = deferred<void>();
+    let calls = 0;
+    api.related.mockImplementation((body: RelatedRangeRequest) => {
+      calls += 1;
+      const response = rankingResponse(body, calls * 1000);
+      return calls === 2 ? held.promise.then(() => response) : Promise.resolve(response);
+    });
+    renderGraph();
+    await ready();
+    selectSeed();
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    expect(await within(bar()).findByText("Ranking 1,000 of about 9,898 related papers…")).toBeInTheDocument();
+    await act(async () => held.resolve());
+    // The first answer plus six automatic re-requests, then the user decides.
+    expect(
+      await within(bar()).findByText("Still ranking: 7,000 of about 9,898 related papers collected so far."),
+    ).toBeInTheDocument();
+    expect(api.related).toHaveBeenCalledTimes(7);
+    expect(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ })).toBeInTheDocument();
+
+    api.related.mockImplementation((body: RelatedRangeRequest) => Promise.resolve(rangeResponse(body)));
+    fireEvent.click(within(bar()).getByRole("button", { name: "Continue" }));
+    expect(api.related).toHaveBeenCalledTimes(8);
+    expect(api.related.mock.calls[7]![0]).toEqual(api.related.mock.calls[0]![0]);
+    expect(await within(ranges()).findByRole("button", { name: "Show results 1 to 30" })).toHaveAttribute("aria-current", "true");
+    expect(within(bar()).queryByText(/Still ranking/)).toBeNull();
+  });
+
+  it("notes a base graph whose links are incomplete until dismissed", async () => {
+    api.buildPaper.mockImplementation(() => Promise.resolve({ ...baseGraph(), edges_partial: true }));
+    renderGraph();
+    await ready();
+
+    const notice = "Some links between these papers couldn’t be loaded in time, so a few may be missing.";
+    expect(within(bar()).getByText(notice)).toBeInTheDocument();
+    selectSeed();
+    await loadFirstRange();
+    expect(within(bar()).getByText(notice)).toBeInTheDocument();
+    fireEvent.click(within(bar()).getByRole("button", { name: "Dismiss notification" }));
+    expect(within(bar()).queryByText(notice)).toBeNull();
+  });
+
   it("disables Expand pinned nodes with a hint when nothing is pinned", async () => {
     renderGraph();
     await ready();
@@ -433,6 +535,37 @@ describe("GraphPage (desktop)", () => {
       sources: [{ source_key: "hash:seed", source_group_key: "group:seed", connected_group_keys: [] }],
     });
     expect(api.related).not.toHaveBeenCalled();
+  });
+
+  it("pauses Expand pinned nodes while the provider is rate limited for a source", async () => {
+    api.topUp.mockResolvedValue({
+      nodes: [],
+      edges: [],
+      sources: [
+        {
+          source_key: "hash:seed",
+          source_group_key: "group:seed",
+          added_group_keys: [],
+          connected_count: 0,
+          total_available: 0,
+          total_exact: false,
+          total_capped: false,
+          provider_total: null,
+          exhausted: false,
+          reason: null,
+          error: "rate_limited",
+        },
+      ],
+      range_size: 30,
+      max_results: 10000,
+    });
+    renderGraph();
+    await ready();
+    fireEvent.click(within(bar()).getByRole("button", { name: "Expand pinned nodes" }));
+
+    expect(await within(bar()).findByText("Paused: too many requests. Resuming in 30 s.")).toBeInTheDocument();
+    expect(within(bar()).getByText("Expanding 0 of 1 pinned papers…")).toBeInTheDocument();
+    expect(api.topUp).toHaveBeenCalledTimes(1);
   });
 
   it("pins a dragged node without any request", async () => {
@@ -540,14 +673,19 @@ describe("GraphPage (desktop)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Graph controls" }));
     const dialog = screen.getByRole("dialog", { name: "Graph controls" });
     expect(within(dialog).getByRole("button", { name: "Most recent" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
 
+    // Growing past compact with the sheet open drops it for good.
     act(() => media.set(() => false));
+    expect(screen.queryByRole("dialog", { name: "Graph controls" })).toBeNull();
     expect(within(bar()).getByText("Citers of “Seed Paper”")).toBeInTheDocument();
     expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
     expect(within(bar()).getByRole("button", { name: "Most recent" })).toHaveAttribute("aria-pressed", "true");
     expect(within(ranges()).getByRole("button", { name: "Show results 1 to 30" })).toHaveAttribute("aria-current", "true");
     expect(api.related).toHaveBeenCalledTimes(1);
+
+    act(() => media.set(() => true));
+    expect(screen.queryByRole("dialog", { name: "Graph controls" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Graph controls" })).toHaveAttribute("aria-expanded", "false");
     expect(engine.mounts).toBe(1);
   });
 });
@@ -625,6 +763,19 @@ describe("GraphPage (compact)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(trigger()).toHaveFocus();
+  });
+
+  it("opens the sheet at the bottom on phones and at the side on short landscape screens", async () => {
+    const media = mockMatchMedia(() => true);
+    renderGraph();
+    await ready();
+    expect(openSheet()).toHaveClass("panel", "panel--bottom");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    // 667×375: compact through (max-height: 500px), wider than a phone.
+    act(() => media.set((query) => query.includes("max-height: 500px")));
+    expect(openSheet()).toHaveClass("panel");
+    expect(screen.getByRole("dialog")).not.toHaveClass("panel--bottom");
   });
 
   it("summarizes the selected paper in-flow and keeps its card and the legend in the sheet", async () => {
@@ -758,6 +909,35 @@ describe("GraphPage (compact)", () => {
     await act(async () => failing.resolve(rangeResponse(api.related.mock.calls[0]![0] as RelatedRangeRequest)));
     const layer = document.querySelector("[data-live-layer]") as HTMLElement;
     expect(await within(layer).findByText("The citation provider is unavailable right now.")).toBeInTheDocument();
+  });
+
+  it("shows ranking progress and Continue in the summary row after the sheet closes", async () => {
+    api.related.mockImplementation((body: RelatedRangeRequest) => Promise.resolve(rankingResponse(body, 500)));
+    renderGraph();
+    await ready();
+    selectSeedOnCanvas();
+    const nav = within(openSheet()).getByRole("navigation", { name: "Result ranges" });
+    fireEvent.click(within(nav).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The scan did not advance on the re-request: stop at once.
+    expect(
+      await within(summary()).findByText("Still ranking: 500 of about 9,898 related papers collected so far."),
+    ).toBeInTheDocument();
+    expect(api.related).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(summary()).getByRole("button", { name: "Continue" }));
+    expect(api.related).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows the incomplete-links notice in the summary row without a selection", async () => {
+    api.buildPaper.mockImplementation(() => Promise.resolve({ ...baseGraph(), edges_partial: true }));
+    renderGraph();
+    await ready();
+
+    const row = summary();
+    expect(within(row).getByText(/Some links between these papers couldn’t be loaded/)).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "Dismiss notification" }));
+    expect(screen.queryByTestId("graph-summary")).toBeNull();
   });
 });
 

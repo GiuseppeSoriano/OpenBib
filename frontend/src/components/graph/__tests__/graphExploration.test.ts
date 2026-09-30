@@ -847,3 +847,77 @@ describe("topUpLoaded and Expand pinned", () => {
     expect(explorationReducer(confirm, { type: "expandCancelled" }).notice).toBeNull();
   });
 });
+
+describe("ranking, provider limits and base notices", () => {
+  it("keeps a stalled ranking for its source until another request, source or mode", () => {
+    const selected = explorationReducer(loaded(["x", "y"]), { type: "select", id: "x" });
+    const [started, id] = startRange(selected, "x");
+    const stalled = explorationReducer(started, { type: "rankingStalled", id, scanned: 4000, providerTotal: 9000 });
+    expect(stalled.pending).toBeNull();
+    expect(stalled.rankingStall).toEqual({
+      request: { kind: "range", sourceId: "x", mode: CITERS, rangeIndex: 0, last: false },
+      scanned: 4000,
+      providerTotal: 9000,
+    });
+    expect(currentBranch(stalled, "x")).toBeUndefined();
+    expect(modeSwitchAutoLoad(stalled)).toBe("x");
+    // A stale id is ignored.
+    expect(explorationReducer(stalled, { type: "rankingStalled", id, scanned: 1, providerTotal: null })).toBe(stalled);
+
+    expect(explorationReducer(stalled, { type: "select", id: "y" }).rankingStall).toBeNull();
+    expect(explorationReducer(stalled, { type: "setMode", mode: { order: "recent" } }).rankingStall).toBeNull();
+    expect(explorationReducer(stalled, { type: "versionChanged", groupId: "x", canonicalKey: "doi:10.1/x2" }).rankingStall).toBeNull();
+    expect(startRange(stalled, "x")[0].rankingStall).toBeNull();
+  });
+
+  it("re-queues ranking sources at the end and rate-limited ones at the head, pausing the run", () => {
+    const sources = ["a", "b", "c", "d"];
+    let state = explorationReducer(loaded(sources), { type: "expandPlanned", sourceIds: sources, upTo: 120 });
+    const [started, id] = startTopUp(state, ["a", "b", "c"]);
+    state = explorationReducer(started, {
+      type: "topUpLoaded",
+      id,
+      now: 1000,
+      response: topUpResponse([
+        sourceResult("a", [], { error: "ranking" }),
+        sourceResult("b", [], { error: "rate_limited" }),
+        sourceResult("c", ["c1"]),
+      ]),
+    });
+    expect(state.expand).toMatchObject({
+      phase: "paused",
+      queue: ["b", "d", "a"],
+      failed: [],
+      rankingRounds: { a: 1 },
+      retryAfter: 30,
+      resumeAt: 31000,
+    });
+    expect(visibleNodeIds(state).has("c1")).toBe(true);
+  });
+
+  it("fails top-up errors outside a run, including ranking", () => {
+    const [started, id] = startTopUp(loaded(["x", "y"]), ["x", "y"]);
+    const state = explorationReducer(started, {
+      type: "topUpLoaded",
+      id,
+      response: topUpResponse([sourceResult("x", ["a"]), sourceResult("y", [], { error: "ranking" })]),
+    });
+    expect(state.notice).toEqual({ kind: "partialTopUp", params: { done: 1, total: 2, failed: 1 } });
+  });
+
+  it("notes partial base edges until dismissed, across range loads and mode switches", () => {
+    let state = explorationReducer(initialExplorationState(), {
+      type: "baseLoaded",
+      base: baseGraph(["x"], [], [], { edges_partial: true }),
+    });
+    expect(state.notice).toEqual({ kind: "edgesPartial" });
+    state = loadRange(explorationReducer(state, { type: "select", id: "x" }), "x", ["a"]);
+    expect(state.notice).toEqual({ kind: "edgesPartial" });
+    state = explorationReducer(state, { type: "setMode", mode: { direction: "cites" } });
+    expect(state.notice).toEqual({ kind: "edgesPartial" });
+    // A range notice replaces it.
+    expect(loadRange(state, "x", [], { provider_total: 0, total_available: 0 }).notice?.kind).toBe("empty");
+    expect(explorationReducer(state, { type: "dismissNotice" }).notice).toBeNull();
+    expect(loaded(["x"]).notice).toBeNull();
+  });
+});

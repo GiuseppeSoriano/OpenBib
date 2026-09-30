@@ -12,6 +12,7 @@ import type {
   RelatedRangeResponse,
   TopUpRequest,
   TopUpResponse,
+  TopUpSourceResult,
 } from "@/types";
 
 vi.mock("@/lib/api", () => ({
@@ -117,8 +118,27 @@ function topUpFor(body: TopUpRequest): TopUpResponse {
   };
 }
 
-function httpError(status: number, headers: Record<string, string> = {}) {
-  return Object.assign(new Error(`HTTP ${status}`), { response: { status, headers, data: {} } });
+/** A top-up answer where the listed sources report `error` and add nothing. */
+function topUpWith(body: TopUpRequest, errors: Record<string, TopUpSourceResult["error"]>): TopUpResponse {
+  const response = topUpFor(body);
+  const sources = response.sources.map((source) =>
+    errors[source.source_group_key] ? { ...source, added_group_keys: [], error: errors[source.source_group_key]! } : source,
+  );
+  const kept = new Set(sources.flatMap((source) => source.added_group_keys));
+  return {
+    ...response,
+    sources,
+    nodes: response.nodes.filter((item) => kept.has(item.id)),
+    edges: response.edges.filter((edge) => kept.has(String(edge.source))),
+  };
+}
+
+function httpError(status: number, headers: Record<string, string> = {}, data: unknown = {}) {
+  return Object.assign(new Error(`HTTP ${status}`), { response: { status, headers, data } });
+}
+
+function ranking(body: RelatedRangeRequest, scanned: number): RelatedRangeResponse {
+  return rangeFor(body, [], { scan_incomplete: true, reason: "ranking", scanned, provider_total: 5000, total_available: 0 });
 }
 
 /** Queue deferred responses for related() and capture each call. */
@@ -416,5 +436,129 @@ describe("useGraphExploration", () => {
     act(() => result.current.loadRange({ index: 0 }));
     unmount();
     expect(calls[0]!.signal?.aborted).toBe(true);
+  });
+});
+
+describe("useGraphExploration ranking and provider limits", () => {
+  it("re-requests a range while the provider list is ranked and the scan advances, up to six times", async () => {
+    const calls = queueRelated();
+    const { result } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    for (let i = 0; i < 6; i++) {
+      await act(async () => calls[i]!.reply.resolve(ranking(calls[i]!.body, (i + 1) * 500)));
+      expect(calls).toHaveLength(i + 2);
+      expect(calls[i + 1]!.body).toEqual(calls[0]!.body);
+      expect(result.current.state.pending).toMatchObject({ autoContinue: i + 1, scanned: (i + 1) * 500, ranking: true });
+    }
+    await act(async () => calls[6]!.reply.resolve(ranking(calls[6]!.body, 3500)));
+    expect(calls).toHaveLength(7);
+    const state = result.current.state;
+    expect(state.pending).toBeNull();
+    expect(state.rankingStall).toEqual({ request: expect.objectContaining({ sourceId: "s", rangeIndex: 0 }), scanned: 3500, providerTotal: 5000 });
+    // Nothing was applied: the range is still not loaded.
+    expect(currentBranch(state, "s")).toBeUndefined();
+
+    act(() => result.current.continueRanking());
+    expect(calls).toHaveLength(8);
+    expect(calls[7]!.body).toEqual(calls[0]!.body);
+    expect(result.current.state.rankingStall).toBeNull();
+    expect(result.current.state.pending).toMatchObject({ autoContinue: 0, scanned: 3500, ranking: true });
+    await act(async () => calls[7]!.reply.resolve(rangeFor(calls[7]!.body, ["a"])));
+    expect(currentBranch(result.current.state, "s")!.memberIds).toEqual(["a"]);
+  });
+
+  it("stops at once when the ranking scan does not advance", async () => {
+    const calls = queueRelated();
+    const { result } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(ranking(calls[0]!.body, 800)));
+    await act(async () => calls[1]!.reply.resolve(ranking(calls[1]!.body, 800)));
+    expect(calls).toHaveLength(2);
+    expect(result.current.state.rankingStall?.scanned).toBe(800);
+
+    // A mode switch reloads the stalled source under the new mode.
+    act(() => result.current.setOrder("recent"));
+    expect(calls[2]!.body).toMatchObject({ order: "recent", range_start: 0 });
+    expect(result.current.state.rankingStall).toBeNull();
+  });
+
+  it("reports ranking progress against what is collected: capped at max_results, never below scanned", async () => {
+    const calls = queueRelated();
+    const { result } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    const capped = { scan_incomplete: true, reason: "ranking" as const, provider_total: 50000, total_available: 10000 };
+    await act(async () => calls[0]!.reply.resolve(rangeFor(calls[0]!.body, [], { ...capped, scanned: 1000 })));
+    expect(result.current.state.pending).toMatchObject({ scanned: 1000, providerTotal: 10000, ranking: true });
+    await act(async () => calls[1]!.reply.resolve(rangeFor(calls[1]!.body, [], { ...capped, scanned: 1000 })));
+    expect(result.current.state.rankingStall).toMatchObject({ scanned: 1000, providerTotal: 10000 });
+
+    // The provider's count can trail the records it lists.
+    act(() => result.current.continueRanking());
+    const short = { scan_incomplete: true, reason: "ranking" as const, provider_total: 900, total_available: 1100 };
+    await act(async () => calls[2]!.reply.resolve(rangeFor(calls[2]!.body, [], { ...short, scanned: 1100 })));
+    expect(result.current.state.pending).toMatchObject({ scanned: 1100, providerTotal: 1100, ranking: true });
+  });
+
+  it("maps a rate-limited provider (503 with Retry-After) to a countdown and keeps the error for its message", async () => {
+    const calls = queueRelated();
+    const { result } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    const limited = httpError(503, { "retry-after": "20" }, { detail: { code: "related_provider_unavailable", message: "x" } });
+    await act(async () => calls[0]!.reply.reject(limited));
+    expect(result.current.state.error).toMatchObject({ kind: "rate_limited", retryAfter: 20, cause: limited });
+
+    act(() => result.current.retry());
+    const down = httpError(503, {}, { detail: { code: "related_provider_unavailable", message: "x" } });
+    await act(async () => calls[1]!.reply.reject(down));
+    expect(result.current.state.error).toMatchObject({ kind: "provider", retryAfter: null, cause: down });
+
+    act(() => result.current.retry());
+    const coded = httpError(503, {}, { detail: { code: "provider_rate_limited", message: "x", retry_after: 9 } });
+    await act(async () => calls[2]!.reply.reject(coded));
+    expect(result.current.state.error).toMatchObject({ kind: "rate_limited", retryAfter: 9 });
+  });
+
+  it("asks again for top-up sources still being ranked, at most three more rounds", async () => {
+    const calls = queueTopUp();
+    const { result } = setup(["a", "b", "c"]);
+    act(() => result.current.expandPinned());
+    await act(async () => calls[0]!.reply.resolve(topUpWith(calls[0]!.body, { b: "ranking" })));
+    expect(result.current.state.expand).toMatchObject({ phase: "running", queue: ["b"], rankingRounds: { b: 1 } });
+    for (let round = 1; round <= 3; round++) {
+      expect(calls[round]!.body.sources.map((source) => source.source_group_key)).toEqual(["b"]);
+      await act(async () => calls[round]!.reply.resolve(topUpWith(calls[round]!.body, { b: "ranking" })));
+    }
+    expect(calls).toHaveLength(4);
+    const state = result.current.state;
+    expect(state.expand).toBeNull();
+    expect(state.notice).toEqual({ kind: "partialTopUp", params: { done: 2, total: 3, failed: 1 } });
+    expect(visibleNodeIds(state).has("a-n")).toBe(true);
+  });
+
+  it("pauses the run on a rate-limited top-up source and resumes it after the provider wait", async () => {
+    vi.useFakeTimers();
+    const calls = queueTopUp();
+    const { result } = setup(["a", "b"]);
+    act(() => result.current.expandPinned());
+    await act(async () => calls[0]!.reply.resolve(topUpWith(calls[0]!.body, { a: "rate_limited" })));
+    expect(result.current.state.expand).toMatchObject({ phase: "paused", retryAfter: 30, queue: ["a"] });
+    expect(visibleNodeIds(result.current.state).has("b-n")).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(29_900);
+    });
+    expect(calls).toHaveLength(1);
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body.sources.map((source) => source.source_group_key)).toEqual(["a"]);
+    await act(async () => calls[1]!.reply.resolve(topUpFor(calls[1]!.body)));
+    expect(result.current.state.expand).toBeNull();
+    expect(result.current.state.notice).toBeNull();
   });
 });

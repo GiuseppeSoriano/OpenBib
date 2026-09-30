@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { AlertTriangle, GitFork, Loader2, Lock, RotateCcw } from "lucide-react";
 import EmptyState from "@/components/ui/EmptyState";
-import { apiStatus, retryAfterSeconds } from "@/lib/apiError";
+import { apiErrorCode, apiErrorText, apiStatus } from "@/lib/apiError";
 
 type GraphBaseStateProps =
   | { status: "loading" }
@@ -11,13 +11,15 @@ type GraphBaseStateProps =
   | { status: "unavailable"; backTo: string }
   | { status: "error"; error: unknown; retrying?: boolean; onRetry: () => void };
 
-/** Status-specific copy for a failed base graph. */
+/**
+ * Status-specific copy for a failed base graph: too many seeds, not
+ * available, otherwise the coded, rate-limit or connection message.
+ */
 export function baseErrorMessage(error: unknown, t: TFunction): string {
   const status = apiStatus(error);
-  if (status === 422) return t("graph.tooManySeeds");
-  if (status === 429) return t("graph.rateLimited", { seconds: retryAfterSeconds(error) ?? 60 });
+  if (status === 422 && !apiErrorCode(error)) return t("graph.tooManySeeds");
   if (status === 403 || status === 404) return t("graph.notAvailable");
-  return t("graph.baseFailed");
+  return apiErrorText(error, t, t("graph.baseFailed"));
 }
 
 /**

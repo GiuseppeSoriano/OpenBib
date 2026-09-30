@@ -18,7 +18,10 @@ const TABS: GraphSheetTab[] = ["controls", "papers"];
 interface GraphControlsSheetProps {
   open: boolean;
   onClose: () => void;
-  /** "bottom" on phones; "auto" gives a right sheet on short landscape screens. */
+  /**
+   * "bottom" on phones; "auto" on short landscape screens, a right sheet
+   * (graph.css keeps it one below 768px, where Panel would turn to the bottom).
+   */
   placement: "auto" | "bottom";
   returnFocusRef: RefObject<HTMLElement>;
   tab: GraphSheetTab;

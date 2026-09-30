@@ -699,6 +699,28 @@
     padding-top: var(--space-md);
     border-top: 1px solid var(--color-border);
   }
+  /* Short landscape phones 640–767px wide (667×375, 740×360): the global
+     rule makes every Panel ≤767px a bottom sheet, which would cover most of
+     the screen's height. The graph sheet (placement "auto" there) stays a
+     full-height right sheet, as it is from 768px up. */
+  @media (min-width: 640px) and (max-width: 767px) and (max-height: 500px) {
+    .panel:not(.panel--bottom):has(.graph-sheet-tabs) {
+      top: 0;
+      left: auto;
+      width: min(460px, 60vw);
+      max-height: none;
+      border-top: none;
+      border-left: 1px solid var(--color-border);
+      border-radius: 0;
+      animation: panel-in 0.18s ease-out;
+    }
+    .panel:not(.panel--bottom):has(.graph-sheet-tabs) .panel-handle {
+      display: none;
+    }
+    .panel:not(.panel--bottom):has(.graph-sheet-tabs) :is(.panel-header, .panel-body) {
+      padding-left: var(--space-lg);
+    }
+  }
 
   /* The last row sits on the screen edge where no bottom tab bar clears the
      home indicator (desktop widths and short landscape). */

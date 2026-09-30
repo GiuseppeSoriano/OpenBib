@@ -33,8 +33,17 @@ export const MAX_CONNECTED = 60;
 export const TOPUP_CONFIRM_ABOVE = 20;
 /** A `scan_incomplete` range is re-requested at most this many times. */
 export const MAX_AUTO_CONTINUE = 3;
+/**
+ * A range whose provider list is still being ranked (`reason: "ranking"`) is
+ * re-requested this many times while the scan advances; then "Continue".
+ */
+export const MAX_RANKING_CONTINUE = 6;
+/** Rounds a top-up source still being ranked goes back into the expand queue. */
+export const MAX_RANKING_ROUNDS = 3;
 /** Used when a 429 carries no usable Retry-After (limits are per minute). */
 export const DEFAULT_RETRY_AFTER_SECONDS = 60;
+/** Wait after a top-up source reports the provider rate limited (no header per source). */
+export const PROVIDER_RETRY_AFTER_SECONDS = 30;
 
 export interface Mode {
   direction: RelationDirection;
@@ -118,6 +127,8 @@ export type PendingRange = RangeRequestSpec &
     /** Scan progress from the previous incomplete response, if any. */
     scanned: number | null;
     providerTotal: number | null;
+    /** That response was still ranking the provider's list. */
+    ranking?: boolean;
   };
 
 export type PendingTopUp = TopUpRequestSpec & RequestStamp;
@@ -133,6 +144,18 @@ export interface ExplorationError {
   retryAfter: number | null;
   /** Epoch ms after which a retry is allowed, for `rate_limited`. */
   retryAt: number | null;
+  /** The failed request's error, for its localized message. */
+  cause?: unknown;
+}
+
+/**
+ * A range whose provider list was still being ranked after the automatic
+ * re-requests (or stopped advancing): "Continue" re-issues `request`.
+ */
+export interface RankingStall {
+  request: RangeRequestSpec;
+  scanned: number;
+  providerTotal: number | null;
 }
 
 export type NoticeKind =
@@ -141,7 +164,8 @@ export type NoticeKind =
   | "allPinned"
   | "noProviderId"
   | "nothingToExpand"
-  | "partialTopUp";
+  | "partialTopUp"
+  | "edgesPartial";
 
 export interface Notice {
   kind: NoticeKind;
@@ -149,6 +173,11 @@ export interface Notice {
 }
 
 const RANGE_NOTICES: ReadonlySet<NoticeKind> = new Set(["rangeAdjusted", "empty", "allPinned", "noProviderId"]);
+
+/** The base graph's own notice outlives exploration notices until dismissed. */
+function baseNotice(state: ExplorationState): Notice | null {
+  return state.notice?.kind === "edgesPartial" ? state.notice : null;
+}
 
 /**
  * "Expand pinned nodes": every deficient pinned source of one click, sent in
@@ -158,6 +187,10 @@ const RANGE_NOTICES: ReadonlySet<NoticeKind> = new Set(["rangeAdjusted", "empty"
  * - `running`: a chunk is in flight, or the next one is about to be sent.
  * - `paused`: rate limited; resumes automatically at `resumeAt`.
  * - `failed`: a chunk failed; Retry resumes, Cancel stops.
+ *
+ * A source the provider is still ranking goes back to the end of the queue
+ * (at most MAX_RANKING_ROUNDS times); a rate-limited one goes back to the
+ * head and pauses the run.
  */
 export interface ExpandRun {
   phase: "confirm" | "running" | "paused" | "failed";
@@ -166,6 +199,8 @@ export interface ExpandRun {
   /** Sources not processed yet (the head chunk is re-sent after a pause). */
   queue: string[];
   failed: string[];
+  /** Times each source was re-queued because it was still being ranked. */
+  rankingRounds: Readonly<Record<string, number>>;
   added: number;
   /** Upper bound of new papers, for the confirmation text. */
   upTo: number;
@@ -197,6 +232,7 @@ export interface ExplorationState {
   maxResults: number;
   pending: PendingRequest | null;
   error: ExplorationError | null;
+  rankingStall: RankingStall | null;
   notice: Notice | null;
   expand: ExpandRun | null;
   /** The last request had more than MAX_EXCLUSIONS pins to exclude. */
@@ -213,8 +249,10 @@ export type ExplorationAction =
   | { type: "pinFromDrag"; id: string }
   | { type: "requestStarted"; pending: PendingRequest; exclusionsCapped: boolean }
   | { type: "rangeLoaded"; id: number; response: RelatedRangeResponse }
-  | { type: "topUpLoaded"; id: number; response: TopUpResponse }
-  | { type: "requestFailed"; id: number; kind: ErrorKind; retryAfter?: number | null; now: number }
+  | { type: "rankingStalled"; id: number; scanned: number; providerTotal: number | null }
+  /** `now` (epoch ms) times the pause after a rate-limited source. */
+  | { type: "topUpLoaded"; id: number; response: TopUpResponse; now?: number }
+  | { type: "requestFailed"; id: number; kind: ErrorKind; retryAfter?: number | null; now: number; cause?: unknown }
   | { type: "versionChanged"; groupId: string; canonicalKey: string }
   | { type: "expandPlanned"; sourceIds: string[]; upTo: number }
   | { type: "expandNothing" }
@@ -243,6 +281,7 @@ export function initialExplorationState(
     maxResults: DEFAULT_MAX_RESULTS,
     pending: null,
     error: null,
+    rankingStall: null,
     notice: null,
     expand: null,
     exclusionsCapped: false,
@@ -314,6 +353,8 @@ function forgetVersion(branch: BranchMeta): BranchMeta {
   return { ...branch, reason: null, exhausted: false, snapshotId: null };
 }
 
+function specOf(pending: PendingRange): RangeRequestSpec;
+function specOf(pending: PendingRequest): RequestSpec;
 function specOf(pending: PendingRequest): RequestSpec {
   if (pending.kind === "range") {
     const { sourceId, mode, rangeIndex, last, retireOtherModes } = pending;
@@ -444,27 +485,38 @@ function applyRange(state: ExplorationState, pending: PendingRange, response: Re
     maxResults: response.max_results,
     pending: null,
     error: null,
-    notice,
+    notice: notice ?? baseNotice(state),
     anchorId: sourceId,
   };
 }
 
-function applyTopUp(state: ExplorationState, pending: PendingTopUp, response: TopUpResponse): ExplorationState {
+function applyTopUp(state: ExplorationState, pending: PendingTopUp, response: TopUpResponse, now: number): ExplorationState {
   const { direction, order } = pending.mode;
   const edgeEnds = registerEdges(state.edgeEnds, response.edges);
   const branches: Record<BranchKey, BranchMeta> = { ...state.branches };
   const activeBySource: Record<string, BranchKey> = { ...state.activeBySource };
   const failed: string[] = [];
+  const stillRanking: string[] = [];
+  const rateLimited: string[] = [];
   let added = 0;
+  const run = state.expand;
+  const rankingRounds: Record<string, number> = { ...run?.rankingRounds };
   // A source unpinned while its chunk was in flight has left the run's queue.
-  const queued = state.expand ? new Set(state.expand.queue) : null;
+  const queued = run ? new Set(run.queue) : null;
 
   // Top-up only appends: it never retires a branch (prior branches are kept).
   for (const result of response.sources) {
     const sourceId = result.source_group_key;
     if (queued && !queued.has(sourceId)) continue;
     if (result.error) {
-      failed.push(sourceId);
+      // Within a run, a source still being ranked is asked again later and a
+      // rate-limited one after the pause; anything else counts as failed.
+      const rounds = rankingRounds[sourceId] ?? 0;
+      if (run && result.error === "ranking" && rounds < MAX_RANKING_ROUNDS) {
+        rankingRounds[sourceId] = rounds + 1;
+        stillRanking.push(sourceId);
+      } else if (run && result.error === "rate_limited") rateLimited.push(sourceId);
+      else failed.push(sourceId);
       continue;
     }
     const key = branchKey(sourceId, direction, order);
@@ -501,15 +553,18 @@ function applyTopUp(state: ExplorationState, pending: PendingTopUp, response: To
   }
 
   let next: ExplorationState = { ...state, branches, activeBySource, edgeEnds, pending: null };
-  const run = state.expand;
   if (run) {
     const batch = new Set(pending.batch);
+    const paused = rateLimited.length > 0;
     const updated: ExpandRun = {
       ...run,
-      phase: "running",
-      queue: run.queue.filter((id) => !batch.has(id)),
+      phase: paused ? "paused" : "running",
+      queue: dedupe([...rateLimited, ...run.queue.filter((id) => !batch.has(id)), ...stillRanking]),
       failed: dedupe([...run.failed, ...failed]),
+      rankingRounds,
       added: run.added + added,
+      retryAfter: paused ? PROVIDER_RETRY_AFTER_SECONDS : null,
+      resumeAt: paused ? now + PROVIDER_RETRY_AFTER_SECONDS * 1000 : null,
     };
     next = { ...next, expand: updated };
     if (updated.queue.length === 0) next = finishExpand(next);
@@ -534,6 +589,7 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
         edgeEnds: registerEdges({}, base.edges),
         rangeSize: base.related_range_size ?? DEFAULT_RANGE_SIZE,
         maxResults: base.related_max_results ?? DEFAULT_MAX_RESULTS,
+        notice: base.edges_partial ? { kind: "edgesPartial" } : null,
       };
     }
 
@@ -543,15 +599,16 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
       const pending = state.pending?.kind === "range" && state.pending.sourceId !== action.id ? null : state.pending;
       const error =
         state.error?.request.kind === "range" && state.error.request.sourceId !== action.id ? null : state.error;
+      const rankingStall = state.rankingStall?.request.sourceId === action.id ? state.rankingStall : null;
       const notice = state.notice && RANGE_NOTICES.has(state.notice.kind) ? null : state.notice;
-      return { ...state, selectedId: action.id, pending, error, notice };
+      return { ...state, selectedId: action.id, pending, error, rankingStall, notice };
     }
 
     case "setMode": {
       const mode = { ...state.mode, ...action.mode };
       if (mode.direction === state.mode.direction && mode.order === state.mode.order) return state;
       // Any in-flight request belongs to the old mode; so does an expand run.
-      return finishExpand({ ...state, mode, pending: null, error: null, notice: null });
+      return finishExpand({ ...state, mode, pending: null, error: null, rankingStall: null, notice: baseNotice(state) });
     }
 
     case "togglePin": {
@@ -590,6 +647,7 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
         ...state,
         pending: action.pending,
         error: null,
+        rankingStall: null,
         exclusionsCapped: action.exclusionsCapped,
       };
       if (action.pending.kind === "range") {
@@ -606,10 +664,20 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
       return applyRange(state, pending, action.response);
     }
 
+    case "rankingStalled": {
+      const pending = state.pending;
+      if (!pending || pending.id !== action.id || pending.kind !== "range") return state;
+      return {
+        ...state,
+        pending: null,
+        rankingStall: { request: specOf(pending), scanned: action.scanned, providerTotal: action.providerTotal },
+      };
+    }
+
     case "topUpLoaded": {
       const pending = state.pending;
       if (!pending || pending.id !== action.id || pending.kind !== "topup") return state;
-      return applyTopUp(state, pending, action.response);
+      return applyTopUp(state, pending, action.response, action.now ?? 0);
     }
 
     case "requestFailed": {
@@ -619,6 +687,7 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
       const rateLimited = action.kind === "rate_limited";
       const retryAfter = rateLimited ? action.retryAfter ?? DEFAULT_RETRY_AFTER_SECONDS : null;
       const retryAt = retryAfter !== null ? action.now + retryAfter * 1000 : null;
+      const { cause } = action;
       if (pending.kind === "topup" && state.expand) {
         if (rateLimited) {
           return { ...state, pending: null, expand: { ...state.expand, phase: "paused", retryAfter, resumeAt: retryAt } };
@@ -627,10 +696,10 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
           ...state,
           pending: null,
           expand: { ...state.expand, phase: "failed" },
-          error: { request: specOf(pending), kind: action.kind, retryAfter: null, retryAt: null },
+          error: { request: specOf(pending), kind: action.kind, retryAfter: null, retryAt: null, cause },
         };
       }
-      return { ...state, pending: null, error: { request: specOf(pending), kind: action.kind, retryAfter, retryAt } };
+      return { ...state, pending: null, error: { request: specOf(pending), kind: action.kind, retryAfter, retryAt, cause } };
     }
 
     case "versionChanged": {
@@ -649,7 +718,9 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
       }
       const dropPending =
         state.pending?.kind === "range" && state.pending.sourceId === groupId && state.pending.sourceKey !== canonicalKey;
-      if (!changed && !dropPending) return state;
+      // A stalled ranking belongs to the old version's list.
+      const dropStall = state.rankingStall?.request.sourceId === groupId;
+      if (!changed && !dropPending && !dropStall) return state;
       const activeBySource: Record<string, BranchKey> = { ...state.activeBySource };
       const primary = activeBySource[groupId];
       if (!primary || !branches[primary]?.active) {
@@ -657,7 +728,13 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
         if (stillActive) activeBySource[groupId] = stillActive.key;
         else delete activeBySource[groupId];
       }
-      return { ...state, branches, activeBySource, pending: dropPending ? null : state.pending };
+      return {
+        ...state,
+        branches,
+        activeBySource,
+        pending: dropPending ? null : state.pending,
+        rankingStall: dropStall ? null : state.rankingStall,
+      };
     }
 
     case "expandPlanned": {
@@ -665,14 +742,16 @@ export function explorationReducer(state: ExplorationState, action: ExplorationA
       return {
         ...state,
         pending: state.pending?.kind === "range" ? null : state.pending,
-        notice: null,
+        notice: baseNotice(state),
         error: null,
+        rankingStall: null,
         expand: {
           phase: action.sourceIds.length > TOPUP_CONFIRM_ABOVE ? "confirm" : "running",
           mode: state.mode,
           sourceIds: action.sourceIds,
           queue: action.sourceIds,
           failed: [],
+          rankingRounds: {},
           added: 0,
           upTo: action.upTo,
           retryAfter: null,
@@ -762,12 +841,13 @@ export function exclusionsFor(state: ExplorationState, sourceId: string | null):
 /**
  * Source whose first range a mode switch should load (decision 2), if any:
  * the selected source when it has a loaded branch, or a range of it was
- * loading or failed. Evaluate it on the state from before the switch.
+ * loading, failed or stalled while ranking. Evaluate it on the state from
+ * before the switch.
  */
 export function modeSwitchAutoLoad(state: ExplorationState): string | null {
   const id = state.selectedId;
   if (!id) return null;
-  const request = state.pending ?? state.error?.request;
+  const request = state.pending ?? state.error?.request ?? state.rankingStall?.request;
   const loading = request?.kind === "range" && request.sourceId === id;
   return state.activeBySource[id] || loading ? id : null;
 }

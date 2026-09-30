@@ -19,6 +19,7 @@ interface GraphBottomBarProps {
   onCancelExpand: () => void;
   onRetry: () => void;
   onDismiss: () => void;
+  onContinueRanking: () => void;
 }
 
 /**
@@ -38,6 +39,7 @@ export default function GraphBottomBar({
   onCancelExpand,
   onRetry,
   onDismiss,
+  onContinueRanking,
 }: GraphBottomBarProps) {
   const { t } = useTranslation();
   const { mode } = state;
@@ -76,6 +78,7 @@ export default function GraphBottomBar({
           showExpandProgress={selectedTitle !== null}
           onRetry={onRetry}
           onDismiss={onDismiss}
+          onContinueRanking={onContinueRanking}
           onCancelExpand={onCancelExpand}
         />
       </div>

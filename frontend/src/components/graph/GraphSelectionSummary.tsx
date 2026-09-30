@@ -20,6 +20,7 @@ interface GraphSelectionSummaryProps {
   onViewDetails: () => void;
   onRetry: () => void;
   onDismiss: () => void;
+  onContinueRanking: () => void;
   onCancelExpand: () => void;
 }
 
@@ -39,6 +40,7 @@ export default function GraphSelectionSummary({
   onViewDetails,
   onRetry,
   onDismiss,
+  onContinueRanking,
   onCancelExpand,
 }: GraphSelectionSummaryProps) {
   const { t, i18n } = useTranslation();
@@ -89,7 +91,14 @@ export default function GraphSelectionSummary({
           )}
         </div>
       )}
-      <GraphStatus state={state} showExpandProgress onRetry={onRetry} onDismiss={onDismiss} onCancelExpand={onCancelExpand} />
+      <GraphStatus
+        state={state}
+        showExpandProgress
+        onRetry={onRetry}
+        onDismiss={onDismiss}
+        onContinueRanking={onContinueRanking}
+        onCancelExpand={onCancelExpand}
+      />
     </div>
   );
 }
