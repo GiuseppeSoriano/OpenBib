@@ -77,7 +77,7 @@ export interface BranchMeta {
   exhaustedUnpinEpoch: number;
   /** `pinEpoch` the current range was computed with (drives the pinsChanged hint). */
   loadedPinEpoch: number;
-  reason: "no_provider_id" | null;
+  reason: "no_provider_id" | "ranking" | null;
   snapshotId: string | null;
 }
 

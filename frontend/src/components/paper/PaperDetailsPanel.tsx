@@ -15,7 +15,7 @@ import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
 import ExternalLinkChip from "@/components/paper/ExternalLinkChip";
-import { fullTextLinks } from "@/components/paper/links";
+import { fullTextLinks, pubmedUrl, semanticScholarUrl } from "@/components/paper/links";
 import {
   providerLabel,
   versionLabels,
@@ -148,6 +148,8 @@ export default function PaperDetailsPanel({
   );
   const paragraphs = useMemo(() => abstractParagraphs(paper?.abstract), [paper]);
   const fullText = useMemo(() => (paper ? fullTextLinks(paper) : []), [paper]);
+  const pubmed = paper ? pubmedUrl(paper) : null;
+  const semanticScholar = paper ? semanticScholarUrl(paper) : null;
 
   return (
     <Panel
@@ -240,7 +242,7 @@ export default function PaperDetailsPanel({
             </section>
           )}
 
-          {(paper.doi || paper.arxiv_id || fullText.length > 0) && (
+          {(paper.doi || paper.arxiv_id || pubmed || fullText.length > 0 || semanticScholar) && (
             <section className="pd-section">
               <h3>{t("paper.linksHeading")}</h3>
               <div className="pd-links">
@@ -254,6 +256,7 @@ export default function PaperDetailsPanel({
                     arXiv
                   </ExternalLinkChip>
                 )}
+                {pubmed && <ExternalLinkChip href={pubmed}>PubMed</ExternalLinkChip>}
                 {fullText.map((link) => (
                   <ExternalLinkChip
                     key={link.url}
@@ -263,6 +266,11 @@ export default function PaperDetailsPanel({
                     {link.kind === "pdf" ? t("paper.downloadPdf") : t("paper.fullText")}
                   </ExternalLinkChip>
                 ))}
+                {semanticScholar && (
+                  <ExternalLinkChip href={semanticScholar}>
+                    {t("paper.links.semanticScholar")}
+                  </ExternalLinkChip>
+                )}
               </div>
             </section>
           )}

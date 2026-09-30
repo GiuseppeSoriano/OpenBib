@@ -3,18 +3,32 @@
  * (`{code, message, ...extra}`), legacy plain strings, and FastAPI
  * validation lists. Only strings may ever reach the UI as text.
  */
+import type { TFunction } from "i18next";
 
-export type ApiErrorCode =
-  | "invalid_identifier"
-  | "doi_not_found"
-  | "unknown_paper_key"
-  | "already_in_collection"
-  | "entry_in_collections"
-  | "not_in_library"
-  | "invalid_year_range"
-  | "invalid_cursor"
-  | "range_start_not_aligned"
-  | "related_provider_unavailable";
+export const API_ERROR_CODES = [
+  "invalid_identifier",
+  "doi_not_found",
+  "identifier_not_found",
+  "unknown_paper_key",
+  "already_in_collection",
+  "entry_in_collections",
+  "not_in_library",
+  "invalid_year_range",
+  "invalid_cursor",
+  "invalid_query",
+  "search_window_exceeded",
+  "range_start_not_aligned",
+  "related_provider_unavailable",
+  "provider_not_configured",
+  "provider_key_rejected",
+  "provider_rate_limited",
+  "provider_unavailable",
+  "provider_bad_response",
+] as const;
+
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+
+const KNOWN_CODES: ReadonlySet<string> = new Set(API_ERROR_CODES);
 
 export interface ApiErrorDetail {
   code: ApiErrorCode;
@@ -62,7 +76,10 @@ export function apiErrorCode(err: unknown): ApiErrorCode | null {
   return apiErrorDetail(err)?.code ?? null;
 }
 
-/** Seconds from a 429's Retry-After header (delta-seconds or HTTP date). */
+/**
+ * Seconds from a Retry-After header (delta-seconds or HTTP date): sent with a
+ * 429 and with a 503 from a rate-limited or unavailable provider.
+ */
 export function retryAfterSeconds(err: unknown): number | null {
   const headers = responseOf(err)?.headers;
   if (typeof headers !== "object" || headers === null) return null;
@@ -89,4 +106,45 @@ export function retryAfterSeconds(err: unknown): number | null {
 export function apiErrorMessage(err: unknown, fallback: string): string {
   const detail = rawDetail(err);
   return typeof detail === "string" && detail.trim() ? detail : fallback;
+}
+
+/** A request that never got a response (offline, DNS, CORS); not a cancellation. */
+function isNetworkError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null || responseOf(err)) return false;
+  const { isAxiosError, code } = err as { isAxiosError?: unknown; code?: unknown };
+  return isAxiosError === true && code !== "ERR_CANCELED";
+}
+
+/**
+ * `errors.*` keys whose copy states the problem without retry advice; the
+ * advice is added by `apiErrorText`, either a Retry-After wait or this key.
+ */
+const RETRY_ADVICE: Readonly<Record<string, string>> = {
+  rateLimited: "errors.retrySoon",
+  provider_rate_limited: "errors.retrySoon",
+  provider_unavailable: "errors.retryLater",
+  related_provider_unavailable: "errors.retryLater",
+};
+
+/**
+ * Localized copy for a failed request: `errors.<code>` for a known coded
+ * error, otherwise a rate-limit or connection message by status, otherwise
+ * `fallback` (default `errors.generic`). Rate-limit and outage messages end
+ * with one retry sentence: "Try again in N s" when a 429 or 503 carries
+ * Retry-After, generic advice otherwise. The server's own `message` never
+ * reaches the UI.
+ */
+export function apiErrorText(err: unknown, t: TFunction, fallback?: string): string {
+  const code = apiErrorCode(err);
+  const status = apiStatus(err);
+  let key: string;
+  if (code && KNOWN_CODES.has(code)) key = code;
+  else if (status === 429) key = "rateLimited";
+  else if (isNetworkError(err)) return t("errors.network");
+  else return fallback ?? t("errors.generic");
+  const text = t(`errors.${key}`);
+  const advice = RETRY_ADVICE[key];
+  if (!advice) return text;
+  const seconds = status === 429 || status === 503 ? retryAfterSeconds(err) : null;
+  return `${text} ${seconds ? t("errors.retryIn", { seconds }) : t(advice)}`;
 }

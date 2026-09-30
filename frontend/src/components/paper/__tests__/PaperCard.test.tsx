@@ -77,6 +77,12 @@ describe("PaperCard", () => {
     expect(preview?.textContent).not.toContain("x()");
   });
 
+  it("keeps tag-like literal text in the preview", () => {
+    const abstract = "Typed Box<T> handles <mask> tokens when x<a and y>b.";
+    renderCard({ paper: { ...paper, abstract } });
+    expect(document.querySelector(".paper-abstract")?.textContent).toBe(abstract);
+  });
+
   it("never shows the raw DOI or canonical key", () => {
     renderCard();
     expect(screen.queryByText(/doi:10/)).toBeNull();

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { fullTextLinks, linkHost, looksLikePdf } from "@/components/paper/links";
+import {
+  fullTextLinks,
+  linkHost,
+  looksLikePdf,
+  pubmedUrl,
+  semanticScholarUrl,
+} from "@/components/paper/links";
 import type { PaperMetadata } from "@/types";
 
 function paper(overrides: Partial<PaperMetadata>): PaperMetadata {
@@ -95,5 +101,56 @@ describe("fullTextLinks", () => {
   it("returns the host without www", () => {
     expect(linkHost("https://www.example.org/a")).toBe("example.org");
     expect(linkHost("nope")).toBe("");
+  });
+});
+
+// A Semantic Scholar record as the API maps it: `url` -> abstract_url, openAccessPdf -> pdf_url.
+const S2_ID = "3efd851140aa28e95221b55fcc5659eea97b172d";
+const S2_PAGE = `https://www.semanticscholar.org/paper/${S2_ID}`;
+const FIGSHARE =
+  "https://figshare.com/articles/journal_contribution/The_graph_neural_network_model/27757629";
+
+describe("Semantic Scholar records", () => {
+  it("never treats the Semantic Scholar paper page as full text", () => {
+    expect(fullTextLinks(paper({ abstract_url: S2_PAGE }))).toEqual([]);
+    expect(fullTextLinks(paper({ abstract_url: "https://semanticscholar.org/paper/Title/abc" }))).toEqual(
+      [],
+    );
+  });
+
+  it("labels an open-access landing page as full text, not a PDF download", () => {
+    expect(fullTextLinks(paper({ pdf_url: FIGSHARE, abstract_url: S2_PAGE }))).toEqual([
+      { kind: "fulltext", url: FIGSHARE, host: "figshare.com" },
+    ]);
+  });
+
+  it("keeps direct open-access PDFs, including ones Semantic Scholar hosts", () => {
+    expect(
+      fullTextLinks(paper({ pdf_url: "https://arxiv.org/pdf/2301.12345", abstract_url: S2_PAGE })),
+    ).toEqual([{ kind: "pdf", url: "https://arxiv.org/pdf/2301.12345", host: "arxiv.org" }]);
+    const hosted = "https://pdfs.semanticscholar.org/ab12/cd34.pdf";
+    expect(fullTextLinks(paper({ pdf_url: hosted }))).toEqual([
+      { kind: "pdf", url: hosted, host: "pdfs.semanticscholar.org" },
+    ]);
+  });
+
+  it("links the Semantic Scholar page from the stored URL or the paper ID", () => {
+    expect(semanticScholarUrl(paper({ abstract_url: S2_PAGE }))).toBe(S2_PAGE);
+    expect(semanticScholarUrl(paper({ semantic_scholar_id: S2_ID }))).toBe(S2_PAGE);
+    expect(semanticScholarUrl(paper({ canonical_key: `s2:${S2_ID.toUpperCase()}` }))).toBe(S2_PAGE);
+    expect(semanticScholarUrl(paper({ abstract_url: "https://repo.example.org/record/1" }))).toBeNull();
+    expect(semanticScholarUrl(paper({ semantic_scholar_id: "not-an-id" }))).toBeNull();
+    expect(semanticScholarUrl(paper({ abstract_url: "javascript:alert(1)//semanticscholar.org" }))).toBeNull();
+  });
+});
+
+describe("pubmedUrl", () => {
+  it("links numeric PMIDs only and hides the duplicate full-text link", () => {
+    expect(pubmedUrl(paper({ pmid: "12345" }))).toBe("https://pubmed.ncbi.nlm.nih.gov/12345/");
+    expect(pubmedUrl(paper({ pmid: "PMC1" }))).toBeNull();
+    expect(pubmedUrl(paper({ pmid: null }))).toBeNull();
+    expect(
+      fullTextLinks(paper({ pmid: "12345", abstract_url: "https://pubmed.ncbi.nlm.nih.gov/12345/" })),
+    ).toEqual([]);
   });
 });

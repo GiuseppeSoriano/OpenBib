@@ -277,8 +277,8 @@ describe("PaperDetailsPanel — provider text, links and versions", () => {
     renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
   }
 
-  it("renders a structured abstract as paragraphs with bold labels", async () => {
-    renderDetail({ abstract: "Background: Odor coding.\n\nResults: It works <i>well</i>." });
+  it("renders a raw structured abstract as paragraphs with bold labels", async () => {
+    renderDetail({ abstract: "<h4>Background</h4>Odor coding.<h4>Results</h4>It works <i>well</i>." });
     const details = await screen.findByTestId("paper-details");
 
     const paragraphs = details.querySelectorAll(".pd-abstract p");
@@ -288,6 +288,54 @@ describe("PaperDetailsPanel — provider text, links and versions", () => {
     expect(within(paragraphs[1] as HTMLElement).getByText("Results:").tagName).toBe("STRONG");
     expect(paragraphs[1]).toHaveTextContent("Results: It works well.");
     expect(details.textContent).not.toMatch(/<h4|<i>|<\/?[a-z]+>/);
+  });
+
+  it("keeps tag-like literal text in an abstract", async () => {
+    const abstract = "Rust Box<T> values and <mask> tokens hold when x<a and y>b.";
+    renderDetail({ abstract });
+    const details = await screen.findByTestId("paper-details");
+
+    const paragraphs = details.querySelectorAll(".pd-abstract p");
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0]?.textContent).toBe(abstract);
+  });
+
+  it("shows a Semantic Scholar record's page as its own link, never as full text", async () => {
+    const page = "https://www.semanticscholar.org/paper/3efd851140aa28e95221b55fcc5659eea97b172d";
+    const figshare =
+      "https://figshare.com/articles/journal_contribution/The_graph_neural_network_model/27757629";
+    renderDetail({
+      canonical_key: "s2:3efd851140aa28e95221b55fcc5659eea97b172d",
+      semantic_scholar_id: "3efd851140aa28e95221b55fcc5659eea97b172d",
+      pmid: "19068426",
+      pdf_url: figshare,
+      abstract_url: page,
+      provider_source: "semantic_scholar",
+      provider_sources: ["semantic_scholar"],
+    });
+    const details = await screen.findByTestId("paper-details");
+
+    const fullText = screen.getByRole("link", { name: /Full text \/ Repository/ });
+    expect(fullText).toHaveAttribute("href", figshare);
+    expect(screen.queryByRole("link", { name: /Download PDF/ })).toBeNull();
+    const s2 = screen.getByRole("link", { name: "View on Semantic Scholar (opens in a new tab)" });
+    expect(s2).toHaveAttribute("href", page);
+    expect(s2).toHaveAttribute("target", "_blank");
+    expect(s2).toHaveAttribute("title", "semanticscholar.org");
+    expect(s2.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getByRole("link", { name: /PubMed/ })).toHaveAttribute(
+      "href",
+      "https://pubmed.ncbi.nlm.nih.gov/19068426/",
+    );
+    const chips = within(details).getAllByRole("link").filter((link) => link.getAttribute("target") === "_blank");
+    expect(chips.filter((link) => link.getAttribute("href") === page)).toHaveLength(1);
+    expect(chips.map((link) => link.textContent?.replace(/\s*\(opens in a new tab\)$/, ""))).toEqual([
+      "Publisher",
+      "arXiv",
+      "PubMed",
+      "Full text / Repository",
+      "View on Semantic Scholar",
+    ]);
   });
 
   it("labels a real PDF as a download and a repository page as full text", async () => {

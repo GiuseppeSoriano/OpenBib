@@ -177,11 +177,55 @@ export interface CollectionPaper {
   position: number;
   added_at: string;
   paper?: PaperMetadata | null;
+  /** False while the paper is stored as pending (providers unavailable). */
+  resolved: boolean;
+}
+
+/* ── Collection import ──────────────────────────────────── */
+/**
+ * `unavailable`: the provider failed; the line was not saved and can be
+ * retried. `ImportResult` has no count for it; count it from `results`.
+ */
+export type ImportLineStatus =
+  | "added"
+  | "duplicate"
+  | "invalid"
+  | "not_found"
+  | "unresolved"
+  | "unavailable";
+
+export interface ImportLineResult {
+  /** 1-based index within the request list. */
+  line: number;
+  input: string;
+  status: ImportLineStatus;
+  canonical_key: string | null;
+  title: string | null;
+}
+
+export interface ImportResult {
+  added: number;
+  duplicate: number;
+  invalid: number;
+  not_found: number;
+  unresolved: number;
+  total: number;
+  /** Deprecated alias of `duplicate`. */
+  skipped: number;
+  results: ImportLineResult[];
+}
+
+/** A search result that may be another version of this item (never merged). */
+export interface PossibleVersion {
+  paper_group_key: string;
+  title: string;
+  provider_sources: string[];
 }
 
 export interface SearchPaperItem {
   kind: "paper";
   paper: PaperMetadata;
+  possible_versions?: PossibleVersion[];
 }
 
 export interface SearchPaperGroupItem {
@@ -193,9 +237,27 @@ export interface SearchPaperGroupItem {
   selected_version: PaperMetadata;
   versions: PaperMetadata[];
   provider_sources: string[];
+  possible_versions?: PossibleVersion[];
 }
 
 export type SearchResultItem = SearchPaperItem | SearchPaperGroupItem;
+
+export type SearchSort = "relevance" | "date" | "citations";
+
+export interface SearchParams {
+  q: string;
+  year_from?: number;
+  year_to?: number;
+  open_access_only?: boolean;
+  /** Filtered within each served page only (`filtered_locally`). */
+  author?: string;
+  sort?: SearchSort;
+  /** Relevance paging; ignored when `cursor` is set. */
+  page?: number;
+  /** Opaque `next_cursor` of the previous page (date and citation sorts). */
+  cursor?: string;
+  size?: number;
+}
 
 export interface SearchResult {
   items: SearchResultItem[];
@@ -205,6 +267,18 @@ export interface SearchResult {
   page: number;
   page_size: number;
   providers: string[];
+  /* Additive fields; absent from older servers. */
+  sort?: SearchSort;
+  /** Continuation for the date and citation sorts; null on the last page. */
+  next_cursor?: string | null;
+  /** The provider's own match count, an estimate. */
+  total_estimate?: number | null;
+  /** Paging stopped at the provider's result window (first 1,000 for relevance). */
+  window_capped?: boolean;
+  /** A filter (author) was applied to the served page only. */
+  filtered_locally?: boolean;
+  /** Provider that answered, e.g. "semantic_scholar". */
+  source?: string;
 }
 
 /* ── Paper memberships (search page enrichment) ─────────── */
@@ -282,6 +356,8 @@ export interface GraphResponse {
   /** Related-range size and depth cap; absent from older servers (use 30 / 10,000). */
   related_range_size?: number;
   related_max_results?: number;
+  /** Some seeds' references could not be fetched in time, so edges may be missing. */
+  edges_partial?: boolean;
 }
 
 export type CitingOrder = "cited_by_count" | "recent";
@@ -324,7 +400,11 @@ export interface RelatedRangeResponse {
   clamped: boolean;
   scan_incomplete: boolean;
   snapshot_id: string | null;
-  reason: "no_provider_id" | null;
+  /**
+   * "ranking": the provider's list is still being collected and ranked, so no
+   * nodes yet (`scan_incomplete`); `scanned` of about `provider_total` so far.
+   */
+  reason: "no_provider_id" | "ranking" | null;
 }
 
 export interface TopUpSource {
@@ -353,7 +433,8 @@ export interface TopUpSourceResult {
   provider_total: number | null;
   exhausted: boolean;
   reason: "no_provider_id" | null;
-  error: "provider_unavailable" | "timeout" | null;
+  /** "ranking": retry this source later; "rate_limited": wait for Retry-After. */
+  error: "provider_unavailable" | "timeout" | "ranking" | "rate_limited" | null;
 }
 
 export interface TopUpResponse {

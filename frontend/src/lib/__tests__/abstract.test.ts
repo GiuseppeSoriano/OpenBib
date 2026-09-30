@@ -28,6 +28,27 @@ describe("abstractParagraphs", () => {
     ]);
   });
 
+  // Same rule as the backend (app/common/text.py): only known tags with
+  // name=value attributes are markup; anything else is kept as text.
+  it.each([
+    "Rust Box<T> values where x<y holds for all inputs.",
+    "We replace tokens with <mask> and predict them; accuracy improves when n<k.",
+    "tokens <mask> and </s>",
+    "when x<a and y>b holds",
+    "n<p and m>q",
+    "the <style> element is parsed first. Then scripts run.",
+  ])("keeps tag-like literal text unchanged: %s", (text) => {
+    expect(abstractParagraphs(text)).toEqual([{ text }]);
+  });
+
+  it("strips known markup but keeps literal text around it", () => {
+    expect(abstractParagraphs("<i>x</i> and Box<T>")).toEqual([{ text: "x and Box<T>" }]);
+    expect(abstractParagraphs('<p>if x<a and y>b then <a href="https://e.org">z</a></p>')).toEqual([
+      { text: "if x<a and y>b then z" },
+    ]);
+    expect(abstractParagraphs("<jats:p>n &lt; k holds</jats:p>")).toEqual([{ text: "n < k holds" }]);
+  });
+
   it("strips leftover markup defensively without rendering it", () => {
     const paragraphs = abstractParagraphs(
       "<h4>Background</h4>Odor <i>coding</i>.<h4>Results</h4>10<sup>-3</sup> fold<script>alert(1)</script>",

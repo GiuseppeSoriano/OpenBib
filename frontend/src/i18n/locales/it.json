@@ -143,6 +143,9 @@
     "abstractHeading": "Abstract",
     "linksHeading": "Collegamenti",
     "publisherLink": "Editore",
+    "links": {
+      "semanticScholar": "Vedi su Semantic Scholar"
+    },
     "published": "Pubblicato",
     "preprint": "Preprint",
     "versionsHeading": "Versioni",
@@ -521,5 +524,31 @@
     "unavailable": "Collezione non disponibile o accesso non più consentito.",
     "login": "Accedi al tuo account",
     "updateConflict": "Salvataggio non riuscito. Controlla i permessi e i dati aggiornati della collezione prima di riprovare."
+  },
+  "errors": {
+    "generic": "Si è verificato un errore. Riprova.",
+    "network": "Impossibile raggiungere OpenBib. Controlla la connessione e riprova.",
+    "rateLimited": "Troppe richieste.",
+    "retryIn": "Riprova tra {{seconds}} s.",
+    "retrySoon": "Attendi un momento e riprova.",
+    "retryLater": "Riprova più tardi.",
+    "invalid_identifier": "Inserisci un DOI (per esempio 10.1038/nature14539) o un link DOI.",
+    "doi_not_found": "Nessun articolo è registrato con questo DOI.",
+    "identifier_not_found": "Semantic Scholar non ha alcun articolo con questo identificativo.",
+    "unknown_paper_key": "Questo riferimento all’articolo non è riconosciuto. Aggiungilo tramite DOI.",
+    "already_in_collection": "Questo articolo è già nella raccolta.",
+    "entry_in_collections": "Questo articolo è ancora in una o più raccolte.",
+    "not_in_library": "Questo articolo non è nella tua Libreria.",
+    "invalid_year_range": "L’anno iniziale non può essere successivo all’anno finale.",
+    "invalid_cursor": "Questi risultati sono scaduti. Ripeti la ricerca.",
+    "invalid_query": "Semantic Scholar non è riuscito a elaborare questa ricerca. Prova con altre parole.",
+    "search_window_exceeded": "Si possono mostrare solo i primi 1.000 risultati. Affina la ricerca per vederne altri.",
+    "range_start_not_aligned": "Questo intervallo di articoli correlati non è disponibile. Ricomincia dal primo intervallo.",
+    "related_provider_unavailable": "I dati sulle citazioni di Semantic Scholar non sono al momento disponibili.",
+    "provider_not_configured": "Semantic Scholar non è configurato su questo server. Se gestisci questa istanza di OpenBib, imposta SEMANTIC_SCHOLAR_API_KEY.",
+    "provider_key_rejected": "Semantic Scholar ha rifiutato la chiave API di questo server. Se gestisci questa istanza di OpenBib, controlla SEMANTIC_SCHOLAR_API_KEY.",
+    "provider_rate_limited": "Semantic Scholar sta ricevendo troppe richieste.",
+    "provider_unavailable": "Semantic Scholar non è al momento disponibile.",
+    "provider_bad_response": "Semantic Scholar ha inviato una risposta che OpenBib non riesce a leggere. Riprova più tardi."
   }
 }

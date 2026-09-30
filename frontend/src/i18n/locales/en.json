@@ -143,6 +143,9 @@
     "abstractHeading": "Abstract",
     "linksHeading": "Links",
     "publisherLink": "Publisher",
+    "links": {
+      "semanticScholar": "View on Semantic Scholar"
+    },
     "published": "Published",
     "preprint": "Preprint",
     "versionsHeading": "Versions",
@@ -521,5 +524,31 @@
     "unavailable": "Collection unavailable or access no longer granted.",
     "login": "Sign in to your account",
     "updateConflict": "Unable to save. Check your access and the latest collection details before trying again."
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "network": "Couldn’t reach OpenBib. Check your connection and try again.",
+    "rateLimited": "Too many requests.",
+    "retryIn": "Try again in {{seconds}} s.",
+    "retrySoon": "Please wait a moment and try again.",
+    "retryLater": "Please try again later.",
+    "invalid_identifier": "Enter a DOI (for example 10.1038/nature14539) or a DOI link.",
+    "doi_not_found": "No paper is registered under this DOI.",
+    "identifier_not_found": "Semantic Scholar has no paper with this identifier.",
+    "unknown_paper_key": "This paper reference isn’t known. Add it by DOI instead.",
+    "already_in_collection": "This paper is already in the collection.",
+    "entry_in_collections": "This paper is still in one or more collections.",
+    "not_in_library": "This paper isn’t in your Library.",
+    "invalid_year_range": "The start year can’t be later than the end year.",
+    "invalid_cursor": "These results have expired. Run the search again.",
+    "invalid_query": "Semantic Scholar couldn’t process this search. Try different words.",
+    "search_window_exceeded": "Only the first 1,000 results can be shown. Refine your search to see others.",
+    "range_start_not_aligned": "This range of related papers isn’t available. Start again from the first range.",
+    "related_provider_unavailable": "Citation data from Semantic Scholar is unavailable right now.",
+    "provider_not_configured": "Semantic Scholar isn’t set up on this server. If you run this OpenBib instance, set SEMANTIC_SCHOLAR_API_KEY.",
+    "provider_key_rejected": "Semantic Scholar rejected this server’s API key. If you run this OpenBib instance, check SEMANTIC_SCHOLAR_API_KEY.",
+    "provider_rate_limited": "Semantic Scholar is receiving too many requests.",
+    "provider_unavailable": "Semantic Scholar is unavailable right now.",
+    "provider_bad_response": "Semantic Scholar sent a response OpenBib couldn’t read. Please try again later."
   }
 }

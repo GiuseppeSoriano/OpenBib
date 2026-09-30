@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -69,6 +69,7 @@ api.interceptors.response.use((response) => {
 });
 
 export const papers = {
+  async search(params: SearchParams, options: { signal?: AbortSignal } = {}) { return (await api.get<SearchResult>("/papers/search", { params, signal: options.signal })).data; },
   async getDetail(canonicalKey: string) { return (await api.get<PaperDetail>(`/papers/${encodeURIComponent(canonicalKey)}`)).data; },
   async getStates(canonicalKey: string) { return (await api.get<PaperState[]>(`/papers/${encodeURIComponent(canonicalKey)}/states`)).data; },
   async setState(canonicalKey: string, state: ReadingState) { return (await api.put<PaperState>(`/papers/${encodeURIComponent(canonicalKey)}/state`, { state })).data; },
