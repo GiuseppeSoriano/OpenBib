@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { library, zotero } from "@/lib/api";
-import { apiErrorMessage, apiStatus } from "@/lib/apiError";
+import { library } from "@/lib/api";
+import { apiErrorCode, apiErrorDetail, apiErrorText, apiStatus } from "@/lib/apiError";
 import {
   activeFilterCount,
   parseLibraryParams,
@@ -12,19 +12,22 @@ import {
 } from "@/lib/libraryParams";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { useToast } from "@/components/ui/Toast";
-import type { LibraryEntryListItem, ZoteroSyncReport } from "@/types";
+import type { BlockingCollection, LibraryEntryListItem, LibraryResolveResult } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
+import Modal from "@/components/ui/Modal";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import QueryError from "@/components/ui/QueryError";
 import PaperCard from "@/components/paper/PaperCard";
+import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
+import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
 import LibraryFilters from "@/components/library/LibraryFilters";
 import {
   AlertTriangle,
   BookMarked,
-  BookUp,
+  Download,
   GitFork,
   Layers3,
   RotateCcw,
@@ -38,7 +41,8 @@ const PAGE_SIZE = 25;
 /**
  * The personal library: rich, human-readable entries. All low-level
  * details (canonical keys, DOIs, version pins) live behind the details
- * panel — never on the page itself.
+ * panel — except the stored identifier of a paper whose details are
+ * missing, which its recovery card needs to show.
  */
 export default function LibraryPage() {
   const { t } = useTranslation();
@@ -47,7 +51,11 @@ export default function LibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const focusKey = searchParams.get("focus");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [detailsKey, setDetailsKey] = useState<string | null>(null);
+  const [blockedDelete, setBlockedDelete] = useState<{
+    groupKey: string;
+    collections: BlockingCollection[];
+  } | null>(null);
+  const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   // Keyed by the serialized filters so unrelated URL changes (?focus=) keep
@@ -99,43 +107,33 @@ export default function LibraryPage() {
   useEffect(() => {
     if (!focusKey || !focusEntry || openedFocus.current === focusKey) return;
     openedFocus.current = focusKey;
-    setDetailsKey(focusEntry.primary_canonical_key);
+    setDetails({ key: focusEntry.primary_canonical_key, unresolved: !focusEntry.primary_version });
   }, [focusKey, focusEntry]);
 
-  const { data: zoteroStatus } = useQuery({
-    queryKey: ["zotero-status"],
-    queryFn: () => zotero.getStatus(),
-  });
-
-  const zoteroSyncMutation = useMutation({
-    mutationFn: () => zotero.syncLibrary(),
-    onSuccess: (report: ZoteroSyncReport) => {
-      toast(
-        t("zotero.report", {
-          created: report.items_created,
-          updated: report.items_updated,
-          skipped: report.items_skipped,
-        }),
-        report.failures.length > 0 ? "info" : "success",
-      );
-      if (report.failures.length > 0) {
-        toast(t("zotero.reportFailures", { count: report.failures.length }), "error");
+  const deleteMutation = useMutation({
+    mutationFn: ({ groupKey, detach }: { groupKey: string; detach: boolean }) =>
+      library.deleteEntry(groupKey, { detach }),
+    onSuccess: () => {
+      setBlockedDelete(null);
+      for (const queryKey of [
+        ["library-entries"],
+        ["library-keys"],
+        ["library-facets"],
+        ["collection-papers"],
+        ["paper-memberships"],
+      ]) {
+        void queryClient.invalidateQueries({ queryKey });
       }
     },
-    onError: (err: unknown) => {
-      toast(apiStatus(err) === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (groupKey: string) => library.deleteEntry(groupKey),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["library-entries"] });
-      void queryClient.invalidateQueries({ queryKey: ["library-keys"] });
-    },
-    onError: (err: unknown) => {
+    onError: (err: unknown, { groupKey }) => {
+      const collections = blockingCollections(err);
+      if (collections.length > 0) {
+        setBlockedDelete({ groupKey, collections });
+        return;
+      }
+      setBlockedDelete(null);
       const fallback = apiStatus(err) === 409 ? t("library.delete409") : t("library.deleteFailed");
-      toast(apiErrorMessage(err, fallback), "error");
+      toast(apiErrorText(err, t, fallback), "error");
     },
   });
 
@@ -167,14 +165,10 @@ export default function LibraryPage() {
           <Link to="/graph/library" className="btn btn-secondary">
             <GitFork size={14} /> {t("library.viewGraph")}
           </Link>
-          <button
-            className="btn btn-secondary"
-            onClick={() => zoteroSyncMutation.mutate()}
-            disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
-            title={zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")}
-          >
-            <BookUp size={14} /> {t("zotero.sync")}
-          </button>
+          <Link to="/settings#your-data" className="btn btn-secondary">
+            <Download size={14} aria-hidden="true" /> {t("library.exportData")}
+          </Link>
+          <ZoteroSyncButton />
         </div>
       </header>
 
@@ -237,8 +231,14 @@ export default function LibraryPage() {
           <LibraryEntry
             key={item.paper_group_key}
             item={item}
-            onOpenDetails={setDetailsKey}
+            onOpenDetails={(key) => setDetails({ key, unresolved: !item.resolved || !item.primary_version })}
             onRequestDelete={() => setPendingDelete(item.paper_group_key)}
+            onResolved={(result) => {
+              // A detailed or re-keyed entry replaces this card, focused control included.
+              if (result.status === "resolved" || result.canonical_key !== result.previous_key) {
+                headingRef.current?.focus();
+              }
+            }}
           />
         ))}
       </div>
@@ -261,8 +261,9 @@ export default function LibraryPage() {
       )}
 
       <PaperDetailsPanel
-        paperKey={detailsKey}
-        onClose={() => setDetailsKey(null)}
+        paperKey={details?.key ?? null}
+        onClose={() => setDetails(null)}
+        resolveOnOpen={!!details?.unresolved}
         fallbackFocus={() => headingRef.current}
       />
 
@@ -272,13 +273,85 @@ export default function LibraryPage() {
           message={t("library.deleteMessage")}
           confirmLabel={t("common.delete")}
           onConfirm={() => {
-            deleteMutation.mutate(pendingDelete);
+            deleteMutation.mutate({ groupKey: pendingDelete, detach: false });
             setPendingDelete(null);
           }}
           onCancel={() => setPendingDelete(null)}
         />
       )}
+
+      {blockedDelete && (
+        <DeleteBlockedDialog
+          collections={blockedDelete.collections}
+          pending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate({ groupKey: blockedDelete.groupKey, detach: true })}
+          onCancel={() => setBlockedDelete(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** The collections a 409 `entry_in_collections` names; empty for any other error. */
+function blockingCollections(err: unknown): BlockingCollection[] {
+  if (apiErrorCode(err) !== "entry_in_collections") return [];
+  const listed = apiErrorDetail(err)?.collections;
+  if (!Array.isArray(listed)) return [];
+  return listed.filter(
+    (c): c is BlockingCollection =>
+      typeof c === "object" &&
+      c !== null &&
+      typeof c.id === "string" &&
+      typeof c.name === "string" &&
+      typeof c.is_owner === "boolean",
+  );
+}
+
+/**
+ * Deleting a paper that is still in collections: name them (as links), warn
+ * when some belong to other people, and offer to remove it from them too.
+ */
+function DeleteBlockedDialog({
+  collections,
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  collections: BlockingCollection[];
+  pending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const shared = collections.some((collection) => collection.is_owner === false);
+  return (
+    <Modal open onClose={onCancel} title={t("library.deleteBlockedTitle")}>
+      <p className="confirm-message">{t("library.deleteBlockedBy", { count: collections.length })}</p>
+      <ul className="library-blocking">
+        {collections.map((collection) => (
+          <li key={collection.id}>
+            <Link to={`/collections/${collection.id}`}>{collection.name}</Link>
+            {collection.is_owner === false && (
+              <span className="badge badge--warning">{t("library.notOwned")}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {shared && (
+        <p className="library-blocking-warning">
+          <AlertTriangle size={14} aria-hidden="true" />
+          {t("library.deleteNotOwnedWarning")}
+        </p>
+      )}
+      <div className="confirm-actions">
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={pending}>
+          {t("library.deleteAndDetach", { count: collections.length })}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -286,27 +359,37 @@ function LibraryEntry({
   item,
   onOpenDetails,
   onRequestDelete,
+  onResolved,
 }: {
   item: LibraryEntryListItem;
   onOpenDetails: (key: string) => void;
   onRequestDelete: () => void;
+  onResolved: (result: LibraryResolveResult) => void;
 }) {
   const { t } = useTranslation();
   const primary = item.primary_version;
 
-  // Entries without a metadata snapshot degrade to a minimal card that
-  // still opens the details panel (which can hydrate live).
+  // Entries without details offer recovery (and deletion) instead of the graph.
   if (!item.resolved || !primary) {
     return (
-      <div className="card library-entry-fallback">
-        <button
-          type="button"
-          className="paper-title paper-title-btn"
-          onClick={() => onOpenDetails(item.primary_canonical_key)}
-        >
-          {t("paper.detailsTitle")}
-        </button>
-      </div>
+      <UnresolvedPaperCard
+        canonicalKey={item.primary_canonical_key}
+        addedAt={item.created_at}
+        canEdit
+        onOpenDetails={() => onOpenDetails(item.primary_canonical_key)}
+        onResolved={onResolved}
+        actions={(describedBy) => (
+          <button
+            type="button"
+            className="btn btn-secondary library-delete"
+            onClick={onRequestDelete}
+            aria-describedby={describedBy}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            {t("common.delete")}
+          </button>
+        )}
+      />
     );
   }
 
@@ -337,8 +420,9 @@ function LibraryEntry({
             className="btn-ghost library-delete"
             onClick={onRequestDelete}
             title={t("library.deleteFromLibrary")}
+            aria-label={t("library.deleteFromLibrary")}
           >
-            <Trash2 size={14} />
+            <Trash2 size={14} aria-hidden="true" />
           </button>
         </>
       }

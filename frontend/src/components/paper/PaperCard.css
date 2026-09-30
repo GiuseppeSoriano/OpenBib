@@ -93,4 +93,66 @@
     font-size: 0.78rem;
     padding: 0.3rem 0.7rem;
   }
+
+  /* Long unbroken titles (URLs, formulas) must not widen the page. */
+  .paper-title {
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Unresolved papers (details unavailable) ─────────────── */
+
+  .paper-card--unresolved {
+    border-style: dashed;
+  }
+
+  .paper-identifier {
+    font-size: 0.84rem;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+
+  .paper-identifier-link {
+    display: inline;
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .paper-identifier-link svg {
+    display: inline;
+    margin-left: 3px;
+    vertical-align: -1px;
+  }
+
+  .paper-unresolved-status {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+
+  .paper-field-error {
+    font-size: 0.8rem;
+    color: var(--color-danger);
+  }
+
+  .paper-fix-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+  }
+  .paper-fix-form label {
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .paper-fix-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+  .paper-fix-row .input {
+    flex: 1 1 14rem;
+    min-width: 0;
+  }
+  .paper-fix-form .input[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
 }

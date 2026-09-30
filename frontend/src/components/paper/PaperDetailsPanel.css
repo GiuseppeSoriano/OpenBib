@@ -156,6 +156,19 @@
     font-size: 0.88rem;
   }
 
+  .pd-error-state {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .pd-error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
   /* Tag editor */
   .tag-editor {
     display: flex;

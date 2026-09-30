@@ -27,6 +27,8 @@
   }
 
   .cd-title-row h1 {
+    overflow-wrap: anywhere;
+    min-width: 0;
     font-family: var(--font-serif);
     font-size: 1.35rem;
     font-weight: 650;
@@ -34,6 +36,7 @@
   }
 
   .cd-description {
+    overflow-wrap: anywhere;
     font-size: 0.9rem;
     color: var(--color-text-secondary);
     max-width: 640px;
@@ -62,16 +65,6 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--space-sm);
-  }
-
-  /* ── Add paper ──────────────────────────────────────────── */
-
-  .cd-add-form {
-    display: flex;
-    gap: var(--space-sm);
-  }
-  .cd-add-form .input {
-    flex: 1;
   }
 
   /* ── Papers ─────────────────────────────────────────────── */
@@ -103,13 +96,6 @@
     flex-wrap: wrap;
     gap: var(--space-xs);
     margin-top: var(--space-xs);
-  }
-
-  .cd-paper-fallback {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md) var(--space-lg);
   }
 
   /* ── Collection notes ───────────────────────────────────── */
@@ -154,11 +140,5 @@
     margin-top: var(--space-xs);
     font-size: 0.74rem;
     color: var(--color-text-secondary);
-  }
-
-  @media (max-width: 639px) {
-    .cd-add-form {
-      flex-direction: column;
-    }
   }
 }

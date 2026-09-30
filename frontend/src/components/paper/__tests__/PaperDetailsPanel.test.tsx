@@ -4,6 +4,7 @@ import { act, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import i18n from "@/i18n";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
+import { library, papers } from "@/lib/api";
 import { renderWithProviders } from "@/test/utils";
 import type { PaperDetail } from "@/types";
 
@@ -71,6 +72,16 @@ vi.mock("@/lib/api", () => ({
     ensureEntry: vi.fn(),
     repinPrimary: (...args: unknown[]) => repinPrimary(...(args as [])),
     removeVersion: (...args: unknown[]) => removeVersion(...(args as [])),
+    resolve: vi.fn(() =>
+      Promise.resolve({
+        status: "resolved",
+        previous_key: "10.1/PANEL",
+        canonical_key: "doi:10.1/panel",
+        paper_group_key: "group:panel",
+        paper: null,
+        moved: {},
+      }),
+    ),
   },
   notes: { listForPaperGroup: vi.fn(() => Promise.resolve([])) },
   graph: {},
@@ -225,13 +236,13 @@ describe("PaperDetailsPanel — managed library versions", () => {
     removeVersion.mockClear();
   }
 
-  it("shows humanized managed pins with a primary badge", async () => {
+  it("shows humanized saved versions with a default-version badge", async () => {
     setupLibraryPaper();
     renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
 
     const section = await screen.findByTestId("managed-versions");
-    expect(section).toHaveTextContent("Pinned versions");
-    expect(section).toHaveTextContent("Primary");
+    expect(section).toHaveTextContent("Saved versions");
+    expect(section).toHaveTextContent("Default version");
     // Pin without matching metadata degrades to the provider label — never a raw key.
     expect(section).toHaveTextContent("arXiv");
     expect(section.textContent).not.toMatch(/hash:|doi:/);
@@ -245,7 +256,7 @@ describe("PaperDetailsPanel — managed library versions", () => {
     expect(
       within(section).getByRole("button", { name: "Make this version the default shown" }),
     ).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Remove this version pin" })).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Remove this saved version" })).toBeInTheDocument();
   });
 
   it("repins and removes versions through the panel", async () => {
@@ -259,7 +270,7 @@ describe("PaperDetailsPanel — managed library versions", () => {
       expect(repinPrimary).toHaveBeenCalledWith("group:panel", "hash:preprint1"),
     );
 
-    const [removeBtn] = within(section).getAllByTitle("Remove this version pin");
+    const [removeBtn] = within(section).getAllByTitle("Remove this saved version");
     fireEvent.click(removeBtn!);
     await waitFor(() =>
       expect(removeVersion).toHaveBeenCalledWith("group:panel", "hash:preprint1"),
@@ -402,5 +413,81 @@ describe("PaperDetailsPanel — provider text, links and versions", () => {
       "Preprint · Crossref · 2 of 2Crossref",
     ]);
     expect(screen.getByTestId("paper-details").textContent).not.toMatch(/10\.20944|doi:/);
+  });
+});
+
+describe("PaperDetailsPanel — load errors and re-resolution", () => {
+  afterEach(() => {
+    testAuth.authenticated = false;
+    vi.mocked(papers.getDetail).mockImplementation(() => Promise.resolve(detailState.current));
+    vi.mocked(library.resolve).mockClear();
+  });
+
+  it("explains a missing paper, links its DOI and retries", async () => {
+    const user = userEvent.setup();
+    vi.mocked(papers.getDetail).mockClear();
+    vi.mocked(papers.getDetail).mockRejectedValueOnce({ response: { status: 404, data: { detail: "Paper not found" } } });
+    renderWithProviders(<PaperDetailsPanel paperKey="10.1109/TNN.2008.2005605" onClose={() => {}} />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("No paper was found for this identifier.");
+    expect(within(alert).getByRole("link", { name: /Open the DOI link/ })).toHaveAttribute(
+      "href",
+      "https://doi.org/10.1109/tnn.2008.2005605",
+    );
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Panel Paper")).toBeInTheDocument();
+    expect(papers.getDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts down a provider outage's Retry-After", async () => {
+    vi.mocked(papers.getDetail).mockRejectedValueOnce({
+      response: {
+        status: 503,
+        headers: { "retry-after": "30" },
+        data: { detail: { code: "provider_rate_limited", message: "busy" } },
+      },
+    });
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Semantic Scholar is receiving too many requests. Try again in 30 s.",
+    );
+    expect(screen.queryByRole("link", { name: /Open the DOI link/ })).toBeNull();
+  });
+
+  it("shows a generic explanation for other failures", async () => {
+    vi.mocked(papers.getDetail).mockRejectedValueOnce({ response: { status: 400 } });
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={() => {}} />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn’t load the paper details.");
+    expect(within(alert).getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
+
+  it("re-resolves an unresolved paper once for a signed-in user", async () => {
+    testAuth.authenticated = true;
+    renderWithProviders(<PaperDetailsPanel paperKey="10.1/PANEL" onClose={() => {}} resolveOnOpen />);
+    await screen.findByText("Panel Paper");
+
+    await waitFor(() => expect(library.resolve).toHaveBeenCalledWith({ paper_canonical_key: "10.1/PANEL" }));
+    // The lists it invalidates re-render the panel; it still resolves only once.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(library.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("never re-resolves for anonymous visitors or without resolveOnOpen", async () => {
+    const { unmount } = renderWithProviders(
+      <PaperDetailsPanel paperKey="10.1/PANEL" onClose={() => {}} resolveOnOpen />,
+    );
+    await screen.findByText("Panel Paper");
+    unmount();
+
+    testAuth.authenticated = true;
+    renderWithProviders(<PaperDetailsPanel paperKey="10.1/PANEL" onClose={() => {}} />);
+    await screen.findByText("Panel Paper");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(library.resolve).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryResolveRequest, LibraryResolveResult, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -91,7 +91,8 @@ export const library = {
   async getEntry(groupKey: string) { return (await api.get<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`)).data; },
   async ensureEntry(body: { paper_group_key: string; paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryEntry>("/library/entries", body)).data; },
   async repinPrimary(groupKey: string, primaryCanonicalKey: string) { return (await api.patch<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`, { primary_canonical_key: primaryCanonicalKey })).data; },
-  async deleteEntry(groupKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`); },
+  async deleteEntry(groupKey: string, options: { detach?: boolean } = {}) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`, options.detach ? { params: { detach: true } } : undefined); },
+  async resolve(body: LibraryResolveRequest) { return (await api.post<LibraryResolveResult>("/library/resolve", body)).data; },
   async addVersion(groupKey: string, body: { paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryVersionPin>(`/library/entries/${encodeURIComponent(groupKey)}/versions`, body)).data; },
   async removeVersion(groupKey: string, canonicalKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`); },
 };

@@ -63,3 +63,34 @@ describe("AddToCollectionMenu", () => {
     expect(screen.getByRole("menuitem", { name: /Deep Learning/ })).toBeEnabled();
   });
 });
+
+describe("AddToCollectionMenu — outcomes", () => {
+  async function addTo(name: RegExp) {
+    renderWithProviders(<AddToCollectionMenu canonicalKey="doi:10.1/add" savedInCollections={[]} />);
+    fireEvent.click(screen.getByTestId("add-to-collection"));
+    fireEvent.click(await screen.findByRole("menuitem", { name }));
+  }
+
+  it("says when details are still pending", async () => {
+    post.mockResolvedValueOnce({ data: { resolved: false } } as never);
+    await addTo(/Deep Learning/);
+    expect(await screen.findByText(/Added\. Details aren’t available yet/)).toBeInTheDocument();
+  });
+
+  it("marks a collection that already holds the paper", async () => {
+    post.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: { code: "already_in_collection", message: "dup" } } },
+    } as never);
+    await addTo(/Deep Learning/);
+    expect(await screen.findByText("This paper is already in the collection.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: /Deep Learning/ })).toBeDisabled());
+  });
+
+  it("explains a coded rejection", async () => {
+    post.mockRejectedValueOnce({
+      response: { status: 422, data: { detail: { code: "unknown_paper_key", message: "unknown" } } },
+    } as never);
+    await addTo(/Optimization/);
+    expect(await screen.findByText("This paper reference isn’t known. Add it by DOI instead.")).toBeInTheDocument();
+  });
+});

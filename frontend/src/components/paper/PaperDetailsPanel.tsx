@@ -1,15 +1,18 @@
-import { useId, useMemo } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, FileDown, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
+import { BookMarked, FileDown, GitFork, LogIn, Pin, RotateCcw, Trash2 } from "lucide-react";
 import api, { library, papers } from "@/lib/api";
 import { abstractParagraphs } from "@/lib/abstract";
 import { apiStatus } from "@/lib/apiError";
+import { doiUrl, parseIdentifier } from "@/lib/identifiers";
+import { useApiErrorText } from "@/hooks/useApiErrorText";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import Skeleton from "@/components/ui/Skeleton";
+import AnnouncedText from "@/components/ui/AnnouncedText";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
@@ -30,7 +33,25 @@ interface PaperDetailsPanelProps {
   onClose: () => void;
   /** Focus target on close when the opener no longer exists. */
   fallbackFocus?: () => HTMLElement | null | undefined;
+  /**
+   * The stored paper has no details yet: once they load, re-resolve it so
+   * the lists pick them up. Pass it only when the signed-in user can edit
+   * the row or has it in their Library, never for read-link visitors.
+   */
+  resolveOnOpen?: boolean;
 }
+
+// Answers a retry would not change: missing papers, bad keys, provider waits.
+const NO_RETRY_STATUSES = new Set([400, 403, 404, 422, 429, 503]);
+
+// Query families that list papers; a re-resolve can re-key rows in any of them.
+const LIST_QUERIES = [
+  ["collection-papers"],
+  ["library-entries"],
+  ["library-facets"],
+  ["library-keys"],
+  ["paper-memberships"],
+];
 
 /** Human label for a pinned version — metadata match first, provider fallback. */
 function pinLabel(pin: LibraryVersionPin, labels: Map<string, VersionLabel>): VersionLabel {
@@ -61,6 +82,7 @@ export default function PaperDetailsPanel({
   paperKey,
   onClose,
   fallbackFocus,
+  resolveOnOpen = false,
 }: PaperDetailsPanelProps) {
   const { t, i18n } = useTranslation();
   const titleId = useId();
@@ -68,11 +90,49 @@ export default function PaperDetailsPanel({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: paper, isLoading, isError } = useQuery({
+  const {
+    data: paper,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
     queryKey: ["paper-detail", paperKey],
     queryFn: () => papers.getDetail(paperKey!),
     enabled: !!paperKey,
+    retry: (failures, err) => failures < 1 && !NO_RETRY_STATUSES.has(apiStatus(err) ?? 0),
   });
+
+  // Distinct explanations: no such paper, a provider wait (counted down), or anything else.
+  const errorStatus = apiStatus(error);
+  const notFound = errorStatus === 404 || errorStatus === 422;
+  const waitable = errorStatus === 503 || errorStatus === 429 || (!!error && errorStatus === null);
+  const {
+    text: liveErrorText,
+    announcement,
+    waiting,
+  } = useApiErrorText(waitable ? error : null, t("paper.loadFailedHint"));
+  const keyDoi = paperKey ? (parseIdentifier(paperKey)?.doi ?? null) : null;
+  let errorText = t("paper.loadFailedHint");
+  if (notFound) errorText = t("paper.notFoundHint");
+  else if (waitable) errorText = liveErrorText;
+
+  // Re-resolve an unresolved row once per opened key, after its details load.
+  const resolvedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resolveOnOpen || !user || !paper || !paperKey || resolvedKey.current === paperKey) return;
+    resolvedKey.current = paperKey;
+    library
+      .resolve({ paper_canonical_key: paperKey })
+      .then((result) => {
+        if (result.status === "resolved" || result.canonical_key !== result.previous_key) {
+          for (const queryKey of LIST_QUERIES) void queryClient.invalidateQueries({ queryKey });
+        }
+      })
+      // Best effort: the row keeps its Retry and Fix actions.
+      .catch(() => {});
+  }, [resolveOnOpen, user, paper, paperKey, queryClient]);
 
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
@@ -160,7 +220,27 @@ export default function PaperDetailsPanel({
       fallbackFocus={fallbackFocus}
     >
       {isLoading && <Skeleton lines={8} />}
-      {isError && <p className="pd-error">{t("paper.notFound")}</p>}
+      {isError && !paper && (
+        <div className="pd-error-state" role="alert">
+          <p className="pd-error">
+            <AnnouncedText text={errorText} announcement={announcement} />
+          </p>
+          <div className="pd-error-actions">
+            {notFound && keyDoi && (
+              <ExternalLinkChip href={doiUrl(keyDoi)}>{t("paper.openDoi")}</ExternalLinkChip>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void refetch()}
+              disabled={isFetching || waiting}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              {isFetching ? t("common.retrying") : t("common.retry")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {paper && (
         <div className="pd" data-testid="paper-details">

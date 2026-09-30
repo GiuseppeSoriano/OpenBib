@@ -27,6 +27,7 @@ describe("account access before legal acceptance", () => {
     fireEvent.change(password, { target: { value: "a sufficiently long password" } });
     fireEvent.click(screen.getByRole("button", { name: "Export my data" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/users/me/export", { password: "a sufficiently long password" }, { responseType: "blob" }));
+    fireEvent.change(screen.getByLabelText("Password to delete your account"), { target: { value: "a sufficiently long password" } });
     fireEvent.change(screen.getByLabelText("Type DELETE to confirm"), { target: { value: "DELETE" } });
     fireEvent.click(screen.getByRole("button", { name: "Delete account" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/users/me/delete", { password: "a sufficiently long password", confirmation: "DELETE" }));

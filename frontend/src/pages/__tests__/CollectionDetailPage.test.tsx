@@ -2,10 +2,12 @@ import api, { refreshAccessToken } from "@/lib/api";
 import { focusManager } from "@tanstack/react-query";
 import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Routes, Route } from "react-router-dom";
 import CollectionDetailPage from "@/pages/CollectionDetailPage";
 import { renderWithProviders } from "@/test/utils";
+import userEvent from "@testing-library/user-event";
+import { library } from "@/lib/api";
 
 const collection = {
   id: "c1",
@@ -52,6 +54,9 @@ const hydratedRow = {
   },
 };
 
+// Rows the papers endpoint answers with; tests swap it and afterEach restores it.
+const paperRows: { current: unknown[] } = { current: [hydratedRow] };
+
 vi.mock("@/lib/api", () => {
   const get = vi.fn((url: string) => {
     if (url === "/users/me")
@@ -59,7 +64,7 @@ vi.mock("@/lib/api", () => {
         data: { id: "u1", email: "me@example.com", display_name: "Me", created_at: "2026-01-01" },
       });
     if (url === "/collections/c1") return Promise.resolve({ data: collection });
-    if (url === "/collections/c1/papers") return Promise.resolve({ data: [hydratedRow] });
+    if (url === "/collections/c1/papers") return Promise.resolve({ data: paperRows.current });
     return Promise.resolve({ data: [] });
   });
   return {
@@ -71,7 +76,7 @@ vi.mock("@/lib/api", () => {
       getStates: vi.fn(() => Promise.resolve([])),
       getDetail: vi.fn(() => Promise.resolve({ ...hydratedRow.paper, versions: [] })),
     },
-    library: { listKeys: vi.fn(() => Promise.resolve([])) },
+    library: { listKeys: vi.fn(() => Promise.resolve([])), resolve: vi.fn() },
     notes: { listForPaperGroup: vi.fn(() => Promise.resolve([])) },
     graph: {},
     zotero: {
@@ -120,7 +125,7 @@ describe("CollectionDetailPage", () => {
 });
 
 
-afterEach(() => { collection.revision = 1; collection.can_edit = true; collection.can_manage_access = true; collection.is_owner = true; focusManager.setFocused(undefined); });
+afterEach(() => { collection.revision = 1; collection.can_edit = true; collection.can_manage_access = true; collection.is_owner = true; paperRows.current = [hydratedRow]; vi.mocked(api.post).mockReset(); focusManager.setFocused(undefined); });
 
 it("offers no collection edits to authenticated readers", async () => {
   collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
@@ -185,4 +190,316 @@ it("waits for anonymous session hydration before starting protected reads", asyn
   expect(vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1")).toHaveLength(before);
   await act(async () => { rejectRefresh(new Error("No session")); });
   expect(await screen.findByText("Attention Is All You Need")).toBeInTheDocument();
+});
+
+function coded(status: number, code: string, headers: Record<string, string> = {}) {
+  return { response: { status, headers, data: { detail: { code, message: code } } } };
+}
+
+describe("CollectionDetailPage — add a paper", () => {
+  it("labels the field and never mentions canonical keys", async () => {
+    renderPage();
+    const input = await screen.findByLabelText("DOI to add");
+    expect(input).toHaveAttribute(
+      "placeholder",
+      "Paste a DOI or DOI link, e.g. 10.1038/nature14539 (arXiv IDs also work)",
+    );
+    expect(input.closest("form")?.textContent).not.toMatch(/canonical/i);
+  });
+
+  it("rejects input that is not an identifier without a request", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const input = await screen.findByLabelText("DOI to add");
+    await user.type(input, "not-a-doi");
+    await user.click(screen.getByRole("button", { name: "Add paper" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Enter a DOI (for example 10.1038/nature14539) or a DOI link.");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input.getAttribute("aria-describedby")).toContain(alert.id);
+    expect(api.post).not.toHaveBeenCalled();
+
+    await user.type(input, "x");
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("adds a DOI link and confirms with the paper's title", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockResolvedValue({ data: { ...hydratedRow, resolved: true } });
+    renderPage();
+    await user.type(await screen.findByLabelText("DOI to add"), " https://doi.org/10.1/Attention ");
+    await user.click(screen.getByRole("button", { name: "Add paper" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/collections/c1/papers", {
+        paper_canonical_key: "https://doi.org/10.1/Attention",
+      }),
+    );
+    expect(await screen.findByText("Added “Attention Is All You Need”.")).toBeInTheDocument();
+    expect(screen.getByLabelText("DOI to add")).toHaveValue("");
+  });
+
+  it("says when the paper was added without details", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockResolvedValue({ data: { ...hydratedRow, paper: null, resolved: false } });
+    renderPage();
+    await user.type(await screen.findByLabelText("DOI to add"), "10.1/pending");
+    await user.click(screen.getByRole("button", { name: "Add paper" }));
+    expect(await screen.findByText(/Added\. Details aren’t available yet/)).toBeInTheDocument();
+  });
+
+  it.each([
+    [coded(409, "already_in_collection"), "This paper is already in the collection."],
+    [coded(422, "doi_not_found"), "No paper is registered under this DOI."],
+    [coded(422, "identifier_not_found"), "Semantic Scholar has no paper with this identifier."],
+    [coded(503, "provider_rate_limited", { "retry-after": "12" }), "Semantic Scholar is receiving too many requests. Try again in 12 s."],
+  ])("explains a coded rejection inline (%#)", async (error, message) => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockRejectedValue(error);
+    renderPage();
+    const input = await screen.findByLabelText("DOI to add");
+    await user.type(input, "10.1/x");
+    await user.click(screen.getByRole("button", { name: "Add paper" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveValue("10.1/x");
+  });
+
+  it("re-checks access after a 403 instead of showing a field error", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockRejectedValue({ response: { status: 403 } });
+    renderPage();
+    await user.type(await screen.findByLabelText("DOI to add"), "10.1/x");
+    const before = vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1").length;
+    await user.click(screen.getByRole("button", { name: "Add paper" }));
+
+    expect(await screen.findByText("Collection unavailable or access no longer granted.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1").length).toBeGreaterThan(before),
+    );
+    expect(screen.getByLabelText("DOI to add")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("shows readers no add, import or remove controls", async () => {
+    collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
+    renderPage();
+    await screen.findByText("Attention Is All You Need");
+    expect(screen.queryByLabelText("DOI to add")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Import DOIs" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove from collection/ })).toBeNull();
+  });
+});
+
+function importResult(lines: [string, string, (string | null)?][]) {
+  const results = lines.map(([input, status, title], index) => ({
+    line: index + 1, input, status, canonical_key: null, title: title ?? null,
+  }));
+  const count = (status: string) => results.filter((r) => r.status === status).length;
+  return {
+    data: {
+      added: count("added"), duplicate: count("duplicate"), invalid: count("invalid"),
+      not_found: count("not_found"), unresolved: count("unresolved"), total: results.length,
+      skipped: count("duplicate"), results,
+    },
+  };
+}
+
+async function openImport(text: string) {
+  const user = userEvent.setup();
+  renderPage();
+  await user.click(await screen.findByRole("button", { name: "Import DOIs" }));
+  const dialog = await screen.findByRole("dialog", { name: "Import DOIs" });
+  const textarea = within(dialog).getByLabelText("DOIs, DOI links or arXiv IDs, one per line");
+  fireEvent.change(textarea, { target: { value: text } });
+  return { user, dialog };
+}
+
+describe("CollectionDetailPage — import", () => {
+  it("summarizes the paste live and blocks an import with nothing valid", async () => {
+    const { dialog } = await openImport("not-a-doi");
+    expect(within(dialog).getByText(/0 valid · 1 invalid/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Line 1: “not-a-doi” isn’t a DOI or arXiv ID")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Import 0 DOIs" })).toBeDisabled();
+  });
+
+  it("counts distinct valid identifiers and reports every line until Done", async () => {
+    vi.mocked(api.post).mockResolvedValue(
+      importResult([["10.1/a", "added", "Paper A"], ["arxiv:2306.00001", "not_found"]]),
+    );
+    const { user, dialog } = await openImport("10.1/a\nnot-a-doi\nhttps://doi.org/10.1/A\narxiv:2306.00001");
+    expect(within(dialog).getByText(/3 valid · 1 invalid/)).toHaveTextContent("1 repeated line will be imported once.");
+
+    await user.click(within(dialog).getByRole("button", { name: "Import 2 DOIs" }));
+
+    expect(api.post).toHaveBeenCalledWith("/collections/c1/import/dois", { dois: ["10.1/a", "arxiv:2306.00001"] });
+    const results = await within(dialog).findByRole("list");
+    const items = within(results).getAllByRole("listitem").map((li) => li.textContent);
+    expect(items).toEqual([
+      "Line 110.1/aAddedPaper A",
+      "Line 2not-a-doiNot a valid identifier",
+      "Line 3https://doi.org/10.1/ARepeated — see line 1",
+      "Line 4arxiv:2306.00001Not found",
+    ]);
+    expect(await screen.findByText("1 added, 0 pending, 0 already present, 2 not imported")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Import DOIs" })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("sends chunks of 25 and retries only the lines the provider could not answer", async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `10.1/p${i}`);
+    vi.mocked(api.post).mockImplementation(async (_url, body) => {
+      const dois = (body as { dois: string[] }).dois;
+      return importResult(dois.map((doi) => [doi, doi === "10.1/p27" ? "unavailable" : "added"]));
+    });
+    const { user, dialog } = await openImport(lines.join("\n"));
+    await user.click(within(dialog).getByRole("button", { name: "Import 30 DOIs" }));
+
+    await within(dialog).findByRole("button", { name: "Retry 1 line" });
+    const calls = vi.mocked(api.post).mock.calls.map(([, body]) => (body as { dois: string[] }).dois.length);
+    expect(calls).toEqual([25, 5]);
+    expect(within(dialog).getByText("Semantic Scholar unavailable — not added")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Retry 1 line" }));
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith("/collections/c1/import/dois", { dois: ["10.1/p27"] }));
+  });
+
+  it("stops on lost access and keeps the lines already imported", async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `10.1/q${i}`);
+    vi.mocked(api.post)
+      .mockImplementationOnce(async (_url, body) =>
+        importResult((body as { dois: string[] }).dois.map((doi) => [doi, "added"])),
+      )
+      .mockRejectedValueOnce({ response: { status: 403 } });
+    const { user, dialog } = await openImport(lines.join("\n"));
+    await user.click(within(dialog).getByRole("button", { name: "Import 30 DOIs" }));
+
+    expect(await within(dialog).findByText("Import stopped: you can no longer edit this collection.")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("Added")).toHaveLength(25);
+    expect(within(dialog).getAllByText("Not sent — try again")).toHaveLength(5);
+    expect(within(dialog).queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(api.post).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the report open when the re-check finds the collection gone", async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `10.1/r${i}`);
+    const previous = vi.mocked(api.get).getMockImplementation()!;
+    vi.mocked(api.post)
+      .mockImplementationOnce(async (_url, body) =>
+        importResult((body as { dois: string[] }).dois.map((doi) => [doi, "added"])),
+      )
+      .mockImplementationOnce(async () => {
+        // The editor was removed mid-import: the page's re-check now gets a 404.
+        vi.mocked(api.get).mockImplementation(async (url, config) => {
+          if (url?.startsWith("/collections/c1")) throw { response: { status: 404 } };
+          return previous(url, config);
+        });
+        throw { response: { status: 403 } };
+      });
+    try {
+      const { user, dialog } = await openImport(lines.join("\n"));
+      await user.click(within(dialog).getByRole("button", { name: "Import 30 DOIs" }));
+
+      await waitFor(() => expect(document.querySelector(".cd-notfound")).not.toBeNull());
+      const report = screen.getByRole("dialog", { name: "Import DOIs" });
+      expect(within(report).getByText("Import stopped: you can no longer edit this collection.")).toBeInTheDocument();
+      expect(within(report).getAllByText("Added")).toHaveLength(25);
+      expect(within(report).getAllByText("Not sent — try again")).toHaveLength(5);
+
+      await user.click(within(report).getByRole("button", { name: "Done" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    } finally {
+      vi.mocked(api.get).mockImplementation(previous);
+    }
+  });
+});
+
+const pendingRow = {
+  paper_canonical_key: "10.1109/TNN.2008.2005605",
+  paper_group_key: "group:0123456789abcdef",
+  position: 1,
+  added_at: "2026-02-02T10:00:00Z",
+  paper: null,
+  resolved: false,
+};
+
+describe("CollectionDetailPage — unresolved papers", () => {
+  it("offers editors Retry, Fix and Remove instead of the graph", async () => {
+    const user = userEvent.setup();
+    paperRows.current = [pendingRow];
+    vi.mocked(library.resolve).mockResolvedValue({
+      status: "unavailable", previous_key: pendingRow.paper_canonical_key,
+      canonical_key: pendingRow.paper_canonical_key, paper_group_key: null, paper: null, moved: {},
+    });
+    renderPage();
+
+    const card = (await screen.findByRole("button", { name: "Details unavailable" })).closest("article")!;
+    expect(within(card).getByRole("link", { name: /10\.1109\/tnn\.2008\.2005605/ })).toHaveAttribute(
+      "href",
+      "https://doi.org/10.1109/tnn.2008.2005605",
+    );
+    expect(within(card).queryByRole("link", { name: /Explore graph/ })).toBeNull();
+    expect(within(card).queryByTestId("reading-state-select")).toBeNull();
+    expect(within(card).getByRole("button", { name: "Fix identifier" })).toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    expect(library.resolve).toHaveBeenCalledWith({ paper_canonical_key: pendingRow.paper_canonical_key, replacement: null });
+
+    await user.click(within(card).getByRole("button", { name: /Remove/ }));
+    expect(await screen.findByRole("dialog", { name: "Remove paper" })).toHaveTextContent("Remove \"this paper\"");
+  });
+
+  it("moves focus to the heading when a retry replaces the row", async () => {
+    const user = userEvent.setup();
+    paperRows.current = [pendingRow];
+    vi.mocked(library.resolve).mockResolvedValue({
+      status: "resolved", previous_key: pendingRow.paper_canonical_key,
+      canonical_key: "doi:10.1109/tnn.2008.2005605", paper_group_key: "group:tnn", paper: null, moved: {},
+    });
+    renderPage();
+
+    const card = (await screen.findByRole("button", { name: "Details unavailable" })).closest("article")!;
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Deep Learning Classics" })).toHaveFocus());
+  });
+
+  it("shows readers the identifier without recovery actions", async () => {
+    collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
+    paperRows.current = [pendingRow];
+    renderPage();
+
+    const card = (await screen.findByRole("button", { name: "Details unavailable" })).closest("article")!;
+    expect(within(card).getByText(/^DOI/)).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Fix identifier" })).toBeNull();
+    expect(within(card).queryByRole("button", { name: /Remove/ })).toBeNull();
+  });
+
+  it("re-resolves an opened unresolved row for editors only", async () => {
+    const user = userEvent.setup();
+    paperRows.current = [pendingRow];
+    vi.mocked(library.resolve).mockClear();
+    vi.mocked(library.resolve).mockResolvedValue({
+      status: "resolved", previous_key: pendingRow.paper_canonical_key,
+      canonical_key: "doi:10.1/attention", paper_group_key: "group:attention", paper: null, moved: {},
+    });
+    const { unmount } = renderPage();
+    await user.click(await screen.findByRole("button", { name: "Details unavailable" }));
+    await screen.findByTestId("paper-details");
+    await waitFor(() =>
+      expect(library.resolve).toHaveBeenCalledWith({ paper_canonical_key: pendingRow.paper_canonical_key }),
+    );
+    unmount();
+
+    vi.mocked(library.resolve).mockClear();
+    collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
+    renderPage(false, "#share=" + "a".repeat(43));
+    await user.click(await screen.findByRole("button", { name: "Details unavailable" }));
+    await screen.findByTestId("paper-details");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(library.resolve).not.toHaveBeenCalled();
+  });
 });

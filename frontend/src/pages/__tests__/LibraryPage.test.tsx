@@ -1,4 +1,4 @@
-import { mockRefresh } from "@/test/auth-mock";
+import { mockRefresh, testAuth } from "@/test/auth-mock";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -71,7 +71,12 @@ vi.mock("@/lib/api", () => ({
   default: {
     get: vi.fn((url: string) =>
       Promise.resolve({
-        data: url === "/collections" ? [{ id: COLLECTION_ID, name: "Reading group" }] : [],
+        data:
+          url === "/users/me"
+            ? { id: "u1", email: "me@example.com", display_name: "Me" }
+            : url === "/collections"
+              ? [{ id: COLLECTION_ID, name: "Reading group" }]
+              : [],
       }),
     ),
     post: vi.fn(),
@@ -94,6 +99,7 @@ vi.mock("@/lib/api", () => ({
     listKeys: vi.fn(() => Promise.resolve([])),
     getEntry: vi.fn(),
     deleteEntry: vi.fn(),
+    resolve: vi.fn(),
   },
   papers: {
     getDetail: vi.fn(() => Promise.resolve({ ...entries[0]!.primary_version, versions: [] })),
@@ -143,7 +149,7 @@ describe("LibraryPage", () => {
     expect(screen.getByText("Second Library Paper")).toBeInTheDocument();
     // The meta line may split the citation count into several elements.
     const meta = Array.from(container.querySelectorAll(".paper-meta"), (el) => el.textContent);
-    expect(meta.filter((text) => /ICML · 2020 · 42 citations/.test(text ?? ""))).toHaveLength(2);
+    expect(meta.filter((text) => /ICML · 2020 · Cited by 42/.test(text ?? ""))).toHaveLength(2);
     expect(screen.getAllByText("ml").length).toBeGreaterThan(0);
     expect(screen.getByText("2 versions")).toBeInTheDocument();
     expect(screen.getByText("2 papers")).toBeInTheDocument();
@@ -174,12 +180,13 @@ describe("LibraryPage", () => {
     expect(screen.getAllByTestId("add-to-collection")).toHaveLength(2);
   });
 
-  it("keeps a minimal card for entries without metadata", async () => {
+  it("keeps a recovery card that opens details for entries without metadata", async () => {
     vi.mocked(library.listEntries).mockImplementation(() =>
       envelope([entry("doi:10.1/x", "", { primary_version: null, resolved: false })]),
     );
     renderLibrary();
-    expect(await screen.findByRole("button", { name: "Paper details" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Details unavailable" }));
+    expect(await screen.findByRole("dialog", { name: /Paper details/ })).toBeInTheDocument();
   });
 
   it("opens the details panel when an entry is clicked", async () => {
@@ -475,4 +482,93 @@ it("keeps loaded entries and retries a failed next page", async () => {
 
   expect(await screen.findByText("Third Library Paper")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+describe("LibraryPage — recovery, deletion and export", () => {
+  const pending = entry("10.1109/TNN.2008.2005605", "", {
+    paper_group_key: "group:0123456789abcdef",
+    primary_version: null,
+    resolved: false,
+  });
+
+  afterEach(() => {
+    testAuth.authenticated = false;
+    vi.mocked(library.deleteEntry).mockReset();
+    vi.mocked(library.resolve).mockReset();
+  });
+
+  it("shows an unresolved entry's DOI with Retry, Fix and Delete", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.listEntries).mockImplementation(() => envelope([pending, entries[1]!]));
+    vi.mocked(library.resolve).mockResolvedValue({
+      status: "resolved", previous_key: pending.primary_canonical_key, canonical_key: "doi:10.1109/tnn.2008.2005605",
+      paper_group_key: "group:tnn", paper: paper("doi:10.1109/tnn.2008.2005605", "The Graph Neural Network Model"), moved: {},
+    });
+    vi.mocked(library.deleteEntry).mockResolvedValue(undefined);
+    renderLibrary();
+
+    const card = (await screen.findByRole("button", { name: "Details unavailable" })).closest("article")!;
+    expect(within(card).getByText(/^DOI/)).toHaveTextContent("DOI 10.1109/tnn.2008.2005605");
+    expect(within(card).queryByRole("link", { name: /Explore graph/ })).toBeNull();
+
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    expect(library.resolve).toHaveBeenCalledWith({ paper_canonical_key: pending.primary_canonical_key, replacement: null });
+    expect(await screen.findByText("Details found for “The Graph Neural Network Model”.")).toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Fix identifier" }));
+    expect(within(card).getByLabelText("Correct DOI or arXiv ID")).toHaveValue("10.1109/tnn.2008.2005605");
+
+    await user.click(within(card).getByRole("button", { name: "Delete" }));
+    const confirm = await screen.findByRole("dialog", { name: "Delete from Library" });
+    expect(confirm.textContent).not.toMatch(/anchored/);
+    await user.click(within(confirm).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(library.deleteEntry).toHaveBeenCalledWith(pending.paper_group_key, { detach: false }));
+  });
+
+  it("lists blocking collections, warns about shared ones and deletes with detach", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.deleteEntry)
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            detail: {
+              code: "entry_in_collections",
+              message: "blocked",
+              collections: [
+                { id: COLLECTION_ID, name: "Reading group", is_owner: true },
+                { id: "c-shared", name: "Lab shelf", is_owner: false },
+              ],
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce(undefined);
+    renderLibrary();
+
+    await user.click((await screen.findAllByRole("button", { name: "Delete from Library" }))[0]!);
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Paper still in collections" });
+    expect(within(dialog).getByText("This paper is still in 2 collections you can edit:")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Reading group" })).toHaveAttribute("href", `/collections/${COLLECTION_ID}`);
+    expect(within(dialog).getByRole("link", { name: "Lab shelf" })).toHaveAttribute("href", "/collections/c-shared");
+    expect(within(dialog).getAllByText("Shared with you")).toHaveLength(1);
+    expect(within(dialog).getByText(/Some of these collections belong to other people/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete and remove from 2 collections" }));
+    await waitFor(() => expect(library.deleteEntry).toHaveBeenLastCalledWith("group:doi:10.1/a", { detach: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("links to the data export and, without Zotero, to its settings", async () => {
+    testAuth.authenticated = true;
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+
+    expect(screen.getByRole("link", { name: "Export data" })).toHaveAttribute("href", "/settings#your-data");
+    const connect = await screen.findByRole("link", { name: "Connect Zotero to sync" });
+    expect(connect).toHaveAttribute("href", "/settings#zotero");
+    expect(screen.getByText("Zotero isn’t connected. Add your API key in Settings.")).toBeVisible();
+  });
 });

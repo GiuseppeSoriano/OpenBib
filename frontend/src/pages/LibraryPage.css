@@ -54,13 +54,46 @@
     background: var(--color-danger-soft);
   }
 
-  .library-entry-fallback {
-    padding: var(--space-md) var(--space-lg);
-  }
-
   /* Long unbroken titles (URLs, formulas) must not widen the page. */
   .library-list .paper-title {
     overflow-wrap: anywhere;
+  }
+
+  .library-blocking {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-md);
+    font-size: 0.88rem;
+  }
+  .library-blocking li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    overflow-wrap: anywhere;
+  }
+  .library-blocking a {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  .library-blocking-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    background: var(--color-warning-soft);
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+  .library-blocking-warning svg {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--color-warning);
   }
 
   .library-count {

@@ -330,6 +330,32 @@ export interface LibraryFacets {
   unresolved: number;
 }
 
+/** Retry (no replacement) or correct the identifier of a stored paper. */
+export interface LibraryResolveRequest {
+  /** The key exactly as stored. */
+  paper_canonical_key: string;
+  replacement?: string | null;
+}
+
+export interface LibraryResolveResult {
+  status: "resolved" | "not_found" | "unavailable";
+  previous_key: string;
+  /** Effective key after re-keying (equal to previous_key when unchanged). */
+  canonical_key: string;
+  /** Effective Library group; null when the caller has no pin for the paper. */
+  paper_group_key: string | null;
+  paper: PaperMetadata | null;
+  moved: Record<string, number>;
+}
+
+/** A collection named by a 409 `entry_in_collections` Library delete. */
+export interface BlockingCollection {
+  id: string;
+  name: string;
+  /** False when the collection is shared with the caller as an editor. */
+  is_owner: boolean;
+}
+
 export interface LibraryEntry {
   paper_group_key: string;
   primary_canonical_key: string;

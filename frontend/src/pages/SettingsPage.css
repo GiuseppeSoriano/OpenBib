@@ -84,6 +84,39 @@
     gap: var(--space-sm);
   }
 
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .settings-external {
+    display: inline;
+    margin-left: 2px;
+    vertical-align: -1px;
+  }
+
+  /* Deep-linked sections (#zotero, #your-data) take focus programmatically. */
+  .settings-section:focus {
+    outline: none;
+  }
+  .settings-section:focus-visible {
+    box-shadow: var(--focus-ring);
+  }
+
+  .settings-notice {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    background: var(--color-warning-soft);
+    color: var(--color-text);
+  }
+  .settings-notice a {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
   .settings-danger h2 {
     color: var(--color-danger);
   }

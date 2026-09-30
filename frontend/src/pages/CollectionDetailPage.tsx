@@ -1,24 +1,26 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import api, { zotero } from "@/lib/api";
+import api, { library } from "@/lib/api";
+import { apiErrorText, apiStatus } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Collection, CollectionPaper, Note, ZoteroSyncReport } from "@/types";
+import type { Collection, CollectionPaper, LibraryResolveResult, Note } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
-import Modal from "@/components/ui/Modal";
 import PaperCard from "@/components/paper/PaperCard";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
+import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
+import AddPaperForm from "@/components/collections/AddPaperForm";
+import ImportIdentifiersModal from "@/components/collections/ImportIdentifiersModal";
+import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import {
   Trash2,
   GitFork,
-  BookUp,
   StickyNote,
-  Plus,
   ChevronDown,
   ChevronUp,
   Edit3,
@@ -28,6 +30,11 @@ import {
 import "./CollectionDetailPage.css";
 import CollectionSharing from "@/components/collections/CollectionSharing";
 import { useCollectionAccess, collectionRead } from "@/lib/collection-access";
+
+/** A row with no cached details: a pending DOI or a legacy key. */
+function isUnresolved(item: CollectionPaper): boolean {
+  return !item.paper || item.resolved === false;
+}
 
 export default function CollectionDetailPage() {
   const { t, i18n } = useTranslation();
@@ -43,13 +50,12 @@ export default function CollectionDetailPage() {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editRevision, setEditRevision] = useState(0);
-  const [addPaperKey, setAddPaperKey] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [showImport, setShowImport] = useState(false);
-  const [importDois, setImportDois] = useState("");
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
-  const [detailsKey, setDetailsKey] = useState<string | null>(null);
+  const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const { data: collection, isLoading, isError: collectionError } = useQuery({
     queryKey: collectionKey,
@@ -69,9 +75,18 @@ export default function CollectionDetailPage() {
     if (collection === null) {
       void queryClient.cancelQueries({ queryKey: ["collection-papers", id] });
       queryClient.setQueriesData({ queryKey: ["collection-papers", id] }, null);
-      setDetailsKey(null);
+      setDetails(null);
     }
   }, [collection, id, queryClient]);
+
+  // Library pins let a signed-in reader re-resolve rows they also saved.
+  const hasUnresolved = !!papers?.some(isUnresolved);
+  const { data: libraryKeys } = useQuery({
+    queryKey: ["library-keys"],
+    queryFn: () => library.listKeys(),
+    enabled: !!user && hasUnresolved,
+    staleTime: 30_000,
+  });
 
   const { data: notes } = useQuery({
     queryKey: ["notes", "collection", id],
@@ -95,22 +110,11 @@ export default function CollectionDetailPage() {
     },
   });
 
+  // A 403/404 on a write: access changed while the page was open.
   const refreshAccessAfterError = () => {
-    toast(t("sharing.error"), "error");
+    toast(t("sharing.unavailable"), "error");
     void queryClient.invalidateQueries({ queryKey: ["collection", id] });
   };
-
-  const addPaperMutation = useMutation({
-    onError: refreshAccessAfterError,
-    mutationFn: async (paperKey: string) => {
-      await api.post(`/collections/${id}/papers`, { paper_canonical_key: paperKey });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["collection-papers", id] });
-      void queryClient.invalidateQueries({ queryKey: ["collection", id] });
-      setAddPaperKey("");
-    },
-  });
 
   const removePaperMutation = useMutation({
     mutationFn: async (paperKey: string) => {
@@ -125,8 +129,10 @@ export default function CollectionDetailPage() {
       );
       return { previous };
     },
-    onError: (_err, _key, context) => {
-      refreshAccessAfterError();
+    onError: (err, _key, context) => {
+      const status = apiStatus(err);
+      if (status === 403 || status === 404) refreshAccessAfterError();
+      else toast(apiErrorText(err, t, t("collections.removeFailed")), "error");
       if (context?.previous) {
         queryClient.setQueryData(papersKey, context.previous);
       }
@@ -134,6 +140,7 @@ export default function CollectionDetailPage() {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["collection-papers", id] });
       void queryClient.invalidateQueries({ queryKey: ["collection", id] });
+      void queryClient.invalidateQueries({ queryKey: ["paper-memberships"] });
     },
   });
 
@@ -156,281 +163,224 @@ export default function CollectionDetailPage() {
     },
   });
 
-  const importDoisMutation = useMutation({
-    onError: refreshAccessAfterError,
-    mutationFn: async (dois: string[]) => {
-      const { data } = await api.post(`/collections/${id}/import/dois`, { dois });
-      return data as { added: number; skipped: number; total: number };
-    },
-    onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: ["collection-papers", id] });
-      void queryClient.invalidateQueries({ queryKey: ["collection", id] });
-      setImportDois("");
-      setShowImport(false);
-      toast(t("collections.imported", { added: data.added, skipped: data.skipped }), "success");
-    },
-  });
-
-  const { data: zoteroStatus } = useQuery({
-    queryKey: ["zotero-status"],
-    queryFn: () => zotero.getStatus(),
-    enabled: !!user,
-  });
-
-  const zoteroSyncMutation = useMutation({
-    mutationFn: () => zotero.syncCollection(id!, access.headers),
-    onSuccess: (report: ZoteroSyncReport) => {
-      toast(
-        t("zotero.report", {
-          created: report.items_created,
-          updated: report.items_updated,
-          skipped: report.items_skipped,
-        }),
-        report.failures.length > 0 ? "info" : "success",
-      );
-      if (report.failures.length > 0) {
-        toast(t("zotero.reportFailures", { count: report.failures.length }), "error");
-      }
-    },
-    onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      toast(status === 409 ? t("zotero.notConfigured") : t("zotero.failed"), "error");
-    },
-  });
-
   const formatDate = (value: string) =>
     new Intl.DateTimeFormat(i18n.language).format(new Date(value));
 
-  if (isLoading || authLoading) return <SkeletonCard count={3} />;
-  if (!collection || collectionError) return <div className="cd-notfound"><p>{t("sharing.unavailable")}</p>{!user && <Link to="/login" state={{ returnTo: access.returnTo }} className="btn btn-primary">{t("sharing.login")}</Link>}</div>;
+  // Rendered at the same place in both branches below: a mid-import 403/404
+  // that makes the collection unavailable keeps the per-line report open until Done.
+  const importModal = showImport && (
+    <ImportIdentifiersModal
+      collectionId={id!}
+      onClose={() => setShowImport(false)}
+      onAccessError={refreshAccessAfterError}
+    />
+  );
 
-  const importCount = importDois.split("\n").filter((d) => d.trim()).length;
+  // A resolve that replaces an unresolved row's card takes its focused control with it.
+  const onRowResolved = (result: LibraryResolveResult) => {
+    if (result.status === "resolved" || result.canonical_key !== result.previous_key) {
+      headingRef.current?.focus();
+    }
+  };
+
+  if (isLoading || authLoading) return <SkeletonCard count={3} />;
+  if (!collection || collectionError) {
+    return (
+      <>
+        <div className="cd-notfound"><p>{t("sharing.unavailable")}</p>{!user && <Link to="/login" state={{ returnTo: access.returnTo }} className="btn btn-primary">{t("sharing.login")}</Link>}</div>
+        {importModal}
+      </>
+    );
+  }
+
+  const detailsRow = details ? papers?.find((cp) => cp.paper_canonical_key === details.key) : undefined;
+  // Re-resolving on open writes, so only editors and users with a Library pin do it.
+  const resolveOnOpen =
+    !!details?.unresolved &&
+    !!user &&
+    (collection.can_edit || (!!detailsRow?.paper_group_key && !!libraryKeys?.includes(detailsRow.paper_group_key)));
 
   return (
-    <div className="collection-detail">
-      {/* Header */}
-      <header className="cd-header">
-        {editing && collection.can_edit ? (
-          <form
-            className="cd-edit-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              updateMutation.mutate();
-            }}
-          >
-            <input
-              className="input"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              placeholder={t("collections.namePlaceholder")}
-              required
-            />
-            <input
-              className="input"
-              value={editDesc}
-              onChange={(e) => setEditDesc(e.target.value)}
-              placeholder={t("collections.descriptionPlaceholder")}
-            />
-            <div className="cd-edit-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setEditing(false)}>
-                {t("common.cancel")}
-              </button>
-              <button type="submit" className="btn btn-primary">
-                {t("collections.save")}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <div className="cd-title-row">
-              <h1>{collection.name}</h1>
-              <span className="badge badge--neutral">{t(collection.is_owner ? "sharing.owner" : collection.can_edit ? "sharing.editor" : "sharing.reader")}</span>
-              {collection.can_edit && (
-                <button
-                  className="btn-ghost"
-                  onClick={() => {
-                    setEditRevision(collection.revision);
-                    setEditName(collection.name);
-                    setEditDesc(collection.description || "");
-                    setEditing(true);
-                  }}
-                  title={t("collections.edit")}
-                >
-                  <Edit3 size={15} />
+    <>
+      <div className="collection-detail">
+        {/* Header */}
+        <header className="cd-header">
+          {editing && collection.can_edit ? (
+            <form
+              className="cd-edit-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                updateMutation.mutate();
+              }}
+            >
+              <input
+                className="input"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder={t("collections.namePlaceholder")}
+                aria-label={t("collections.namePlaceholder")}
+                required
+              />
+              <input
+                className="input"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                placeholder={t("collections.descriptionPlaceholder")}
+                aria-label={t("collections.descriptionPlaceholder")}
+              />
+              <div className="cd-edit-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditing(false)}>
+                  {t("common.cancel")}
                 </button>
-              )}
-            </div>
-            {collection.description && <p className="cd-description">{collection.description}</p>}
-            <p className="cd-meta">
-              {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
-              {t("collections.createdOn", { date: formatDate(collection.created_at) })}
-            </p>
-            <div className="cd-toolbar">
-              {collection.can_manage_access && <button className="btn btn-primary" onClick={() => setShowSharing(true)}>{t("sharing.title")}</button>}
-              {!user && <Link className="btn btn-secondary" to="/login" state={{ returnTo: access.returnTo }}>{t("sharing.login")}</Link>}
-              <Link to={`/graph/collection/${id}${access.fragment}`} className="btn btn-secondary">
-                <GitFork size={14} /> {t("collections.viewGraph")}
-              </Link>
-              {user && (
-                <>
+                <button type="submit" className="btn btn-primary">
+                  {t("collections.save")}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <div className="cd-title-row">
+                <h1 ref={headingRef} tabIndex={-1}>{collection.name}</h1>
+                <span className="badge badge--neutral">{t(collection.is_owner ? "sharing.owner" : collection.can_edit ? "sharing.editor" : "sharing.reader")}</span>
+                {collection.can_edit && (
                   <button
-                    className="btn btn-secondary"
-                    onClick={() => zoteroSyncMutation.mutate()}
-                    disabled={!zoteroStatus?.connected || zoteroSyncMutation.isPending}
-                    title={zoteroStatus?.connected ? t("zotero.sync") : t("zotero.notConfigured")}
+                    className="btn-ghost"
+                    onClick={() => {
+                      setEditRevision(collection.revision);
+                      setEditName(collection.name);
+                      setEditDesc(collection.description || "");
+                      setEditing(true);
+                    }}
+                    title={t("collections.edit")}
+                    aria-label={t("collections.edit")}
                   >
-                    <BookUp size={14} /> {t("zotero.sync")}
+                    <Edit3 size={15} aria-hidden="true" />
                   </button>
-                  {collection.can_edit && <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
-                    <Upload size={14} /> {t("collections.importDois")}
-                  </button>}
-                </>
-              )}
-            </div>
-          </>
-        )}
-      </header>
-
-      {/* Add paper */}
-      {collection.can_edit && (
-        <form
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            if (addPaperKey.trim()) addPaperMutation.mutate(addPaperKey.trim());
-          }}
-          className="cd-add-form"
-        >
-          <input
-            className="input"
-            placeholder={t("collections.addPaperPlaceholder")}
-            value={addPaperKey}
-            onChange={(e) => setAddPaperKey(e.target.value)}
-          />
-          <button type="submit" className="btn btn-primary" disabled={!addPaperKey.trim()}>
-            <Plus size={14} /> {t("collections.addPaper")}
-          </button>
-        </form>
-      )}
-
-      {/* Paper list */}
-      <section className="cd-papers">
-        {papers && papers.length === 0 && (
-          <EmptyState
-            icon={FileText}
-            title={t("collections.emptyPapersTitle")}
-            description={t("collections.emptyPapersDescription")}
-          />
-        )}
-        {papers?.map((cp) => (
-          <CollectionPaperItem
-            key={cp.paper_canonical_key}
-            item={cp}
-            canEdit={collection.can_edit}
-            onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
-            onOpenDetails={setDetailsKey}
-          />
-        ))}
-      </section>
-
-      {/* Collection notes */}
-      {user && (
-        <section className="cd-notes-section">
-          <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)}>
-            <StickyNote size={14} />
-            {t("collections.notes")}
-            {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-
-          {showNotes && (
-            <div className="cd-notes">
-              <form
-                onSubmit={(e: FormEvent) => {
-                  e.preventDefault();
-                  if (newNote.trim()) createNoteMutation.mutate();
-                }}
-                className="cd-note-form"
-              >
-                <textarea
-                  className="input"
-                  placeholder={t("collections.notePlaceholder")}
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  rows={3}
-                />
-                <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
-                  {t("paper.addNote")}
-                </button>
-              </form>
-
-              {notes?.map((note) => (
-                <div key={note.id} className="card cd-note">
-                  <p>{note.content}</p>
-                  <div className="cd-note-meta">
-                    <span>{formatDate(note.updated_at)}</span>
-                    <button
-                      className="btn-ghost"
-                      onClick={() => deleteNoteMutation.mutate(note.id)}
-                      title={t("common.delete")}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                )}
+              </div>
+              {collection.description && <p className="cd-description">{collection.description}</p>}
+              <p className="cd-meta">
+                {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
+                {t("collections.createdOn", { date: formatDate(collection.created_at) })}
+              </p>
+              <div className="cd-toolbar">
+                {collection.can_manage_access && <button className="btn btn-primary" onClick={() => setShowSharing(true)}>{t("sharing.title")}</button>}
+                {!user && <Link className="btn btn-secondary" to="/login" state={{ returnTo: access.returnTo }}>{t("sharing.login")}</Link>}
+                <Link to={`/graph/collection/${id}${access.fragment}`} className="btn btn-secondary">
+                  <GitFork size={14} /> {t("collections.viewGraph")}
+                </Link>
+                {user && collection.can_edit && (
+                  <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
+                    <Upload size={14} aria-hidden="true" /> {t("collections.importDois")}
+                  </button>
+                )}
+                <ZoteroSyncButton collectionId={id} headers={access.headers} />
+              </div>
+            </>
           )}
+        </header>
+
+        {collection.can_edit && <AddPaperForm collectionId={id!} onAccessError={refreshAccessAfterError} />}
+
+        {/* Paper list */}
+        <section className="cd-papers">
+          {papers && papers.length === 0 && (
+            <EmptyState
+              icon={FileText}
+              title={t("collections.emptyPapersTitle")}
+              description={t(collection.can_edit ? "collections.emptyPapersDescription" : "collections.emptyPapersReadOnly")}
+            />
+          )}
+          {papers?.map((cp) => (
+            <CollectionPaperItem
+              key={cp.paper_canonical_key}
+              item={cp}
+              canEdit={collection.can_edit}
+              onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
+              onOpenDetails={(key) => setDetails({ key, unresolved: isUnresolved(cp) })}
+              onResolved={onRowResolved}
+              onAccessError={refreshAccessAfterError}
+            />
+          ))}
         </section>
-      )}
 
-      {/* Import modal */}
-      <Modal
-        open={showImport && collection.can_edit}
-        onClose={() => setShowImport(false)}
-        title={t("collections.importDois")}
-      >
-        <textarea
-          className="input"
-          placeholder={t("collections.importPlaceholder")}
-          value={importDois}
-          onChange={(e) => setImportDois(e.target.value)}
-          rows={5}
-          autoFocus
-        />
-        <div className="confirm-actions">
-          <button type="button" className="btn btn-secondary" onClick={() => setShowImport(false)}>
-            {t("common.cancel")}
-          </button>
-          <button
-            className="btn btn-primary"
-            disabled={importCount === 0 || importDoisMutation.isPending}
-            onClick={() => {
-              const dois = importDois.split("\n").map((d) => d.trim()).filter(Boolean);
-              if (dois.length > 0) importDoisMutation.mutate(dois);
+        {/* Collection notes */}
+        {user && (
+          <section className="cd-notes-section">
+            <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)} aria-expanded={showNotes}>
+              <StickyNote size={14} />
+              {t("collections.notes")}
+              {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+
+            {showNotes && (
+              <div className="cd-notes">
+                <form
+                  onSubmit={(e: FormEvent) => {
+                    e.preventDefault();
+                    if (newNote.trim()) createNoteMutation.mutate();
+                  }}
+                  className="cd-note-form"
+                >
+                  <textarea
+                    className="input"
+                    placeholder={t("collections.notePlaceholder")}
+                    aria-label={t("collections.notes")}
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    rows={3}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={!newNote.trim()}>
+                    {t("paper.addNote")}
+                  </button>
+                </form>
+
+                {notes?.map((note) => (
+                  <div key={note.id} className="card cd-note">
+                    <p>{note.content}</p>
+                    <div className="cd-note-meta">
+                      <span>{formatDate(note.updated_at)}</span>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => deleteNoteMutation.mutate(note.id)}
+                        title={t("common.delete")}
+                        aria-label={t("common.delete")}
+                      >
+                        <Trash2 size={12} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {pendingDeleteKey && collection.can_edit && (
+          <ConfirmModal
+            title={t("collections.removePaperTitle")}
+            message={t("collections.removePaperMessage", {
+              name: paperDisplayName(papers ?? undefined, pendingDeleteKey, t("collections.thisPaper")),
+            })}
+            confirmLabel={t("collections.remove")}
+            onConfirm={() => {
+              removePaperMutation.mutate(pendingDeleteKey);
+              setPendingDeleteKey(null);
             }}
-          >
-            {t("collections.importButton", { count: importCount })}
-          </button>
-        </div>
-      </Modal>
+            onCancel={() => setPendingDeleteKey(null)}
+          />
+        )}
 
-      {pendingDeleteKey && collection.can_edit && (
-        <ConfirmModal
-          title={t("collections.removePaperTitle")}
-          message={t("collections.removePaperMessage", {
-            name: paperDisplayName(papers ?? undefined, pendingDeleteKey, t("collections.thisPaper")),
-          })}
-          confirmLabel={t("collections.remove")}
-          onConfirm={() => {
-            removePaperMutation.mutate(pendingDeleteKey);
-            setPendingDeleteKey(null);
-          }}
-          onCancel={() => setPendingDeleteKey(null)}
+        {showSharing && collection.can_manage_access && <CollectionSharing collectionId={id!} onClose={() => setShowSharing(false)} />}
+        <PaperDetailsPanel
+          paperKey={details?.key ?? null}
+          onClose={() => setDetails(null)}
+          resolveOnOpen={resolveOnOpen}
+          fallbackFocus={() => headingRef.current}
         />
-      )}
-
-      {showSharing && collection.can_manage_access && <CollectionSharing collectionId={id!} onClose={() => setShowSharing(false)} />}
-      <PaperDetailsPanel paperKey={detailsKey} onClose={() => setDetailsKey(null)} />
-    </div>
+      </div>
+      {importModal}
+    </>
   );
 }
 
@@ -450,14 +400,19 @@ function CollectionPaperItem({
   canEdit,
   onRemove,
   onOpenDetails,
+  onResolved,
+  onAccessError,
 }: {
   item: CollectionPaper;
   canEdit: boolean;
   onRemove: () => void;
   onOpenDetails: (key: string) => void;
+  onResolved: (result: LibraryResolveResult) => void;
+  onAccessError: () => void;
 }) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const unresolved = isUnresolved(item);
 
   const { data: tags } = useQuery({
     queryKey: ["paper-tags", item.paper_canonical_key],
@@ -467,8 +422,39 @@ function CollectionPaperItem({
       );
       return data as { tag: string }[];
     },
-    enabled: !!user,
+    enabled: !!user && !unresolved,
   });
+
+  if (unresolved || !item.paper) {
+    // No details to explore yet: offer recovery instead of the graph and reading state.
+    return (
+      <UnresolvedPaperCard
+        canonicalKey={item.paper_canonical_key}
+        addedAt={item.added_at}
+        canEdit={canEdit}
+        onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
+        onResolved={onResolved}
+        onResolveError={(err) => {
+          const status = apiStatus(err);
+          if (status !== 403 && status !== 404) return false;
+          onAccessError();
+          return true;
+        }}
+        actions={(describedBy) => (
+          <button
+            type="button"
+            className="btn btn-secondary cd-remove"
+            onClick={onRemove}
+            aria-describedby={describedBy}
+            title={t("collections.removeFromCollection")}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            {t("collections.remove")}
+          </button>
+        )}
+      />
+    );
+  }
 
   const actions = (
     <>
@@ -489,28 +475,13 @@ function CollectionPaperItem({
           className="btn-ghost cd-remove"
           onClick={onRemove}
           title={t("collections.removeFromCollection")}
+          aria-label={t("collections.removeFromCollection")}
         >
-          <Trash2 size={14} />
+          <Trash2 size={14} aria-hidden="true" />
         </button>
       )}
     </>
   );
-
-  if (!item.paper) {
-    // No cached metadata yet — a minimal row that still opens the panel.
-    return (
-      <div className="card cd-paper-fallback">
-        <button
-          type="button"
-          className="paper-title paper-title-btn"
-          onClick={() => onOpenDetails(item.paper_canonical_key)}
-        >
-          {t("paper.detailsTitle")}
-        </button>
-        <div className="paper-actions">{actions}</div>
-      </div>
-    );
-  }
 
   return (
     <PaperCard
