@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "service_name": "OpenBib responsive check",
+  "public_url": "http://localhost:3000",
+  "effective_date": "2026-09-02",
+  "privacy_version": "dev-1",
+  "terms_version": "dev-1",
+  "minimum_age": 16,
+  "operator": {
+    "name": "Responsive check operator",
+    "address": "Via dei Test 1, 00100 Roma",
+    "country": { "en": "Italy.", "it": "Italia." },
+    "privacy_email": "privacy@example.com",
+    "support_email": "support@example.com"
+  },
+  "data_location": {
+    "en": "A data centre in the European Union operated by an example hosting provider.",
+    "it": "Un centro dati nell'Unione europea gestito da un fornitore di hosting di esempio."
+  },
+  "third_parties": [
+    {
+      "name": "Semantic Scholar (Allen Institute for Artificial Intelligence)",
+      "purpose": {
+        "en": "Bibliographic metadata, citation and reference lookups for the papers you search and explore.",
+        "it": "Ricerca dei metadati bibliografici, delle citazioni e dei riferimenti degli articoli che cerchi ed esplori."
+      },
+      "role": "independent controller",
+      "region": { "en": "United States of America.", "it": "Stati Uniti d'America." },
+      "privacy_url": "https://allenai.org/privacy-policy",
+      "transfer_safeguard": {
+        "en": "Only the search terms and paper identifiers are sent; no account data leaves the service.",
+        "it": "Vengono inviati solo i termini di ricerca e gli identificativi degli articoli; nessun dato dell'account lascia il servizio."
+      }
+    },
+    {
+      "name": "doi.org (International DOI Foundation)",
+      "purpose": {
+        "en": "Resolving DOIs you add that the bibliographic provider does not yet know about.",
+        "it": "Risoluzione dei DOI che aggiungi e che il fornitore bibliografico non conosce ancora."
+      },
+      "role": "processor",
+      "region": { "en": "Worldwide content delivery network.", "it": "Rete di distribuzione dei contenuti mondiale." },
+      "privacy_url": "https://www.doi.org/privacy-policy",
+      "transfer_safeguard": null
+    },
+    {
+      "name": "An exceptionally long provider name that keeps going so that list items have to wrap gracefully on narrow phone screens",
+      "purpose": {
+        "en": "Transactional email delivery for sign-in codes, password resets and email address confirmations.",
+        "it": "Consegna delle email transazionali per i codici di accesso, il ripristino della password e la conferma degli indirizzi email."
+      },
+      "role": "sub-processor",
+      "region": { "en": "European Economic Area.", "it": "Spazio economico europeo." },
+      "privacy_url": "https://example.com/privacy",
+      "transfer_safeguard": {
+        "en": "Standard contractual clauses;",
+        "it": "Clausole contrattuali tipo;"
+      }
+    }
+  ],
+  "retention": { "access_logs_days": 14, "security_events_days": 90, "backups_days": 0 },
+  "backups_enabled": false,
+  "deletion_journal_enabled": false
+}
