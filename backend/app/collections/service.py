@@ -21,6 +21,8 @@ from app.papers.models import CachedPaperMetadata
 from app.papers.service import (
     cached_paper_to_read,
     get_cached_paper,
+    get_paper_states_batch,
+    get_tags_batch,
     lookup_identifier,
     provider_unavailable,
     store_paper,
@@ -321,7 +323,12 @@ async def remove_paper(
 
 
 async def list_papers(
-    db: AsyncSession, collection_id: uuid.UUID, user_id: uuid.UUID | None, token: str | None = None
+    db: AsyncSession,
+    collection_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    token: str | None = None,
+    *,
+    with_annotations: bool = False,
 ) -> list[dict]:
     await authorize(db, collection_id, user_id, token=token)
 
@@ -335,7 +342,18 @@ async def list_papers(
         .order_by(CollectionPaper.position)
     )
     rows = (await db.execute(stmt)).all()
-    return [_paper_row(cp, cached) for cp, cached in rows]
+    items = [_paper_row(cp, cached) for cp, cached in rows]
+    if with_annotations and user_id is not None and items:
+        # The caller's own annotations, batched: read-link readers see theirs,
+        # never the owner's. Only the list endpoint asks (graph and Zotero
+        # callers discard them).
+        keys = [item["paper_canonical_key"] for item in items]
+        states = await get_paper_states_batch(db, user_id, keys)
+        tags = await get_tags_batch(db, user_id, keys)
+        for item in items:
+            item["my_states"] = states[item["paper_canonical_key"]]
+            item["my_tags"] = tags[item["paper_canonical_key"]]
+    return items
 
 
 async def list_members(

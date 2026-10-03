@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import api, { library } from "@/lib/api";
+import api, { library, papers as paperApi } from "@/lib/api";
 import { apiErrorText, apiStatus } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Collection, CollectionPaper, LibraryResolveResult, Note } from "@/types";
@@ -66,7 +66,12 @@ export default function CollectionDetailPage() {
 
   const { data: papers } = useQuery({
     queryKey: papersKey,
-    queryFn: () => collectionRead(async () => (await api.get<CollectionPaper[]>(`/collections/${id}/papers`, { headers: access.headers })).data),
+    queryFn: () => collectionRead(async () => {
+      const requestedAt = Date.now();
+      const { data } = await api.get<CollectionPaper[]>(`/collections/${id}/papers`, { headers: access.headers });
+      seedPaperAnnotations(queryClient, data, requestedAt);
+      return data;
+    }),
     gcTime: 0, staleTime: 0, refetchOnWindowFocus: "always", retry: false,
     enabled: !!collection,
   });
@@ -384,6 +389,24 @@ export default function CollectionDetailPage() {
   );
 }
 
+/**
+ * The list rows carry the caller's own states and tags: seed the per-paper
+ * queries the rows, ReadingStateSelect and TagEditor read, so a long
+ * collection costs one request instead of two per row. An entry written after
+ * the list request started (a saved state, a tag refetch) is newer than the
+ * row and is kept.
+ */
+function seedPaperAnnotations(queryClient: QueryClient, rows: CollectionPaper[], requestedAt: number) {
+  const seed = (queryKey: string[], value: unknown) => {
+    if ((queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0) > requestedAt) return;
+    queryClient.setQueryData(queryKey, value);
+  };
+  for (const row of rows) {
+    if (row.my_states) seed(["paper-states", row.paper_canonical_key], row.my_states);
+    if (row.my_tags) seed(["paper-tags", row.paper_canonical_key], row.my_tags);
+  }
+}
+
 /** Never surface a raw canonical key — degrade to a generic label. */
 function paperDisplayName(
   papers: CollectionPaper[] | undefined,
@@ -414,15 +437,12 @@ function CollectionPaperItem({
   const { user } = useAuth();
   const unresolved = isUnresolved(item);
 
+  // Seeded and kept fresh by the list response; refetched alone after a tag edit.
   const { data: tags } = useQuery({
     queryKey: ["paper-tags", item.paper_canonical_key],
-    queryFn: async () => {
-      const { data } = await api.get(
-        `/papers/${encodeURIComponent(item.paper_canonical_key)}/tags`,
-      );
-      return data as { tag: string }[];
-    },
+    queryFn: () => paperApi.getTags(item.paper_canonical_key),
     enabled: !!user && !unresolved,
+    staleTime: Infinity,
   });
 
   if (unresolved || !item.paper) {
@@ -460,7 +480,7 @@ function CollectionPaperItem({
     <>
       {user && (
         <div className="cd-state">
-          <ReadingStateSelect paperKey={item.paper_canonical_key} />
+          <ReadingStateSelect paperKey={item.paper_canonical_key} fromList />
         </div>
       )}
       <Link

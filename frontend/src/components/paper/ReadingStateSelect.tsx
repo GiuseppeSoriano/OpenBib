@@ -1,22 +1,34 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { papers } from "@/lib/api";
-import { READING_STATES, type ReadingState } from "@/types";
+import { READING_STATES, type PaperState, type ReadingState } from "@/types";
 
-/** Select bound to the per-version reading state endpoints. */
-export default function ReadingStateSelect({ paperKey }: { paperKey: string }) {
+/**
+ * Select bound to the per-version reading state endpoints. `fromList`: a row
+ * of a list whose response seeds this query and keeps it fresh, so the row
+ * never refetches by itself (a long list would cost a request per row).
+ */
+export default function ReadingStateSelect({
+  paperKey,
+  fromList = false,
+}: {
+  paperKey: string;
+  fromList?: boolean;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const { data: states } = useQuery({
     queryKey: ["paper-states", paperKey],
     queryFn: () => papers.getStates(paperKey),
+    ...(fromList ? { staleTime: Infinity } : {}),
   });
 
   const mutation = useMutation({
     mutationFn: (state: ReadingState) => papers.setState(paperKey, state),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paper-states", paperKey] });
+    onSuccess: (saved) => {
+      // States are per exact key, so the saved row is the whole list: no refetch.
+      queryClient.setQueryData<PaperState[]>(["paper-states", paperKey], [saved]);
       // State-filtered Library pages and the state facets.
       void queryClient.invalidateQueries({ queryKey: ["library-entries"] });
     },

@@ -61,6 +61,9 @@ RATE_LIMIT_BACKOFF = 2
 # Bulk search reads these as boolean operators; queries stay plain words.
 _BULK_OPERATORS_RE = re.compile(r'[+|\-"*()~]')
 _EXHAUSTED_PAGE = "Requested data for this limit and/or offset is not available"
+# ``POST /paper/batch`` answers this 400 when none of the ids matches a paper
+# (a batch with at least one match has ``null`` rows for the misses instead).
+_NO_BATCH_MATCH = "No valid paper ids given"
 
 ProviderErrorCode = Literal[
     "provider_not_configured",
@@ -331,10 +334,12 @@ class SemanticScholarProvider(BaseProvider):
         *,
         missing_ok: bool = False,
         exhausted_ok: bool = False,
+        none_found_ok: bool = False,
     ) -> Any:
         """One API call under the shared key, pacing and retry policy. Returns
-        the decoded JSON, or ``None`` for a 404 when ``missing_ok`` and for a
-        page past the last match when ``exhausted_ok``."""
+        the decoded JSON, or ``None`` for a 404 when ``missing_ok``, for a
+        page past the last match when ``exhausted_ok`` and for a batch that
+        matched no paper when ``none_found_ok``."""
         key = settings.semantic_scholar_api_key.get_secret_value().strip()
         if not key:
             raise ProviderError(
@@ -366,6 +371,8 @@ class SemanticScholarProvider(BaseProvider):
                     # The live API uses this exact 400 for pages beyond the
                     # available matches (even within its 1,000-result window).
                     if exhausted_ok and error == _EXHAUSTED_PAGE:
+                        return None
+                    if none_found_ok and error == _NO_BATCH_MATCH:
                         return None
                     if "offset + limit must be <" in error:
                         raise ProviderError(
@@ -414,7 +421,12 @@ class SemanticScholarProvider(BaseProvider):
         rows: list[dict | None] = []
         for start in range(0, len(provider_ids), BATCH_SIZE):
             chunk = [s2_identifier(i) for i in provider_ids[start : start + BATCH_SIZE]]
-            data = await self._request("POST", "/paper/batch", {"fields": fields}, {"ids": chunk})
+            data = await self._request(
+                "POST", "/paper/batch", {"fields": fields}, {"ids": chunk}, none_found_ok=True
+            )
+            if data is None:
+                rows.extend([None] * len(chunk))
+                continue
             if (
                 not isinstance(data, list)
                 or len(data) != len(chunk)
@@ -514,6 +526,9 @@ class SemanticScholarProvider(BaseProvider):
             **self._filter_params(filters),
         }
         data = await self._get("/paper/search", params, exhausted_ok=offset > 0)
+        if data is not None and "data" not in data and data.get("total") == 0:
+            # A query with no matches is answered ``{"total": 0, "offset": 0}``.
+            data = {**data, "data": []}
         rows, next_offset = self._page(data if data is not None else {"data": []})
         papers = self._author_filter(deduplicate(_map_rows(rows)), filters)
         total = _count((data or {}).get("total"))

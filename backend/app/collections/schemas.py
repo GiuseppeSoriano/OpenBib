@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from app.papers.schemas import PaperMetadataRead, clean_title_value
+from app.papers.schemas import PaperMetadataRead, StateRead, TagRead, clean_title_value
 
 
 class CollectionCreate(BaseModel):
@@ -88,6 +88,11 @@ class CollectionPaperRead(BaseModel):
     paper: PaperMetadataRead | None = None
     # False while the paper is stored as pending (providers unavailable).
     resolved: bool
+    # The caller's own reading states and tags on this key, in the shapes of
+    # GET /papers/{key}/states and /tags, so the list needs no per-row
+    # requests. Set by the list endpoint for a signed-in caller only.
+    my_states: list[StateRead] | None = None
+    my_tags: list[TagRead] | None = None
 
     model_config = {"from_attributes": True}
 

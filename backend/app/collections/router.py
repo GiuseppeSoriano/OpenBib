@@ -85,7 +85,7 @@ async def list_collection_papers(
     collection_id: uuid.UUID, user: OptionalUser, db: DB, share_token: ShareToken = None
 ):
     user_id = user.id if user else None
-    return await service.list_papers(db, collection_id, user_id, share_token)
+    return await service.list_papers(db, collection_id, user_id, share_token, with_annotations=True)
 
 
 @router.post("/{collection_id}/papers", response_model=CollectionPaperRead, status_code=201)

@@ -75,6 +75,13 @@ export interface PaperState {
   state: ReadingState;
 }
 
+export interface PaperTag {
+  paper_canonical_key: string;
+  tag: string;
+  paper_group_key: string | null;
+  created_at: string;
+}
+
 export const READING_STATES: ReadingState[] = [
   "unseen",
   "seen",
@@ -179,6 +186,12 @@ export interface CollectionPaper {
   paper?: PaperMetadata | null;
   /** False while the paper is stored as pending (providers unavailable). */
   resolved: boolean;
+  /**
+   * The caller's own reading states and tags on this key (the shapes of
+   * `/papers/{key}/states` and `/tags`); absent for anonymous readers.
+   */
+  my_states?: PaperState[] | null;
+  my_tags?: PaperTag[] | null;
 }
 
 /* ── Collection import ──────────────────────────────────── */

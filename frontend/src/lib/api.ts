@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryResolveRequest, LibraryResolveResult, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryResolveRequest, LibraryResolveResult, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, PaperTag, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -73,7 +73,7 @@ export const papers = {
   async getDetail(canonicalKey: string) { return (await api.get<PaperDetail>(`/papers/${encodeURIComponent(canonicalKey)}`)).data; },
   async getStates(canonicalKey: string) { return (await api.get<PaperState[]>(`/papers/${encodeURIComponent(canonicalKey)}/states`)).data; },
   async setState(canonicalKey: string, state: ReadingState) { return (await api.put<PaperState>(`/papers/${encodeURIComponent(canonicalKey)}/state`, { state })).data; },
-  async getTags(canonicalKey: string) { return (await api.get<{ tag: string }[]>(`/papers/${encodeURIComponent(canonicalKey)}/tags`)).data; },
+  async getTags(canonicalKey: string) { return (await api.get<PaperTag[]>(`/papers/${encodeURIComponent(canonicalKey)}/tags`)).data; },
   async addTag(canonicalKey: string, tag: string) { return (await api.post(`/papers/${encodeURIComponent(canonicalKey)}/tags`, { tag })).data; },
   async removeTag(canonicalKey: string, tag: string) { await api.delete(`/papers/${encodeURIComponent(canonicalKey)}/tags/${encodeURIComponent(tag)}`); },
 };

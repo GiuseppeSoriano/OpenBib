@@ -110,7 +110,8 @@ class SearchResultRead(BaseModel):
     page_size: int
     providers: list[str] = []
     sort: SearchSort = "relevance"
-    # Opaque continuation of the date and citation sorts; None on the last page.
+    # Opaque continuation of the date and citation sorts; None on their last
+    # page and always for relevance, which continues with ``page + 1``.
     next_cursor: str | None = None
     # The provider's own match count (an estimate), kept before deduplication.
     total_estimate: int | None = None

@@ -573,13 +573,25 @@ async def set_paper_state(
 async def get_paper_states(
     db: AsyncSession, user_id: uuid.UUID, paper_key: str
 ) -> list[UserPaperState]:
+    return (await get_paper_states_batch(db, user_id, [paper_key]))[paper_key]
+
+
+async def get_paper_states_batch(
+    db: AsyncSession, user_id: uuid.UUID, paper_keys: list[str]
+) -> dict[str, list[UserPaperState]]:
+    """Batched ``get_paper_states``: the user's states per exact key."""
+    states: dict[str, list[UserPaperState]] = {key: [] for key in paper_keys}
+    if not states:
+        return states
     result = await db.execute(
         select(UserPaperState).where(
             UserPaperState.user_id == user_id,
-            UserPaperState.paper_canonical_key == paper_key,
+            UserPaperState.paper_canonical_key.in_(list(states)),
         )
     )
-    return list(result.scalars().all())
+    for row in result.scalars().all():
+        states[row.paper_canonical_key].append(row)
+    return states
 
 
 async def add_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> UserPaperTag:
@@ -618,13 +630,29 @@ async def add_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str
 
 
 async def _tag_scope(db: AsyncSession, paper_key: str) -> tuple[str | None, set[str]]:
-    cached = await get_cached_paper(db, paper_key)
-    if cached is None or not cached.paper_group_key:
-        return None, {paper_key}
-    rows = await get_cached_papers_by_group(db, cached.paper_group_key)
-    group_keys = {row.canonical_key for row in rows}
-    group_keys.add(paper_key)
-    return cached.paper_group_key, group_keys
+    return (await _tag_scopes(db, [paper_key]))[paper_key]
+
+
+async def _tag_scopes(
+    db: AsyncSession, paper_keys: list[str]
+) -> dict[str, tuple[str | None, set[str]]]:
+    """Per key, the paper group its tags are shared across and the version
+    keys of that group (legacy tags stored without a group key), or
+    ``(None, {key})`` for a key with no cached paper."""
+    cached = await get_cached_papers_by_aliases(db, set(paper_keys))
+    siblings = await get_cached_papers_by_groups(
+        db, {row.paper_group_key for row in cached.values() if row.paper_group_key}
+    )
+    scopes: dict[str, tuple[str | None, set[str]]] = {}
+    for key in paper_keys:
+        row = cached.get(key)
+        if row is None or not row.paper_group_key:
+            scopes[key] = (None, {key})
+            continue
+        group_keys = {sibling.canonical_key for sibling in siblings.get(row.paper_group_key, [])}
+        group_keys.add(key)
+        scopes[key] = (row.paper_group_key, group_keys)
+    return scopes
 
 
 async def remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> None:
@@ -673,35 +701,49 @@ async def _remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag:
 
 
 async def get_tags(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> list[UserPaperTag]:
-    paper_group_key, group_keys = await _tag_scope(db, paper_key)
-    if paper_group_key:
-        result = await db.execute(
-            select(UserPaperTag)
-            .where(
-                UserPaperTag.user_id == user_id,
-                or_(
-                    UserPaperTag.paper_group_key == paper_group_key,
-                    UserPaperTag.paper_canonical_key.in_(group_keys),
-                ),
-            )
-            .order_by(UserPaperTag.created_at)
-        )
-        tags: list[UserPaperTag] = []
-        seen: set[str] = set()
-        for row in result.scalars().all():
-            if row.tag in seen:
-                continue
-            seen.add(row.tag)
-            tags.append(row)
-        return tags
+    return (await get_tags_batch(db, user_id, [paper_key]))[paper_key]
 
+
+async def get_tags_batch(
+    db: AsyncSession, user_id: uuid.UUID, paper_keys: list[str]
+) -> dict[str, list[UserPaperTag]]:
+    """Batched ``get_tags``: per key, the user's tags on any version of its
+    paper group (one row per tag, oldest first), or on the exact key when the
+    paper is not cached."""
+    tags: dict[str, list[UserPaperTag]] = {key: [] for key in paper_keys}
+    if not tags:
+        return tags
+    scopes = await _tag_scopes(db, list(tags))
+    group_keys = {group for group, _ in scopes.values() if group}
+    version_keys = set().union(*(keys for _, keys in scopes.values()))
+    conditions = [UserPaperTag.paper_canonical_key.in_(version_keys)]
+    if group_keys:
+        conditions.append(UserPaperTag.paper_group_key.in_(group_keys))
     result = await db.execute(
-        select(UserPaperTag).where(
-            UserPaperTag.user_id == user_id,
-            UserPaperTag.paper_canonical_key == paper_key,
-        )
+        select(UserPaperTag)
+        .where(UserPaperTag.user_id == user_id, or_(*conditions))
+        # Tags added in one transaction share created_at: break ties stably.
+        .order_by(UserPaperTag.created_at, UserPaperTag.tag, UserPaperTag.paper_canonical_key)
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    by_group: dict[str, list[int]] = defaultdict(list)
+    by_key: dict[str, list[int]] = defaultdict(list)
+    for index, row in enumerate(rows):
+        if row.paper_group_key:
+            by_group[row.paper_group_key].append(index)
+        by_key[row.paper_canonical_key].append(index)
+    for key, (group, keys) in scopes.items():
+        indexes = set(by_key[key])
+        if group:
+            indexes.update(by_group[group])
+            for version_key in keys:
+                indexes.update(by_key[version_key])
+        seen: set[str] = set()
+        for index in sorted(indexes):
+            if rows[index].tag not in seen:
+                seen.add(rows[index].tag)
+                tags[key].append(rows[index])
+    return tags
 
 
 # ── Dismiss ─────────────────────────────────────────────────

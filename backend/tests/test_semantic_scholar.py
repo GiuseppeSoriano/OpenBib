@@ -473,6 +473,22 @@ async def test_search_past_last_page_is_empty_but_other_400s_fail(provider):
     assert len(calls) == 2
 
 
+async def test_search_without_matches_is_empty_not_a_bad_response(provider):
+    p, responses, calls = provider
+    # The live API omits ``data`` when a relevance search matches nothing.
+    responses.append({"total": 0, "offset": 0})
+    result = await p.search("zzzznomatch", SearchFilters())
+    assert result.papers == []
+    assert result.has_more is False and result.window_capped is False
+    assert result.total_estimate == 0
+    # A page that claims matches but carries no rows is still malformed.
+    responses.append({"total": 5, "offset": 0})
+    with pytest.raises(ProviderError) as exc_info:
+        await p.search("q", SearchFilters())
+    assert exc_info.value.status_code == 502
+    assert len(calls) == 2
+
+
 async def test_graph_source_lookup_writes_the_s2_identity_back(provider, db, redis_backend):
     _p, responses, calls = provider
     legacy = PaperMetadata(
@@ -713,6 +729,47 @@ async def test_lookup_many_rejects_malformed_batches(s2_mock, body):
     with pytest.raises(ProviderError) as error:
         await s2_mock.provider.lookup_many(["a", "b"])
     assert error.value.code == "provider_bad_response"
+
+
+async def test_batch_without_any_match_is_all_misses_not_an_invalid_query(s2_mock):
+    # Live behaviour: a batch in which no id matches is a 400, not null rows.
+    s2_mock.responses.append(httpx.Response(400, json={"error": "No valid paper ids given"}))
+    assert await s2_mock.provider.lookup_many(["doi:10.5555/a", "doi:10.5555/b"]) == [None, None]
+    s2_mock.responses.append(httpx.Response(400, json={"error": "No valid paper ids given"}))
+    assert await registry.references_batch(["a", "b"]) == {}
+    assert len(s2_mock.calls) == 2
+    # Any other 400 is still an unreadable query.
+    s2_mock.responses.append(httpx.Response(400, json={"error": "Unacceptable id"}))
+    with pytest.raises(ProviderError) as error:
+        await s2_mock.provider.lookup_many(["x"])
+    assert error.value.code == "invalid_query"
+
+
+async def test_graph_seeds_unknown_to_the_provider_cost_one_batch_call(s2_mock, db, redis_backend):
+    # Before: the no-match 400 read as "one unreadable id" and the seed batch
+    # was bisected down to single ids, a call each, until the edge budget ran out.
+    for n in range(8):
+        db.add(
+            CachedPaperMetadata(
+                canonical_key=f"doi:10.5555/demo.{n}",
+                paper_group_key=f"group:demo-{n}",
+                title=f"Demo {n}",
+                authors_json=[],
+                topics_json=[],
+                keywords_json=[],
+                doi=f"10.5555/demo.{n}",
+                provider_source="semantic_scholar",
+            )
+        )
+    await db.flush()
+    s2_mock.responses.append(httpx.Response(400, json={"error": "No valid paper ids given"}))
+
+    graph = await graph_service.build_base_graph(
+        db, redis_backend, [f"doi:10.5555/demo.{n}" for n in range(8)]
+    )
+
+    assert len(s2_mock.calls) == 1
+    assert (len(graph.nodes), graph.edges, graph.edges_partial) == (8, [], False)
 
 
 async def test_batch_ids_use_provider_identifier_forms(s2_mock):

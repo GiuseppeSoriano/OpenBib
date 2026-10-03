@@ -7,7 +7,7 @@ import { Routes, Route } from "react-router-dom";
 import CollectionDetailPage from "@/pages/CollectionDetailPage";
 import { renderWithProviders } from "@/test/utils";
 import userEvent from "@testing-library/user-event";
-import { library } from "@/lib/api";
+import { library, papers as paperApi } from "@/lib/api";
 
 const collection = {
   id: "c1",
@@ -74,6 +74,8 @@ vi.mock("@/lib/api", () => {
     default: { get, post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() },
     papers: {
       getStates: vi.fn(() => Promise.resolve([])),
+      getTags: vi.fn(() => Promise.resolve([])),
+      setState: vi.fn(),
       getDetail: vi.fn(() => Promise.resolve({ ...hydratedRow.paper, versions: [] })),
     },
     library: { listKeys: vi.fn(() => Promise.resolve([])), resolve: vi.fn() },
@@ -502,4 +504,92 @@ describe("CollectionDetailPage — unresolved papers", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(library.resolve).not.toHaveBeenCalled();
   });
+});
+
+it("reads each row's reading state and tags from the list response, not per-row requests", async () => {
+  const rows = Array.from({ length: 30 }, (_, index) => {
+    const key = `doi:10.1/row${index}`;
+    return {
+      ...hydratedRow,
+      paper_canonical_key: key,
+      position: index,
+      paper: { ...hydratedRow.paper, canonical_key: key, title: `Row paper ${index}` },
+      my_states: index === 3 ? [{ paper_canonical_key: key, state: "reading" }] : [],
+      my_tags: index === 3 ? [{ paper_canonical_key: key, tag: "seminal", paper_group_key: null, created_at: "2026-01-01" }] : [],
+    };
+  });
+  paperRows.current = rows;
+  vi.mocked(paperApi.getStates).mockClear();
+  vi.mocked(paperApi.getTags).mockClear();
+  vi.mocked(api.get).mockClear();
+  renderPage();
+
+  await screen.findByText("Row paper 29");
+  const selects = screen.getAllByTestId("reading-state-select");
+  expect(selects).toHaveLength(30);
+  expect(selects[3]).toHaveValue("reading");
+  expect(selects[0]).toHaveValue("");
+  expect(screen.getByText("seminal")).toBeInTheDocument();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(paperApi.getStates).not.toHaveBeenCalled();
+  expect(paperApi.getTags).not.toHaveBeenCalled();
+  const perRow = vi.mocked(api.get).mock.calls.filter(([url]) => /^\/papers\//.test(String(url)));
+  expect(perRow).toEqual([]);
+
+  // A focus refetch re-reads the list once and still sends no per-row requests.
+  act(() => focusManager.setFocused(false));
+  act(() => focusManager.setFocused(true));
+  await waitFor(() =>
+    expect(vi.mocked(api.get).mock.calls.filter(([url]) => url === "/collections/c1/papers").length).toBeGreaterThan(1),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(paperApi.getStates).not.toHaveBeenCalled();
+  expect(paperApi.getTags).not.toHaveBeenCalled();
+});
+
+it("keeps a state saved while a list refetch was in flight, and still takes newer list data", async () => {
+  const key = hydratedRow.paper_canonical_key;
+  const row = (state: string | null) => ({
+    ...hydratedRow,
+    my_states: state ? [{ paper_canonical_key: key, state }] : [],
+    my_tags: [],
+  });
+  paperRows.current = [row(null)];
+  vi.mocked(paperApi.getStates).mockClear();
+  renderPage();
+  const select = await screen.findByTestId("reading-state-select");
+  expect(select).toHaveValue("");
+
+  const previous = vi.mocked(api.get).getMockImplementation()!;
+  let releaseList: (() => void) | undefined;
+  vi.mocked(api.get).mockImplementation((url, config) => {
+    if (url === "/collections/c1/papers")
+      return new Promise((resolve) => { releaseList = () => resolve({ data: [row(null)] }); });
+    return previous(url, config);
+  });
+  try {
+    // The list request starts, then the reader saves a state before it answers.
+    act(() => focusManager.setFocused(false));
+    act(() => focusManager.setFocused(true));
+    await waitFor(() => expect(releaseList).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    vi.mocked(paperApi.setState).mockResolvedValue({ paper_canonical_key: key, state: "read" });
+    await userEvent.setup().selectOptions(select, "read");
+    await waitFor(() => expect(select).toHaveValue("read"));
+
+    // The older list response must not put the pre-save state back.
+    await act(async () => { releaseList!(); });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByTestId("reading-state-select")).toHaveValue("read");
+  } finally {
+    vi.mocked(api.get).mockImplementation(previous);
+  }
+
+  // A list request started after the save carries newer data and still seeds the row.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  paperRows.current = [row("important")];
+  act(() => focusManager.setFocused(false));
+  act(() => focusManager.setFocused(true));
+  await waitFor(() => expect(screen.getByTestId("reading-state-select")).toHaveValue("important"));
+  expect(paperApi.getStates).not.toHaveBeenCalled();
 });
