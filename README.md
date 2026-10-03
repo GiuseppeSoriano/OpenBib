@@ -22,7 +22,7 @@ Want to try or use OpenBib without installing it locally? Visit the hosted versi
 Academic discovery is spread across search engines, reference managers, and graph tools. OpenBib brings those workflows together in an application you can inspect, run locally and contribute to:
 
 - **Discover papers with Semantic Scholar** — one authenticated source for search, metadata, references and citations, normalized and deduplicated before display.
-- **Explore citation networks visually** — expand citers or references, preserve node positions, and move directly from discovery to a paper's details.
+- **Explore citation networks visually** — browse a paper's citers or references in ranked ranges of 30, pin the papers worth keeping, preserve node positions, and move directly from discovery to a paper's details.
 - **Organize research your way** — maintain a library, version-aware collections, notes, tags, reading states, and collections with read-only links and authorized collaborators.
 - **Keep Zotero in the workflow** — push a collection or the whole library to Zotero with an idempotent one-way sync.
 - **Use it comfortably anywhere** — responsive UI, light and dark themes, and bundled English and Italian translations.
@@ -104,12 +104,45 @@ Copy [`.env.example`](.env.example) to `.env` before starting the Compose stack.
 | `JWT_SECRET_KEY` | Signs short-lived access tokens | Insecure development placeholder |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `10` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime | `7` |
-| `SEMANTIC_SCHOLAR_API_KEY` | Required for live paper retrieval; `x-api-key` header | Empty |
+| `SEMANTIC_SCHOLAR_API_KEY` | **Required.** Search, paper details, citation graphs, and resolving added or imported identifiers; sent only in the `x-api-key` header. Without it, search and live lookups return 503 `provider_not_configured`, graph ranges report the provider as unavailable, and added DOIs stay pending | Empty |
 | `SEMANTIC_SCHOLAR_API_KEY_FILE` | Optional secret file, takes precedence | Empty |
+| `DOI_RESOLVE_TIMEOUT_SECONDS` | Time budget for resolving one added identifier; a DOI still unresolved by then is saved as pending | `15` |
+| `IMPORT_RESOLVE_CONCURRENCY` | Parallel doi.org checks for imported DOIs that Semantic Scholar does not know (the lookups themselves are batched, 500 per call) | `4` |
+| `IMPORT_REQUEST_BUDGET_SECONDS` | Time budget for resolving one import request; lines left over are reported as pending or retryable | `25` |
+| `GRAPH_RELATED_RANGE_SIZE` | Papers per related-paper range in the graph (5–100) | `30` |
+| `GRAPH_RELATED_CHUNK_SIZE` | Semantic Scholar citation/reference page size (100–1000) | `1000` |
+| `GRAPH_RELATED_MAX_RESULTS` | Depth cap in raw provider records per paper and direction (1000–10000); larger lists read "first 10,000 of N" | `10000` |
+| `GRAPH_RELATED_PAGES_PER_REQUEST` | Provider pages fetched per request while a list is collected and ranked (1–10) | `4` |
+| `GRAPH_RELATED_SCAN_BUDGET_SECONDS` | Time one graph request may spend collecting a list (at most 20) | `20` |
+| `GRAPH_RELATED_TOPUP_CONCURRENCY` | Pinned sources expanded in parallel (1–8; the provider allows one call at a time) | `1` |
+| `BACKUPS_ENABLED` | Declares that the operator keeps database backups; must match `legal.json` in production and requires the deletion journal | `true` in code, `false` in `.env.example` |
+| `DELETION_JOURNAL_ENABLED` | Off-site S3 journal of account deletions, replayed after a restore; defaults to `BACKUPS_ENABLED` | Follows `BACKUPS_ENABLED` |
+| `LEGAL_CONFIG_PATH` | Path to the operator's `legal.json`; required in production, development uses built-in placeholder data | Empty |
 | `CORS_ORIGINS` | JSON list of allowed browser origins | Local web ports |
 | `CACHE_TTL_*` | Provider-cache lifetimes in seconds | See `.env.example` |
 
 Never commit `.env`, API keys, JWT secrets, database dumps, or Zotero credentials. The repository's `.gitignore` excludes the usual local secret files, but deployment secrets remain the operator's responsibility.
+
+Run a single API worker per Semantic Scholar key: the client paces every provider call (searches, lookups, imports and graph list collection) through one process-local queue, one call every two seconds. See [Semantic Scholar integration](docs/Architecture/SemanticScholar.md).
+
+### Backups
+
+The Compose file includes an opt-in `backup` profile that writes verified, optionally encrypted `pg_dump` archives on a schedule (`docker compose --profile backup up -d backup`). It is off by default. [Database backups and restore](docs/Operations/Backups.md) covers encryption, off-host copies, what `BACKUPS_ENABLED` and `legal.json` must then say, and a tested restore runbook.
+
+### Upgrading an existing installation
+
+> [!WARNING]
+> Migration `1d2e3f4a5b6c` is an irreversible data repair: it re-keys paper identifiers stored before input normalization existed (bare DOIs, `DOI:` labels, doi.org links) to `doi:<lowercase DOI>` and merges the duplicates this creates. Its downgrade is a no-op, so the only way back is a dump taken just before the upgrade. Follow [Before deploying migration 1d2e3f4a5b6c](docs/Operations/Backups.md#before-deploying-migration-1d2e3f4a5b6c), in this order:
+>
+> ```sh
+> docker compose build                                   # the new release
+> docker compose stop api mail-worker                    # no writes after the dump
+> docker compose run --rm migrate python -m scripts.repair_paper_keys --dry-run
+> docker compose --profile backup run --rm backup once   # or take your own pg_dump
+> docker compose up -d                                   # migrate applies the migration first
+> ```
+>
+> Run the preview through `migrate`, never `docker compose run api …`: `api` depends on `migrate`, which would apply the migration before the preview runs. See the [CHANGELOG](CHANGELOG.md) for breaking API changes.
 
 ## Local development
 
@@ -173,7 +206,7 @@ Application runtime images exclude test/development packages. CI runs PostgreSQL
 ├── docs/                    Architecture, requirements, and future work
 ├── .github/                 CI, issue forms, and pull-request template
 ├── docker-compose.yml       Local development stack with Mailpit
-├── tools/                   Checksum-verified CI scanners
+├── tools/                   CI scanners, the backup script, and the responsive regression script (see tools/README.md)
 ├── .env.example             Safe configuration template
 ├── CONTRIBUTING.md          Development and contribution workflow
 ├── CODE_OF_CONDUCT.md       Community standards
@@ -199,6 +232,11 @@ This public repository contains reviewed official source snapshots with a separa
 - [System architecture](docs/Requirements/03-SystemArchitecture.md)
 - [Provider integrations](docs/Requirements/04-APIIntegration.md)
 - [Persistence architecture](docs/Architecture/Persistence.md)
+- [Semantic Scholar integration](docs/Architecture/SemanticScholar.md)
+- [Collection sharing](docs/Architecture/CollectionSharing.md)
+- [Database backups and restore](docs/Operations/Backups.md)
+- [Privacy operations](docs/Privacy.md)
+- [Changelog](CHANGELOG.md)
 - [Future work](docs/FutureWorks.md)
 - OpenAPI documentation at `/api/docs` on a running instance
 
