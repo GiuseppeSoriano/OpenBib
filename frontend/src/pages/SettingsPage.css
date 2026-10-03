@@ -58,6 +58,8 @@
     font-size: 0.8rem;
     color: var(--color-text-secondary);
     line-height: 1.5;
+    /* A bare URL (zotero.org/settings/keys) wraps at large text sizes. */
+    overflow-wrap: anywhere;
   }
 
   .settings-self-start {

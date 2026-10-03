@@ -27,9 +27,10 @@ interface GraphHeaderProps {
 }
 
 /**
- * One header row that takes real space above the canvas: back, the page
- * `<h1>`, the mode badge, counts and pins, then the view controls. A
- * container query hides the badge and counts as the row narrows.
+ * The header takes real space above the canvas: back, the page `<h1>`, the
+ * mode badge, counts and pins, then the view controls. Wide, that is one row;
+ * narrow (container queries in em, so large text counts too), the title keeps
+ * a row of its own beside Back and the rest wraps below it.
  */
 export default function GraphHeader({
   mode,
@@ -66,7 +67,7 @@ export default function GraphHeader({
         >
           <ArrowLeft size={16} aria-hidden="true" />
         </button>
-        <h1 className="graph-title">
+        <h1 className={seedTitle ? "graph-title graph-title--seeded" : "graph-title"}>
           <span className="graph-title-main">{t("graph.title")}</span>
           {seedTitle && (
             <span className="graph-title-seed">

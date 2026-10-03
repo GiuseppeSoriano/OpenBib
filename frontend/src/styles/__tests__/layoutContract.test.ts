@@ -7,6 +7,7 @@ import tokensCss from "@/styles/tokens.css?raw";
 import indexCss from "@/styles/index.css?raw";
 import navCss from "@/components/nav/nav.css?raw";
 import graphCss from "@/pages/GraphPage.css?raw";
+import graphHeaderCss from "@/components/graph/graph.css?raw";
 import indexHtml from "../../../index.html?raw";
 import { COMPACT_QUERY, TOUCH_QUERY } from "@/lib/breakpoints";
 
@@ -37,7 +38,7 @@ function declarations(css: string, selector: string): string {
     .join(" ");
 }
 
-const sources = { tokensCss, indexCss, navCss, graphCss, indexHtml };
+const sources = { tokensCss, indexCss, navCss, graphCss, graphHeaderCss, indexHtml };
 
 describe("layout contract", () => {
   it("loads every source as raw text", () => {
@@ -95,6 +96,10 @@ describe("layout contract", () => {
 
   it("keeps panels scrollable above the safe area and locks the page behind dialogs", () => {
     expect(declarations(indexCss, "html")).toContain("font-size: 100%;");
+    expect(declarations(indexCss, "html")).toContain("scroll-padding-top: var(--nav-height);");
+    expect(declarations(indexCss, "html")).toContain(
+      "scroll-padding-bottom: var(--bottomnav-clearance);",
+    );
     expect(declarations(indexCss, "html.has-modal")).toContain("overflow: hidden;");
     const body = declarations(indexCss, ".panel-body");
     expect(body).toContain("overscroll-behavior: contain;");
@@ -135,5 +140,48 @@ describe("layout contract", () => {
       expect(decls, selector).toContain("min-height: var(--touch-target);");
     }
     expect(declarations(navCss, ".app-footer a")).toContain("min-height: var(--touch-target);");
+  });
+
+  it("lets buttons, menus and the tab bar reflow instead of widening the page", () => {
+    const btn = declarations(indexCss, ".btn");
+    expect(btn).not.toContain("white-space: nowrap");
+    expect(btn).toContain("max-width: 100%;");
+    expect(btn).toContain("flex-shrink: 0;");
+    expect(declarations(indexCss, ".segmented")).toContain("flex-wrap: wrap;");
+
+    const menu = declarations(indexCss, ".menu-popover");
+    expect(menu).toContain("max-width: min(22rem, calc(100vw - 2 * var(--space-md)));");
+    expect(menu).toContain("translate: var(--menu-shift, 0px) 0;");
+    const label = declarations(indexCss, ".menu-item-label");
+    expect(label).toContain("min-width: 0;");
+    expect(label).toContain("-webkit-line-clamp: 2;");
+    expect(label).not.toContain("white-space: nowrap");
+
+    expect(declarations(navCss, ".tabbar-link")).toContain("min-width: 0;");
+    expect(declarations(navCss, ".tabbar-link span")).toContain("text-overflow: ellipsis;");
+  });
+
+  it("compacts the app and graph headers with em container queries", () => {
+    expect(declarations(navCss, ".topnav")).toContain("container: topnav / inline-size;");
+    const nav = squash(navCss);
+    // The container is the content box: the viewport minus 2em of padding
+    // below 640px. At 100% text Sign in goes icon-only below a 360px viewport
+    // (327px box = 20.4375em) and the wordmark stays on a 320px one (288px box).
+    expect(nav).toMatch(/@container topnav \(max-width: 20\.4375em\) \{ \.topnav-signin-label \{/);
+    expect(nav).toMatch(/@container topnav \(max-width: 17\.99em\) \{ \.topnav-wordmark \{/);
+    expect(nav).not.toContain("@media (max-width: 359px)");
+
+    expect(declarations(graphHeaderCss, ".graph-header")).toContain(
+      "container: graph-header / inline-size;",
+    );
+    const graph = squash(graphHeaderCss);
+    expect(graph).not.toMatch(/@container graph-header \([^)]*px\)/);
+    // Narrow: the title keeps a row of its own; the controls wrap below it.
+    expect(graph).toMatch(
+      /@container graph-header \(max-width: [\d.]+em\) \{ \.graph-header-row \{ flex-wrap: wrap;/,
+    );
+    const seed = declarations(graphHeaderCss, ".graph-title-seed");
+    expect(seed).toContain("min-width: 0;");
+    expect(seed).toContain("text-overflow: ellipsis;");
   });
 });

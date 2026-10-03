@@ -62,6 +62,18 @@ describe("AddToCollectionMenu", () => {
     expect(saved).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: /Deep Learning/ })).toBeEnabled();
   });
+
+  it("keeps each full collection name in the item's tooltip", async () => {
+    renderWithProviders(
+      <AddToCollectionMenu canonicalKey="doi:10.1/add" savedInCollections={["c2"]} />,
+    );
+
+    fireEvent.click(screen.getByTestId("add-to-collection"));
+    const open = await screen.findByRole("menuitem", { name: /Deep Learning/ });
+    expect(open).toHaveAttribute("title", "Deep Learning");
+    const saved = screen.getByRole("menuitem", { name: /Optimization/ });
+    expect(saved.getAttribute("title")).toMatch(/^Optimization\n\S/);
+  });
 });
 
 describe("AddToCollectionMenu — outcomes", () => {

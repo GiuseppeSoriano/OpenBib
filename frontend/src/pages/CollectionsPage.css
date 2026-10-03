@@ -68,6 +68,7 @@
 
   .collection-item-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
     font-size: 0.76rem;

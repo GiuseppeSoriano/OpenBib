@@ -115,7 +115,8 @@ export default function AddToCollectionMenu({
                 role="menuitem"
                 className="menu-item"
                 disabled={saved || addMutation.isPending}
-                title={saved ? t("paper.alreadySaved") : collection.name}
+                // The label may be clamped: the tooltip always has the full name.
+                title={saved ? `${collection.name}\n${t("paper.alreadySaved")}` : collection.name}
                 onClick={() => addMutation.mutate(collection.id)}
               >
                 <span className="menu-item-check">{saved && <Check size={14} />}</span>

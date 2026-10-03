@@ -136,18 +136,57 @@
     margin-left: auto;
   }
 
-  @container graph-header (max-width: 759px) {
+  /* The breakpoints are in em so they follow the text size: at 200% text the
+     header compacts as if it were half as wide. */
+  @container graph-header (max-width: 59.99em) {
     .graph-counts {
       display: none;
     }
   }
-  @container graph-header (max-width: 399px) {
-    .graph-mode-badge {
+
+  /* Narrow header (phones, tablets, large text): the title gets its own row
+     beside Back, and the badges and view controls move to a second row. A
+     seed title stacks under a small "Citation graph" line and keeps the
+     row's full width. */
+  @container graph-header (max-width: 49.99em) {
+    .graph-header-row {
+      flex-wrap: wrap;
+      row-gap: var(--space-xs);
+    }
+    .graph-title {
+      flex: 1 1 calc(100% - var(--control-min) - var(--space-sm) - 1px);
+    }
+    .graph-title--seeded {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+    .graph-title--seeded .graph-title-main {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--color-text-secondary);
+    }
+    .graph-title--seeded .graph-title-seed {
+      padding-left: 0;
+      border-left: none;
+      color: var(--color-text);
+      font-weight: 600;
+    }
+  }
+  @container graph-header (min-width: 40em) and (max-width: 49.99em) {
+    .graph-counts {
+      display: inline;
+    }
+  }
+  @container graph-header (max-width: 24.99em) {
+    .graph-controls-label {
       display: none;
     }
   }
-  @container graph-header (max-width: 359px) {
-    .graph-controls-label {
+  @container graph-header (max-width: 16.99em) {
+    .graph-mode-badge {
       display: none;
     }
   }
