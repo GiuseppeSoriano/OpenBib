@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Pin, PinOff } from "lucide-react";
+import { Pin, PinOff } from "lucide-react";
 import VersionPicker from "@/components/search/VersionPicker";
 import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
 import type { GraphNode, PaperMetadata } from "@/types";
@@ -39,9 +39,15 @@ interface GraphNodePopupProps {
   onTogglePin: () => void;
   onSelectVersion: (version: PaperMetadata) => void;
   onViewDetails: () => void;
+  /** Loads the paper's first range of related papers (1–30). */
+  onExplore?: () => void;
 }
 
-/** The selected paper: pin toggle, title, authors, meta, versions, details. */
+/**
+ * The selected paper: title and pin toggle, authors, meta, versions, then
+ * View details and Explore from here. On wide screens it floats over the
+ * canvas's top-right corner; in the compact sheet it is a plain card.
+ */
 export default function GraphNodePopup({
   node,
   pinned,
@@ -49,6 +55,7 @@ export default function GraphNodePopup({
   onTogglePin,
   onSelectVersion,
   onViewDetails,
+  onExplore,
 }: GraphNodePopupProps) {
   const { t } = useTranslation();
   const titleId = useId();
@@ -64,7 +71,7 @@ export default function GraphNodePopup({
 
   return (
     <section
-      className={`graph-popup graph-popup--${variant}${variant === "card" ? " card" : ""}`}
+      className={`graph-popup graph-popup--${variant}`}
       aria-labelledby={titleId}
       data-testid="graph-node-popup"
     >
@@ -91,12 +98,18 @@ export default function GraphNodePopup({
           onSelect={onSelectVersion}
         />
       )}
-      {!unresolved && (
+      {(!unresolved || onExplore) && (
         <div className="graph-popup-actions">
-          <button type="button" className="btn btn-secondary graph-btn" onClick={onViewDetails}>
-            <FileText size={14} aria-hidden="true" />
-            {t("paper.viewDetails")}
-          </button>
+          {!unresolved && (
+            <button type="button" className="btn btn-primary btn--sm" onClick={onViewDetails}>
+              {t("paper.viewDetails")}
+            </button>
+          )}
+          {onExplore && (
+            <button type="button" className="btn btn-secondary btn--sm" onClick={onExplore}>
+              {t("graph.exploreFromHere")}
+            </button>
+          )}
         </div>
       )}
     </section>

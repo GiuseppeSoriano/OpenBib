@@ -2,6 +2,7 @@ import { useId, useRef, type KeyboardEvent, type ReactNode, type RefObject } fro
 import { useTranslation } from "react-i18next";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import ExpandPinnedAction from "@/components/graph/ExpandPinnedAction";
+import { RelationSource } from "@/components/graph/GraphBottomBar";
 import { DirectionToggle, OrderingToggle } from "@/components/graph/GraphControls";
 import GraphLegend from "@/components/graph/GraphLegend";
 import GraphNodePopup from "@/components/graph/GraphNodePopup";
@@ -123,6 +124,8 @@ interface GraphSheetControlsProps {
   onTogglePin: () => void;
   onSelectVersion: (version: PaperMetadata) => void;
   onViewDetails: () => void;
+  /** Loads the selected paper's first range (closes the sheet). */
+  onExplore?: () => void;
   onDirection: (direction: RelationDirection) => void;
   onOrder: (order: CitingOrder) => void;
   onRange: (selection: RangeSelection) => void;
@@ -144,6 +147,7 @@ export function GraphSheetControls({
   onTogglePin,
   onSelectVersion,
   onViewDetails,
+  onExplore,
   onDirection,
   onOrder,
   onRange,
@@ -156,15 +160,12 @@ export function GraphSheetControls({
   const { t } = useTranslation();
   const viewId = useId();
   const { mode } = state;
-  const source = node
-    ? t(mode.direction === "cites" ? "graph.referencesOf" : "graph.citersOf", { title: paperTitle(node.selected_version, t) })
-    : t("graph.noSelection");
 
   return (
     <>
       {node && (
         <div className="graph-sheet-section">
-          <p className="graph-sheet-label">{t("graph.selectedPaper")}</p>
+          <p className="graph-sheet-label label-caps">{t("graph.selectedPaper")}</p>
           <GraphNodePopup
             node={node}
             pinned={state.pinned.has(node.id)}
@@ -172,25 +173,24 @@ export function GraphSheetControls({
             onTogglePin={onTogglePin}
             onSelectVersion={onSelectVersion}
             onViewDetails={onViewDetails}
+            onExplore={onExplore}
           />
         </div>
       )}
       <div className="graph-sheet-section">
-        <p className="graph-source">
-          <span className="graph-source-text">{source}</span>
-          <span className="graph-source-pins">{t("graph.pinnedCount", { count: state.pinned.size })}</span>
-        </p>
+        <RelationSource direction={mode.direction} title={node ? paperTitle(node.selected_version, t) : null} />
+        <p className="graph-hint tabular">{t("graph.pinnedCount", { count: state.pinned.size })}</p>
         <div className="graph-sheet-field">
-          <span className="graph-sheet-label" aria-hidden="true">
+          <span className="graph-sheet-label label-caps" aria-hidden="true">
             {t("graph.direction")}
           </span>
-          <DirectionToggle value={mode.direction} onChange={onDirection} />
+          <DirectionToggle value={mode.direction} onChange={onDirection} block />
         </div>
         <div className="graph-sheet-field">
-          <span className="graph-sheet-label" aria-hidden="true">
+          <span className="graph-sheet-label label-caps" aria-hidden="true">
             {t("graph.ordering")}
           </span>
-          <OrderingToggle value={mode.order} onChange={onOrder} />
+          <OrderingToggle value={mode.order} onChange={onOrder} block />
         </div>
         {node && rangeControls ? (
           <RangeNavigator controls={rangeControls} onSelect={onRange} />
@@ -206,7 +206,7 @@ export function GraphSheetControls({
         )}
       </div>
       <div className="graph-sheet-section" role="group" aria-labelledby={viewId}>
-        <p id={viewId} className="graph-sheet-label">
+        <p id={viewId} className="graph-sheet-label label-caps">
           {t("graph.view")}
         </p>
         <div className="graph-sheet-view">
@@ -221,7 +221,7 @@ export function GraphSheetControls({
         </div>
       </div>
       <div className="graph-sheet-section">
-        <p className="graph-sheet-label">{t("graph.legend")}</p>
+        <p className="graph-sheet-label label-caps">{t("graph.legend")}</p>
         <GraphLegend variant="inline" />
       </div>
     </>

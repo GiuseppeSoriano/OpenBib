@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { GitFork } from "lucide-react";
 import api, { graph as graphApi, library } from "@/lib/api";
 import { apiStatus } from "@/lib/apiError";
-import { COMPACT_QUERY, PHONE_MAX } from "@/lib/breakpoints";
+import { COMPACT_QUERY, PHONE_MAX, RAIL_MAX } from "@/lib/breakpoints";
 import { collectionRead, useCollectionAccess } from "@/lib/collection-access";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,6 +44,9 @@ export type GraphMode = "manual" | "paper" | "collection" | "library";
 type SeededMode = Exclude<GraphMode, "manual">;
 type CollectionAccess = ReturnType<typeof useCollectionAccess>;
 
+/** Wide enough for the paper list to sit open beside the canvas. */
+const WIDE_QUERY = `(min-width: ${RAIL_MAX + 1}px)`;
+
 export default function GraphPage({ mode }: { mode: GraphMode }) {
   const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
   const { user } = useAuth();
@@ -58,15 +61,19 @@ export default function GraphPage({ mode }: { mode: GraphMode }) {
   return <GraphExplorer key={`${mode}:${paramKey}:${scope}`} mode={mode} paramKey={paramKey} scope={scope} access={access} />;
 }
 
-/** The /graph route has no seed: point the user at the entry points. */
+/**
+ * The /graph route has no seed: the graph header (home mark and title, no
+ * Back since nothing precedes it) and the entry points.
+ */
 function ManualGraph() {
   const { t } = useTranslation();
+  const compact = useMediaQuery(COMPACT_QUERY);
   return (
     <div className="graph-empty">
-      <h1 className="sr-only">{t("graph.title")}</h1>
+      <GraphHeader title={null} hasGraph={false} nodeCount={0} edgeCount={0} pinnedCount={0} compact={compact} />
       <EmptyState
         icon={GitFork}
-        title={t("graph.title")}
+        title={t("graph.manualTitle")}
         description={t("graph.manualHint")}
         action={
           <Link to="/search" className="btn btn-primary">
@@ -175,7 +182,9 @@ function GraphExplorer({
     nodeCountRef.current = forceData.nodes.length;
   }, [forceData]);
 
-  const [papersOpen, setPapersOpen] = useState(false);
+  // Wide screens (the mockup's 1024px and up) show the paper list beside the
+  // canvas from the start; narrower ones open it on demand.
+  const [papersOpen, setPapersOpen] = useState(() => !!window.matchMedia?.(WIDE_QUERY).matches);
   // Compact "Graph controls" sheet. Its tab and every choice made in it live
   // here (or in the exploration), so reopening shows them unchanged.
   const [controlsOpen, setControlsOpen] = useState(false);
@@ -195,6 +204,8 @@ function GraphExplorer({
   const controls = selectedId ? rangeControls(state, selectedId) : null;
   const branch = selectedId ? currentBranch(state, selectedId) : undefined;
   const currentRangeIds = branch && branch.rangeIndex !== null ? branch.memberIds : [];
+  const currentItem = controls?.loaded ? controls.items.find((item) => item.kind === "range" && item.current) : undefined;
+  const currentRange = currentItem?.kind === "range" ? { start: currentItem.start, end: currentItem.end } : null;
   const visibleNodes = forceData.nodes.map((forceNode) => forceNode.node);
   const nodeCount = forceData.nodes.length;
   const edgeCount = forceData.links.length;
@@ -213,6 +224,10 @@ function GraphExplorer({
 
   const seedNode = mode === "paper" && base ? base.nodes.find((node) => node.is_seed) ?? base.nodes[0] : undefined;
   const seedTitle = seedHeading(seedNode ? catalog.getNode(seedNode.id) ?? seedNode : undefined);
+  // The serif title under "Citation graph": the seed, the collection or the library.
+  let headerTitle: string | null = seedTitle;
+  if (mode === "library") headerTitle = t("graph.titleLibrary");
+  else if (mode === "collection") headerTitle = accessProbe.data?.name || t("graph.modeCollection");
   const canvasLabel = seedTitle
     ? t("graph.canvasLabelSeed", { title: seedTitle, nodes: nodeCount, edges: edgeCount })
     : t("graph.canvasLabel", { nodes: nodeCount, edges: edgeCount });
@@ -228,6 +243,16 @@ function GraphExplorer({
   const selectFromList = (id: string) => {
     exploration.select(id);
     graphRef.current?.focusNode(id);
+  };
+
+  // "Explore from here": the paper's first range, 1–30. Loads it the first
+  // time, goes back to it from a later range (or after pins changed) and
+  // otherwise leaves the list as it is.
+  const exploreFrom = (id: string) => {
+    const paperControls = rangeControls(state, id);
+    const shown = paperControls.items.find((item) => item.kind === "range" && item.current);
+    if (!paperControls.loaded) exploration.loadFirstRangeFor(id);
+    else if (paperControls.pinsChanged || (shown?.kind === "range" && shown.index !== 0)) exploration.loadRange({ index: 0 });
   };
 
   const sheetOpen = compact && controlsOpen;
@@ -314,8 +339,7 @@ function GraphExplorer({
   return (
     <div className="graph-screen" data-testid="graph-screen">
       <GraphHeader
-        mode={mode}
-        seedTitle={seedTitle}
+        title={headerTitle}
         hasGraph={hasGraph}
         nodeCount={nodeCount}
         edgeCount={edgeCount}
@@ -341,7 +365,9 @@ function GraphExplorer({
             nodes={visibleNodes}
             pinOrder={state.pinOrder}
             pinned={state.pinned}
+            saved={savedGroupKeys}
             currentRangeIds={currentRangeIds}
+            currentRange={currentRange}
             selectedId={selectedId}
             onSelect={selectFromList}
             onTogglePin={togglePin}
@@ -371,6 +397,7 @@ function GraphExplorer({
               onTogglePin={() => togglePin(selectedNode.id)}
               onSelectVersion={(version) => exploration.versionChanged(selectedNode.id, version.canonical_key)}
               onViewDetails={() => setDetailsKey(selectedNode.selected_version.canonical_key)}
+              onExplore={() => exploreFrom(selectedNode.id)}
             />
           )}
           {!compact && hasGraph && <GraphLegend />}
@@ -428,6 +455,11 @@ function GraphExplorer({
               onTogglePin={() => selectedNode && togglePin(selectedNode.id)}
               onSelectVersion={(version) => selectedNode && exploration.versionChanged(selectedNode.id, version.canonical_key)}
               onViewDetails={() => selectedNode && setDetailsKey(selectedNode.selected_version.canonical_key)}
+              onExplore={() => {
+                if (!selectedNode) return;
+                closeSheet();
+                exploreFrom(selectedNode.id);
+              }}
               onDirection={setDirection}
               onOrder={setOrder}
               onRange={loadRange}
@@ -444,7 +476,9 @@ function GraphExplorer({
               nodes={visibleNodes}
               pinOrder={state.pinOrder}
               pinned={state.pinned}
+              saved={savedGroupKeys}
               currentRangeIds={currentRangeIds}
+              currentRange={currentRange}
               selectedId={selectedId}
               onSelect={selectFromList}
               onTogglePin={togglePin}

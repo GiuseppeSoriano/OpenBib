@@ -6,6 +6,45 @@ import RangeNavigator, { type RangeSelection } from "@/components/graph/RangeNav
 import type { ExplorationState, RangeControls } from "@/components/graph/graphExploration";
 import type { CitingOrder, RelationDirection } from "@/types";
 
+/** Stands in for the title while the sentence is translated, then is split on. */
+const TITLE_MARK = "\u0000";
+
+/**
+ * What the ranges refer to: "Citers of <cite>Title</cite>" (the title set
+ * in italic serif), or the hint to select a paper.
+ */
+export function RelationSource({
+  direction,
+  title,
+  className = "graph-source",
+}: {
+  direction: RelationDirection;
+  title: string | null;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  if (title === null) {
+    return (
+      <p className={className}>
+        <span className="graph-source-text">{t("graph.noSelection")}</span>
+      </p>
+    );
+  }
+  const sentence = t(direction === "cites" ? "graph.referencesOf" : "graph.citersOf", { title: TITLE_MARK });
+  const at = sentence.indexOf(TITLE_MARK);
+  const before = at < 0 ? sentence : sentence.slice(0, at);
+  const after = at < 0 ? "" : sentence.slice(at + TITLE_MARK.length);
+  return (
+    <p className={className}>
+      <span className="graph-source-text">
+        {before}
+        <cite className="graph-source-title">{title}</cite>
+        {after}
+      </span>
+    </p>
+  );
+}
+
 interface GraphBottomBarProps {
   state: ExplorationState;
   /** Display title of the selected paper, if any. */
@@ -24,8 +63,8 @@ interface GraphBottomBarProps {
 
 /**
  * Desktop exploration bar below the canvas, always visible. Row A: what the
- * ranges refer to, pins, Direction and Order. Row B: the selected paper's
- * ranges, or "Expand pinned nodes" with nothing selected, plus live status.
+ * ranges refer to, Direction and Order. Row B: the selected paper's ranges,
+ * or "Expand pinned nodes" with nothing selected, plus live status.
  */
 export default function GraphBottomBar({
   state,
@@ -41,20 +80,12 @@ export default function GraphBottomBar({
   onDismiss,
   onContinueRanking,
 }: GraphBottomBarProps) {
-  const { t } = useTranslation();
   const { mode } = state;
-  const source =
-    selectedTitle === null
-      ? t("graph.noSelection")
-      : t(mode.direction === "cites" ? "graph.referencesOf" : "graph.citersOf", { title: selectedTitle });
 
   return (
     <div className="graph-bottombar" data-testid="graph-bottombar">
       <div className="graph-bar-row">
-        <p className="graph-source">
-          <span className="graph-source-text">{source}</span>
-          <span className="graph-source-pins">{t("graph.pinnedCount", { count: state.pinned.size })}</span>
-        </p>
+        <RelationSource direction={mode.direction} title={selectedTitle} />
         <div className="graph-bar-toggles">
           <DirectionToggle value={mode.direction} onChange={onDirection} />
           <OrderingToggle value={mode.order} onChange={onOrder} />

@@ -3,14 +3,12 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
 import { useTranslation } from "react-i18next";
-import { useTheme } from "@/contexts/ThemeContext";
 import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
 import { nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
 import { paperTitle, truncateLabel } from "@/components/graph/paperText";
@@ -48,15 +46,47 @@ interface CitationGraphProps {
 interface ThemeStyle extends NodeStyleColors {
   edge: string;
   label: string;
+  /** The selected paper's label (the amber of the selection ring, as text). */
+  selectedLabel: string;
+  /** --graph-canvas: the halo behind always-on labels. */
+  canvas: string;
   /** Canvas has no var() support, so the label stack is resolved up front. */
   labelFont: string;
 }
+
+/** Opacity of the soft halo around the selection ring (--graph-node-halo). */
+const HALO_ALPHA = 0.18;
 
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
+
+/**
+ * Resolves the canvas colors from the theme tokens. Fallbacks are the
+ * light-theme Verdigris values, used only where the custom properties fail
+ * to resolve. (The halo's color-mix() is not read: the canvas draws the ring
+ * colour at HALO_ALPHA instead, which needs no colour parsing.)
+ */
+function readThemeColors(): ThemeStyle {
+  const canvas = cssVar("--graph-canvas") || cssVar("--color-bg") || "#f8faf9";
+  return {
+    node: cssVar("--graph-node") || "#a0a8a4",
+    pinned: cssVar("--graph-node-pinned") || cssVar("--color-accent") || "#33695f",
+    saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
+    selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
+    background: cssVar("--graph-node-gap") || canvas,
+    surface: cssVar("--color-surface") || "#ffffff",
+    edge: cssVar("--graph-edge") || "#d6dcd8",
+    label: cssVar("--color-text") || "#1a1e1d",
+    selectedLabel: cssVar("--color-state-toread-text") || "#7a4d11",
+    canvas,
+    labelFont: cssVar("--font-serif") || "Georgia, serif",
+  };
+}
+
+const MAX_FIT_ZOOM = 2.5;
 
 function nodeRadius(node: ForceNode): number {
   const citations = node.node.selected_version.cited_by_count ?? 0;
@@ -85,7 +115,6 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   ref,
 ) {
   const { t } = useTranslation();
-  const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<ForceGraphMethods<any, any>>(undefined);
@@ -135,23 +164,17 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     }
   }, []);
 
-  // Resolve theme colors once per theme switch; the canvas re-draws every
-  // frame so nodes/edges restyle instantly. Fallbacks are the light-theme
-  // Verdigris values, used only where the custom properties fail to resolve.
-  const colors = useMemo<ThemeStyle>(() => {
-    void resolved;
-    return {
-      node: cssVar("--graph-node") || "#a0a8a4",
-      pinned: cssVar("--graph-node-pinned") || cssVar("--color-accent") || "#33695f",
-      saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
-      selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
-      background: cssVar("--color-bg") || "#f8faf9",
-      surface: cssVar("--color-surface") || "#ffffff",
-      edge: cssVar("--graph-edge") || "#d6dcd8",
-      label: cssVar("--color-text-secondary") || "#5f6b67",
-      labelFont: cssVar("--font-sans") || "system-ui, sans-serif",
-    };
-  }, [resolved]);
+  // Theme colors, re-read whenever <html data-theme> changes; the canvas
+  // re-draws every frame so nodes/edges restyle instantly. The attribute is
+  // observed rather than the theme context: ThemeProvider writes it in an
+  // effect that runs after this component renders, so reading the tokens on
+  // the context change would still see the previous theme.
+  const [colors, setColors] = useState<ThemeStyle>(readThemeColors);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setColors(readThemeColors()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const findNode = (id: string) => dataRef.current.nodes.find((node) => node.id === id);
 
@@ -164,7 +187,18 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       const fg = fgRef.current;
       if (fg) fg.zoom(fg.zoom() / 1.4, 250);
     },
-    fit: () => fgRef.current?.zoomToFit(400, 60),
+    fit: () => {
+      const fg = fgRef.current;
+      if (!fg) return;
+      fg.zoomToFit(400, 60);
+      // A graph of one or two papers would otherwise be zoomed until a node
+      // fills the screen; cap the fitted zoom so nodes keep their scale.
+      window.setTimeout(() => {
+        if (fgRef.current && fgRef.current.zoom() > MAX_FIT_ZOOM) {
+          fgRef.current.zoom(MAX_FIT_ZOOM, 200);
+        }
+      }, 420);
+    },
     reheat: () => fgRef.current?.d3ReheatSimulation(),
     focusNode: (id: string) => {
       const fg = fgRef.current;
@@ -231,16 +265,19 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         colors,
       );
 
+      // The selected node is hollow (canvas-filled inside its amber ring), as
+      // the legend's Selected swatch shows; its state colour moves to the
+      // pin stroke and version ring below.
       ctx.beginPath();
       ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = style.fill;
+      ctx.fillStyle = style.selectedRing ? colors.canvas : style.fill;
       ctx.fill();
 
       // A thin inner stroke marks pins without relying on color alone.
       if (style.innerStroke) {
         ctx.beginPath();
         ctx.arc(x, y, Math.max(r - 1.5 * px, r * 0.5), 0, 2 * Math.PI);
-        ctx.strokeStyle = style.innerStroke;
+        ctx.strokeStyle = style.selectedRing ? style.fill : style.innerStroke;
         ctx.lineWidth = px;
         ctx.stroke();
       }
@@ -256,8 +293,15 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         ctx.setLineDash([]);
       }
 
-      // Selection: an outer ring over a background-colored gap ring.
+      // Selection: a soft halo, then an outer ring over a canvas-colored gap ring.
       if (style.selectedRing) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 7.5 * px, 0, 2 * Math.PI);
+        ctx.strokeStyle = style.selectedRing.color;
+        ctx.lineWidth = 3 * px;
+        ctx.globalAlpha = HALO_ALPHA;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
         ctx.beginPath();
         ctx.arc(x, y, r + 4.5 * px, 0, 2 * Math.PI);
         ctx.strokeStyle = style.selectedRing.color;
@@ -270,23 +314,31 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         ctx.stroke();
       }
 
-      // Titles fade in as the user zooms; the selection and a few pins are
-      // always labelled, over a halo so they read on top of edges.
+      // Titles (serif, like every paper title) fade in as the user zooms;
+      // the selection and a few pins are always labelled, over a halo so
+      // they read on top of edges. The selection's label takes its amber.
       const always = alwaysLabelIds.has(node.id);
       if (always || globalScale > 1.3) {
         const label = truncateLabel(paperTitle(node.node.selected_version, t));
-        ctx.font = `${Math.max(10 * px, 2.6)}px ${colors.labelFont}`;
+        // Lay the text out at 12px and scale the context instead: a tiny font
+        // size scaled up by the zoom gets uneven glyph spacing.
+        const k = Math.max(12 * px, 3) / 12;
+        const labelY = y + r + (style.selectedRing ? 10 * px : 3 * px);
+        ctx.save();
+        ctx.translate(x, labelY);
+        ctx.scale(k, k);
+        ctx.font = `12px ${colors.labelFont}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        const labelY = y + r + (style.selectedRing ? 6 * px : 2);
         if (always) {
           ctx.lineJoin = "round";
-          ctx.lineWidth = 3 * px;
-          ctx.strokeStyle = colors.background;
-          ctx.strokeText(label, x, labelY);
+          ctx.lineWidth = (3 * px) / k;
+          ctx.strokeStyle = colors.canvas;
+          ctx.strokeText(label, 0, 0);
         }
-        ctx.fillStyle = colors.label;
-        ctx.fillText(label, x, labelY);
+        ctx.fillStyle = style.selectedRing ? colors.selectedLabel : colors.label;
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
       }
     },
     [alwaysLabelIds, colors, pinnedIds, savedGroupKeys, selectedId, t],

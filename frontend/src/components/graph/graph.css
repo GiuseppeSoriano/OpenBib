@@ -22,7 +22,7 @@
 
   .graph-btn {
     min-height: var(--control-min);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     padding-block: 0;
   }
 
@@ -36,32 +36,51 @@
     padding: 0;
   }
 
+  /* Outlined square controls: Back, Papers, zoom, Fit, the sheet trigger. */
   .graph-view-btn {
-    border: 1px solid var(--color-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text-secondary);
-    transition: color 0.1s ease, border-color 0.1s ease;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
   }
   .graph-view-btn:hover {
+    background: var(--color-surface-hover);
     color: var(--color-text);
-    border-color: var(--color-text-secondary);
+  }
+  .graph-papers-btn,
+  .graph-controls-trigger {
+    padding: 0 10px;
+  }
+  .graph-papers-btn[aria-expanded="true"] {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
   }
   .graph-view-btn:focus-visible,
   .graph-range-btn:focus-visible,
   .graph-pin-toggle:focus-visible,
-  .graph-list-select:focus-visible {
+  .graph-list-select:focus-visible,
+  .graph-summary-title:focus-visible,
+  .graph-sheet-tab:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
 
-  .graph-segmented button {
-    min-height: var(--control-min);
-  }
-
   .graph-hint {
     margin: 0;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
 
@@ -69,183 +88,193 @@
 
   .graph-header {
     container: graph-header / inline-size;
-    background: var(--color-surface);
-    border-bottom: 1px solid var(--color-border);
-    padding: var(--space-xs) var(--space-md);
+    position: relative;
+    padding: 0.875rem var(--space-lg);
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-bg);
   }
 
   .graph-header-row {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: 0.75rem;
     min-width: 0;
   }
 
+  .graph-home {
+    flex-shrink: 0;
+  }
+
+  /* One <h1>: a small caps "Citation graph" line over the serif title. */
   .graph-title {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-sm);
+    flex: 1 1 20rem;
     min-width: 0;
     margin: 0;
-    font-size: 0.95rem;
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
     font-weight: 600;
+    line-height: var(--leading-tight);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .graph-title-main {
-    flex-shrink: 0;
+  .graph-title--seeded {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .graph-title--seeded .graph-title-main {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+    font-weight: 400;
+    letter-spacing: var(--tracking-caps-wide);
+    line-height: var(--leading-snug);
+    text-transform: uppercase;
+    color: var(--color-text-muted);
   }
   .graph-title-seed {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding-left: var(--space-sm);
-    border-left: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-    font-weight: 500;
   }
-
-  .graph-mode-badge {
-    flex-shrink: 0;
-    font-size: 0.68rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-accent);
-    background: var(--color-accent-soft);
-    border-radius: var(--radius-full);
-    padding: 1px 8px;
+  /* The pins join the label line only where the counts fold away. */
+  .graph-title-pins {
+    display: none;
   }
 
   .graph-counts {
     flex-shrink: 0;
-    font-size: 0.75rem;
+    margin: 0;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    white-space: nowrap;
-  }
-
-  .graph-pinned-badge {
-    flex-shrink: 0;
     white-space: nowrap;
   }
 
   .graph-header-actions {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 6px;
     flex-shrink: 0;
     margin-left: auto;
   }
 
-  /* The breakpoints are in em so they follow the text size: at 200% text the
-     header compacts as if it were half as wide. */
-  @container graph-header (max-width: 59.99em) {
-    .graph-counts {
-      display: none;
-    }
+  /* Phones and short landscape screens: a compact bar on the sidebar
+     ground, borderless icon buttons. */
+  .graph-header--compact {
+    padding: 6px var(--space-xs);
+    background: var(--color-sidebar);
+  }
+  .graph-header--compact .graph-header-row {
+    gap: 2px;
+  }
+  .graph-header--compact .graph-view-btn {
+    border-color: transparent;
+    background: transparent;
+  }
+  .graph-header--compact .graph-view-btn:hover {
+    background: var(--color-hover-quiet);
+  }
+  .graph-header--compact .graph-title {
+    flex: 1 1 0;
+    font-size: var(--text-base);
   }
 
-  /* Narrow header (phones, tablets, large text): the title gets its own row
-     beside Back, and the badges and view controls move to a second row. A
-     seed title stacks under a small "Citation graph" line and keeps the
-     row's full width. */
+  /* The breakpoints are in em so they follow the text size: at 200% text the
+     header compacts as if it were half as wide. Narrow: the wide layout's
+     title keeps a row of its own beside Home and Back and the controls wrap
+     below it; the counts fold into the label line ("Citation graph · 2
+     pinned") and stay readable to assistive tech. */
   @container graph-header (max-width: 49.99em) {
     .graph-header-row {
       flex-wrap: wrap;
       row-gap: var(--space-xs);
     }
-    .graph-title {
-      flex: 1 1 calc(100% - var(--control-min) - var(--space-sm) - 1px);
+    .graph-header:not(.graph-header--compact) .graph-title {
+      flex: 1 1 calc(100% - 2 * var(--control-min) - 1.5rem - 1px);
     }
-    .graph-title--seeded {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 0;
-    }
-    .graph-title--seeded .graph-title-main {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-size: 0.75rem;
-      font-weight: 500;
-      color: var(--color-text-secondary);
-    }
-    .graph-title--seeded .graph-title-seed {
-      padding-left: 0;
-      border-left: none;
-      color: var(--color-text);
-      font-weight: 600;
-    }
-  }
-  @container graph-header (min-width: 40em) and (max-width: 49.99em) {
-    .graph-counts {
+    .graph-title-pins {
       display: inline;
     }
+    .graph-counts {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
   }
-  @container graph-header (max-width: 24.99em) {
+  @container graph-header (max-width: 39.99em) {
+    .graph-controls-trigger {
+      padding: 0;
+    }
     .graph-controls-label {
       display: none;
     }
   }
-  @container graph-header (max-width: 16.99em) {
-    .graph-mode-badge {
-      display: none;
+  /* Very narrow (large text on a phone): Fit and the trigger wrap below. */
+  @container graph-header (max-width: 21.99em) {
+    .graph-header--compact .graph-title {
+      flex: 1 1 calc(100% - 2 * var(--control-min) - 4px - 1px);
     }
   }
 
-  /* ── Bottom bar (desktop) ───────────────────────────────── */
+  /* ── Bottom bar (wide screens) ──────────────────────────── */
 
   .graph-bottombar {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     max-height: 45dvh;
     overflow-y: auto;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-surface);
-    border-top: 1px solid var(--color-border);
+    padding: 0.75rem var(--space-lg);
+    background: var(--color-sidebar);
+    border-top: 1px solid var(--color-hairline);
   }
 
   .graph-bar-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-sm) var(--space-md);
+    gap: var(--space-sm) 1.25rem;
     min-width: 0;
   }
 
   .graph-source {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-sm);
-    flex: 1 1 16rem;
+    flex: 1 1 17.5rem;
     min-width: 0;
     margin: 0;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
   }
   .graph-source-text {
+    display: block;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: 500;
   }
-  .graph-source-pins {
-    flex-shrink: 0;
-    font-size: 0.75rem;
-    color: var(--color-text-secondary);
+  /* The italic serif title keeps the sentence's size and colour. */
+  .graph-source-title {
+    font-family: var(--font-serif);
+    font-style: italic;
   }
 
   .graph-bar-toggles {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--space-sm) 1.25rem;
   }
 
-  /* Ranges */
+  /* Ranges: ‹ 1–30 31–60 … › then "31–60 of N · ranked from …" */
   .graph-ranges {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-xs) var(--space-md);
+    gap: var(--space-sm) var(--space-md);
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -254,36 +283,50 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 2px;
   }
 
   .graph-range-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--control-min);
     min-height: var(--control-min);
-    padding: 0 0.6rem;
-    border: 1px solid var(--color-border);
+    padding: 0 10px;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    color: var(--color-text);
-    font-size: 0.8rem;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
+    transition: background-color var(--duration-fast) var(--ease-out);
   }
-  .graph-range-btn:hover {
-    background: var(--color-surface-hover);
+  .graph-range-btn:hover:not(:disabled) {
+    background: var(--color-hover-quiet);
+    color: var(--color-text);
+  }
+  .graph-range-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
   .graph-range-btn.is-current {
     border-color: var(--color-accent);
     background: var(--color-accent-soft);
-    color: var(--color-accent);
-    font-weight: 600;
+    color: var(--color-accent-strong);
   }
   /* Current but not loaded yet: the first tap loads it. */
   .graph-range-btn.is-unloaded {
     border-style: dashed;
     background: transparent;
   }
+  .graph-range-arrow {
+    padding: 0;
+  }
 
   .graph-range-gap {
-    color: var(--color-text-secondary);
+    padding: 0 2px;
+    color: var(--color-text-muted);
   }
 
   .graph-range-summary {
@@ -291,8 +334,8 @@
     flex-direction: column;
     gap: 2px;
     margin: 0;
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
 
   /* Expand pinned nodes */
@@ -309,7 +352,7 @@
     align-items: center;
     gap: var(--space-xs);
     margin: 0;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
   }
   .graph-expand-actions {
     display: flex;
@@ -327,7 +370,8 @@
     gap: var(--space-xs);
     flex: 1 1 14rem;
     min-width: 0;
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
   .graph-status-line {
     display: flex;
@@ -348,32 +392,39 @@
   .graph-popup {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: 2px;
     min-width: 0;
   }
+  /* Wide screens: a card floating over the canvas's top-right corner. */
   .graph-popup--card {
     position: absolute;
     top: var(--space-md);
     right: var(--space-md);
     z-index: 10;
-    width: min(320px, calc(100% - 2 * var(--space-md)));
+    width: min(300px, calc(100% - 2 * var(--space-md)));
     max-height: calc(100% - 2 * var(--space-md));
     overflow-y: auto;
-    padding: var(--space-md);
+    padding: 0.875rem var(--space-md);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-md);
   }
 
   .graph-popup-head {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-sm);
+    gap: 10px;
+    margin-bottom: var(--space-xs);
   }
   .graph-popup-title {
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 0.92rem;
+    font-family: var(--font-serif);
+    font-size: var(--text-base);
     font-weight: 600;
-    line-height: 1.35;
+    line-height: var(--leading-snug);
     overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 3;
@@ -382,7 +433,7 @@
   }
   .graph-popup-authors {
     margin: 0;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
     overflow-wrap: anywhere;
     display: -webkit-box;
@@ -392,14 +443,18 @@
   }
   .graph-popup-meta {
     margin: 0;
-    font-size: 0.75rem;
-    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
     overflow-wrap: anywhere;
+  }
+  .graph-popup .version-picker,
+  .graph-popup-actions {
+    margin-top: var(--space-sm);
   }
   .graph-popup-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
   }
 
   /* Pin toggle: the name stays constant; pressed is a filled accent. */
@@ -410,15 +465,18 @@
     flex-shrink: 0;
     width: var(--control-min);
     height: var(--control-min);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text-secondary);
-    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
   }
   .graph-pin-toggle:hover {
+    background: var(--color-surface-hover);
     color: var(--color-text);
-    border-color: var(--color-text-secondary);
   }
   .graph-pin-toggle[aria-pressed="true"] {
     background: var(--color-accent);
@@ -429,42 +487,41 @@
     background: var(--color-accent-hover);
     border-color: var(--color-accent-hover);
   }
+  /* In list rows and the summary: no outline at rest; pinned keeps the solid
+     accent fill, so the pressed state stays 3:1 against the row (WCAG 1.4.11). */
+  .graph-pin-toggle--quiet:not([aria-pressed="true"]) {
+    border-color: transparent;
+    background: transparent;
+  }
+  .graph-pin-toggle--quiet:not([aria-pressed="true"]):hover {
+    background: var(--color-hover-quiet);
+  }
 
   /* ── Paper list ─────────────────────────────────────────── */
 
   .graph-paper-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 0.875rem;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--space-sm) var(--space-md) var(--space-md);
-    background: var(--color-surface);
+    padding: 0.875rem 10px;
+    background: var(--color-sidebar);
   }
   .graph-drawer {
-    border-right: 1px solid var(--color-border);
-  }
-  .graph-paper-list-title {
-    margin: 0;
-    font-size: 0.85rem;
-    font-weight: 600;
+    border-right: 1px solid var(--color-hairline);
   }
   .graph-list-heading {
-    margin: var(--space-sm) 0 var(--space-xs);
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-text-secondary);
+    margin: 0 var(--space-sm) 6px;
   }
   .graph-list-count {
-    font-weight: 500;
+    font-weight: 400;
   }
   .graph-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -472,100 +529,115 @@
   .graph-list-row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 2px;
   }
   .graph-list-select {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: var(--space-sm);
     flex: 1;
     min-width: 0;
     min-height: var(--control-min);
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid transparent;
+    padding: 0 var(--space-sm);
+    border: none;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text);
+    font-size: var(--text-sm);
     text-align: left;
+    transition: background-color var(--duration-fast) var(--ease-out);
   }
   .graph-list-select:hover {
-    background: var(--color-surface-hover);
+    background: var(--color-hover-quiet);
   }
+  /* The selected paper: the selection's amber ground, as on the canvas. */
   .graph-list-select[aria-current="true"] {
-    border-color: var(--graph-node-selected);
-    background: var(--color-accent-soft);
+    background: var(--color-warning-soft);
+    font-weight: 500;
   }
   .graph-list-name {
-    font-size: 0.82rem;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .graph-list-meta {
-    font-size: 0.72rem;
-    color: var(--color-text-secondary);
+
+  /* Node-colour dots (list rows, summary). */
+  .graph-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--graph-node);
+  }
+  .graph-dot--pinned {
+    background: var(--graph-node-pinned);
+  }
+  .graph-dot--saved {
+    background: var(--graph-node-saved);
+  }
+  .graph-dot--selected {
+    background: var(--graph-node-selected);
+  }
+  .graph-dot--ring {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+    box-shadow: 0 0 0 2px var(--graph-node-selected);
   }
 
   /* ── Legend ─────────────────────────────────────────────── */
 
   .graph-legend {
-    font-size: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
+  .graph-legend > li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* Wide screens: a pill at the canvas's bottom left. */
   .graph-legend--overlay {
     position: absolute;
     left: var(--space-md);
     bottom: var(--space-md);
     z-index: 10;
-    max-width: 240px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) 14px;
+    max-width: calc(100% - 2 * var(--space-md));
+    padding: 6px 12px;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-full);
+    background: var(--graph-legend-bg);
   }
-  .graph-legend--overlay summary {
-    cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    font-weight: 500;
-    user-select: none;
-  }
-  .graph-legend-body {
+  .graph-legend--inline {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    margin: 0;
-    padding: 0 var(--space-sm) var(--space-sm);
-    list-style: none;
-  }
-  .graph-legend--inline .graph-legend-body {
-    padding: 0;
-  }
-  .graph-legend-body > li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
   }
 
   .legend-dot {
     display: inline-block;
     flex-shrink: 0;
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     background: var(--graph-node);
   }
+  /* The canvas marks pins with an inner stroke too, not by colour alone. */
   .legend-dot--pinned {
     background: var(--graph-node-pinned);
     box-shadow: inset 0 0 0 1.5px var(--color-surface);
     outline: 1px solid var(--graph-node-pinned);
   }
   .legend-dot--selected {
-    background: var(--graph-node);
-    box-shadow:
-      0 0 0 1.5px var(--color-bg),
-      0 0 0 3px var(--graph-node-selected);
+    background: var(--graph-canvas);
+    box-shadow: 0 0 0 2px var(--graph-node-selected);
   }
   .legend-dot--saved {
     background: var(--graph-node-saved);
@@ -599,7 +671,7 @@
     gap: var(--space-sm);
     margin: 0;
     color: var(--color-text-secondary);
-    font-size: 0.9rem;
+    font-size: var(--text-md);
   }
 
   /* ── Compact: selection summary row ─────────────────────── */
@@ -608,12 +680,12 @@
   .graph-summary {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 6px;
     max-height: 40dvh;
     overflow-y: auto;
-    padding: var(--space-xs) var(--space-md);
+    padding: 10px 12px var(--space-sm) var(--space-md);
     background: var(--color-surface);
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--color-hairline);
   }
   .graph-summary .graph-status {
     flex: none;
@@ -621,8 +693,11 @@
   .graph-summary-row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     min-width: 0;
+  }
+  .graph-summary-row--meta {
+    flex-wrap: wrap;
   }
   .graph-summary-title {
     display: block;
@@ -634,7 +709,8 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text);
-    font-size: 0.85rem;
+    font-family: var(--font-serif);
+    font-size: var(--text-base);
     font-weight: 600;
     text-align: left;
     white-space: nowrap;
@@ -642,15 +718,47 @@
     text-overflow: ellipsis;
   }
   .graph-summary-title:hover {
-    background: var(--color-surface-hover);
+    background: var(--color-hover-quiet);
   }
-  .graph-summary-title:focus-visible,
-  .graph-sheet-tab:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  /* "Citers · Most cited · [31–60] of 9,898". Room for the total's wrapped
+     line is kept, so a range that finishes loading never resizes the canvas. */
+  .graph-summary-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: flex-start;
+    column-gap: 0.35em;
+    flex: 1 1 12rem;
+    min-width: 0;
+    min-height: calc(var(--control-min) + 1lh);
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
-  .graph-range-chip {
+  .graph-summary-actions {
+    display: flex;
+    gap: var(--space-sm);
     flex-shrink: 0;
+    margin-left: auto;
+  }
+  /* The current range reads as inline text in the sentence; the button keeps
+     its control-min hit area, and a dashed underline marks "not loaded yet". */
+  .graph-summary-meta .graph-range-chip.is-current {
+    flex-shrink: 0;
+    min-width: 0;
+    padding: 0 2px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-accent-strong);
+    font-size: inherit;
+    font-weight: 500;
+  }
+  .graph-summary-meta .graph-range-chip.is-current:hover {
+    background: var(--color-hover-quiet);
+  }
+  .graph-summary-meta .graph-range-chip.is-unloaded {
+    text-decoration: underline dashed;
+    text-underline-offset: 3px;
   }
 
   /* ── Compact: "Graph controls" sheet ────────────────────── */
@@ -659,7 +767,7 @@
     display: flex;
     gap: var(--space-xs);
     margin-bottom: var(--space-md);
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-hairline);
   }
   .graph-sheet-tab {
     flex: 1;
@@ -669,7 +777,7 @@
     border-bottom: 2px solid transparent;
     background: transparent;
     color: var(--color-text-secondary);
-    font-size: 0.85rem;
+    font-size: var(--text-md);
     font-weight: 500;
   }
   .graph-sheet-tab:hover {
@@ -677,7 +785,7 @@
   }
   .graph-sheet-tab[aria-selected="true"] {
     border-bottom-color: var(--color-accent);
-    color: var(--color-accent);
+    color: var(--color-accent-strong);
     font-weight: 600;
   }
   .graph-sheet-panel {
@@ -694,11 +802,6 @@
   }
   .graph-sheet-label {
     margin: 0;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-text-secondary);
   }
   .graph-sheet-section .graph-source {
     flex: none;
@@ -708,8 +811,8 @@
     overflow-wrap: anywhere;
   }
   .graph-popup--sheet {
-    padding: var(--space-md);
-    border: 1px solid var(--color-border);
+    padding: 0.875rem var(--space-md);
+    border: 1px solid var(--color-hairline);
     border-radius: var(--radius-md);
     background: var(--color-bg);
   }
@@ -717,9 +820,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-  }
-  .graph-sheet-field .graph-segmented button {
-    flex: 1;
   }
   .graph-sheet-view {
     display: flex;
@@ -736,7 +836,7 @@
     justify-content: flex-end;
     margin-top: var(--space-lg);
     padding-top: var(--space-md);
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--color-hairline);
   }
   /* Short landscape phones 640–767px wide (667×375, 740×360): the global
      rule makes every Panel ≤767px a bottom sheet, which would cover most of
@@ -770,14 +870,14 @@
   /* Mirror of PHONE_MAX: the tab bar's clearance already includes the inset. */
   @media (max-width: 639px) {
     .graph-summary {
-      padding-bottom: var(--space-xs);
+      padding-bottom: var(--space-sm);
     }
   }
 
   /* ── Touch sizes (mirror of TOUCH_QUERY in lib/breakpoints.ts) ── */
 
+  /* Separate neighbouring targets; the joined segmented groups keep theirs. */
   @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
-    .graph-segmented,
     .graph-range-nav,
     .graph-header-actions,
     .graph-list,
@@ -786,6 +886,9 @@
     .graph-summary-row,
     .graph-sheet-tabs {
       gap: var(--space-sm);
+    }
+    .graph-header--compact .graph-header-actions {
+      gap: 2px;
     }
   }
 }

@@ -179,10 +179,118 @@ describe("CitationGraph", () => {
       fill: vi.fn(),
       stroke: vi.fn(),
       setLineDash: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
       strokeText: vi.fn(),
       fillText: vi.fn(),
     };
     engine.props.nodeCanvasObject(node, ctx, 2);
     expect(ctx.fillText).toHaveBeenCalledWith(label, expect.any(Number), expect.any(Number));
+  });
+
+  it("draws the selection hollow with a soft halo and labels it in the theme's amber", () => {
+    const style = document.documentElement.style;
+    style.setProperty("--graph-canvas", "#f8faf9");
+    style.setProperty("--graph-node", "#a0a8a4");
+    style.setProperty("--graph-node-selected", "#8f5b14");
+    style.setProperty("--color-state-toread-text", "#7a4d11");
+    style.setProperty("--color-text", "#1a1e1d");
+    try {
+      const data: ForceGraphData = { nodes: [forceNode("a", 0, 0), forceNode("b", 5, 5)], links: [] };
+      render(
+        <ThemeProvider>
+          <CitationGraph
+            data={data}
+            selectedId="a"
+            alwaysLabelIds={new Set(["a", "b"])}
+            ariaLabel="Citation graph"
+            onNodeClick={vi.fn()}
+            onBackgroundClick={vi.fn()}
+          />
+        </ThemeProvider>,
+      );
+      // Record the paint state at each stroke and label.
+      const strokes: { style: string; alpha: number }[] = [];
+      const labels: string[] = [];
+      const fills: string[] = [];
+      const paint = { fillStyle: "", strokeStyle: "", globalAlpha: 1 };
+      const ctx = Object.assign(paint, {
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(() => fills.push(paint.fillStyle)),
+        setLineDash: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        translate: vi.fn(),
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        stroke: vi.fn(() => strokes.push({ style: paint.strokeStyle, alpha: paint.globalAlpha })),
+        fillText: vi.fn(() => labels.push(paint.fillStyle)),
+      });
+      engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
+      expect(strokes[0]).toEqual({ style: "#8f5b14", alpha: 0.18 });
+      expect(strokes[1]).toEqual({ style: "#8f5b14", alpha: 1 });
+      engine.props.nodeCanvasObject(data.nodes[1], ctx, 1);
+      expect(labels).toEqual(["#7a4d11", "#1a1e1d"]);
+      // The selected node is canvas-filled inside its ring; others keep their fill.
+      expect(fills).toEqual(["#f8faf9", "#a0a8a4"]);
+      expect(ctx.globalAlpha).toBe(1);
+    } finally {
+      style.removeProperty("--graph-canvas");
+      style.removeProperty("--graph-node");
+      style.removeProperty("--graph-node-selected");
+      style.removeProperty("--color-state-toread-text");
+      style.removeProperty("--color-text");
+    }
+  });
+
+  it("re-reads the theme colors once the theme attribute changes", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--color-text", "#1a1e1d");
+    try {
+      const data: ForceGraphData = { nodes: [forceNode("a", 0, 0)], links: [] };
+      render(
+        <ThemeProvider>
+          <CitationGraph
+            data={data}
+            selectedId={null}
+            alwaysLabelIds={new Set(["a"])}
+            ariaLabel="Citation graph"
+            onNodeClick={vi.fn()}
+            onBackgroundClick={vi.fn()}
+          />
+        </ThemeProvider>,
+      );
+      const labels: string[] = [];
+      const paint = { fillStyle: "", strokeStyle: "", globalAlpha: 1 };
+      const ctx = Object.assign(paint, {
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(),
+        stroke: vi.fn(),
+        setLineDash: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        translate: vi.fn(),
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(() => labels.push(paint.fillStyle)),
+      });
+      engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
+
+      // ThemeProvider writes data-theme after its children render: the
+      // tokens are only read once the attribute itself has changed.
+      const next = root.dataset.theme === "dark" ? "light" : "dark";
+      await act(async () => {
+        root.style.setProperty("--color-text", "#e9efec");
+        root.dataset.theme = next;
+      });
+      engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
+      expect(labels).toEqual(["#1a1e1d", "#e9efec"]);
+    } finally {
+      root.style.removeProperty("--color-text");
+    }
   });
 });

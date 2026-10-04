@@ -200,8 +200,12 @@ function bar() {
   return screen.getByTestId("graph-bottombar");
 }
 
+function header() {
+  return screen.getByTestId("graph-header");
+}
+
 function openPapers() {
-  fireEvent.click(screen.getByRole("button", { name: /^Papers \(/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Papers" }));
   return screen.getByRole("complementary", { name: "Papers on the graph" });
 }
 
@@ -244,16 +248,23 @@ describe("GraphPage (desktop)", () => {
     await ready();
 
     expect(screen.getByRole("heading", { level: 1, name: /^Citation graph ?: Seed Paper$/ })).toBeInTheDocument();
-    expect(screen.getByText("Paper")).toBeInTheDocument();
-    expect(screen.getByText("2 papers · 0 links")).toBeInTheDocument();
+    // The OpenBib mark leads home, then Back; the counts include the pins.
+    expect(within(header()).getByRole("link", { name: "OpenBib home" })).toHaveAttribute("href", "/");
+    expect(within(header()).getByRole("button", { name: "Back" })).toBeInTheDocument();
+    expect(within(header()).getByText("2 papers · 0 links")).toBeInTheDocument();
+    expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /^Citation graph of “Seed Paper” with 2 papers and 0 links/ })).toBeInTheDocument();
 
-    const direction = within(bar()).getByRole("group", { name: "Direction" });
-    expect(within(direction).getByRole("button", { name: "Citers" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(direction).getByRole("button", { name: "References" })).toHaveAttribute("aria-pressed", "false");
-    const order = within(bar()).getByRole("group", { name: "Order" });
-    expect(within(order).getByRole("button", { name: "Top cited" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(order).getByRole("button", { name: "Most recent" })).toHaveAttribute("aria-pressed", "false");
+    const direction = within(bar()).getByRole("radiogroup", { name: "Direction" });
+    expect(within(direction).getByRole("radio", { name: "Citers" })).toHaveAttribute("aria-checked", "true");
+    expect(within(direction).getByRole("radio", { name: "References" })).toHaveAttribute("aria-checked", "false");
+    const order = within(bar()).getByRole("radiogroup", { name: "Order" });
+    expect(within(order).getByRole("radio", { name: "Most cited" })).toHaveAttribute("aria-checked", "true");
+    expect(within(order).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "false");
+    // A pill legend floats on the canvas.
+    const legend = screen.getByRole("list", { name: "Legend" });
+    expect(within(legend).getByText("Pinned")).toBeInTheDocument();
+    expect(within(legend).getByText("In library")).toBeInTheDocument();
 
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText(/Expand entire graph/)).toBeNull();
@@ -268,7 +279,7 @@ describe("GraphPage (desktop)", () => {
     expect(within(bar()).getByRole("button", { name: "Expand pinned nodes" })).toBeEnabled();
     expect(within(bar()).getByText("Adds up to 30 related papers to each pinned paper.")).toBeInTheDocument();
     expect(within(bar()).getByText("Select a paper to browse its citers or references.")).toBeInTheDocument();
-    expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
+    expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Result ranges" })).toBeNull();
   });
 
@@ -280,7 +291,8 @@ describe("GraphPage (desktop)", () => {
     expect(within(list).getByRole("button", { name: /^Seed Paper/ })).toHaveAttribute("aria-current", "true");
     const popup = screen.getByTestId("graph-node-popup");
     expect(within(popup).getByRole("heading", { level: 2, name: "Seed Paper" })).toBeInTheDocument();
-    expect(within(bar()).getByText("Citers of “Seed Paper”")).toBeInTheDocument();
+    expect(within(bar()).getByText(/^Citers of/)).toHaveTextContent("Citers of Seed Paper");
+    expect(within(bar()).getByText("Seed Paper", { selector: "cite" })).toBeInTheDocument();
 
     const pin = within(popup).getByRole("button", { name: "Pin “Seed Paper”" });
     expect(pin).toHaveAttribute("aria-pressed", "true");
@@ -291,7 +303,7 @@ describe("GraphPage (desktop)", () => {
 
     expect(api.related).not.toHaveBeenCalled();
     expect(api.topUp).not.toHaveBeenCalled();
-    const legend = screen.getByText("Legend").closest("details")!;
+    const legend = screen.getByRole("list", { name: "Legend" });
     expect(within(legend).getByText("Pinned")).toBeInTheDocument();
     expect(within(legend).getByText("Selected")).toBeInTheDocument();
   });
@@ -337,14 +349,29 @@ describe("GraphPage (desktop)", () => {
     fireEvent.click(within(ranges()).getByRole("button", { name: "Show results 61 to 90" }));
     expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 60 }), expect.anything());
     expect(await within(ranges()).findByRole("button", { name: "Show results 61 to 90" })).toHaveAttribute("aria-current", "true");
-    expect(within(ranges()).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "1–30",
-      "31–60",
-      "61–90",
-      "91–120",
-      "991–1,000",
-    ]);
-    expect(ranges().querySelector('[aria-hidden="true"]')?.textContent).toBe("…");
+    expect(
+      within(ranges())
+        .getAllByRole("button")
+        .map((button) => button.textContent || button.getAttribute("aria-label")),
+    ).toEqual(["Previous range", "1–30", "31–60", "61–90", "91–120", "991–1,000", "Next range"]);
+    expect(ranges().querySelector(".graph-range-gap")?.textContent).toBe("…");
+
+    // ‹ and › step through the ranges.
+    fireEvent.click(within(ranges()).getByRole("button", { name: "Next range" }));
+    expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 90 }), expect.anything());
+    expect(await within(ranges()).findByRole("button", { name: "Show results 91 to 120" })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(within(ranges()).getByRole("button", { name: "Previous range" }));
+    expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 60 }), expect.anything());
+    expect(screen.getByText("· ranked from Semantic Scholar")).toBeInTheDocument();
+  });
+
+  it("disables the previous-range arrow on the first range", async () => {
+    renderGraph();
+    await ready();
+    selectSeed();
+    await loadFirstRange();
+    expect(within(ranges()).getByRole("button", { name: "Previous range" })).toBeDisabled();
+    expect(within(ranges()).getByRole("button", { name: "Next range" })).toBeEnabled();
   });
 
   it("offers Last with last:true when the total is an estimate", async () => {
@@ -394,7 +421,7 @@ describe("GraphPage (desktop)", () => {
 
     const fresh = deferred<RelatedRangeResponse>();
     api.related.mockImplementationOnce(() => fresh.promise);
-    fireEvent.click(within(bar()).getByRole("button", { name: "Most recent" }));
+    fireEvent.click(within(bar()).getByRole("radio", { name: "Most recent" }));
     expect(api.related).toHaveBeenCalledTimes(3);
     const freshBody = api.related.mock.calls[2]![0] as RelatedRangeRequest;
     expect(freshBody).toMatchObject({ order: "recent", range_start: 0, last: false, source_group_key: "group:seed" });
@@ -573,7 +600,7 @@ describe("GraphPage (desktop)", () => {
     await ready();
     act(() => engine.props.onNodeDragEnd(forceNode("group:other")));
 
-    expect(within(bar()).getByText("2 pinned")).toBeInTheDocument();
+    expect(within(header()).getByText("2 pinned")).toBeInTheDocument();
     expect(api.related).not.toHaveBeenCalled();
     expect(api.topUp).not.toHaveBeenCalled();
   });
@@ -646,12 +673,61 @@ describe("GraphPage (desktop)", () => {
     const view = renderGraph();
     await ready();
     fireEvent.click(within(openPapers()).getByRole("button", { name: "Pin “Other Paper”" }));
-    expect(within(bar()).getByText("2 pinned")).toBeInTheDocument();
+    expect(within(header()).getByText("2 pinned")).toBeInTheDocument();
     view.unmount();
 
     renderGraph();
     await ready();
-    expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
+    expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
+  });
+
+  it("opens the paper list beside the canvas on wide screens and toggles it from Papers", async () => {
+    mockMatchMedia((query) => query.includes("min-width: 1024px"));
+    renderGraph();
+    await ready();
+
+    const toggle = within(header()).getByRole("button", { name: "Papers" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const list = screen.getByRole("complementary", { name: "Papers on the graph" });
+    expect(toggle).toHaveAttribute("aria-controls", list.id);
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("labels the current range section with its bounds", async () => {
+    renderGraph();
+    await ready();
+    const list = selectSeed();
+    await loadFirstRange();
+    expect(within(list).getByRole("heading", { level: 3, name: /^Current range · 1–30/ })).toBeInTheDocument();
+    expect(within(list).getByRole("heading", { level: 3, name: /^Pinned/ })).toBeInTheDocument();
+  });
+
+  it("explores from the selected paper: loads 1–30, and goes back to it from a later range", async () => {
+    renderGraph();
+    await ready();
+    selectSeed();
+    const card = screen.getByTestId("graph-node-popup");
+    expect(within(card).getByRole("button", { name: "View details" })).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Explore from here" }));
+    expect(api.related).toHaveBeenCalledTimes(1);
+    expect(api.related).toHaveBeenLastCalledWith(
+      expect.objectContaining({ source_group_key: "group:seed", range_start: 0, last: false }),
+      expect.anything(),
+    );
+    expect(await within(ranges()).findByRole("button", { name: "Show results 1 to 30" })).toHaveAttribute("aria-current", "true");
+
+    // Already on 1–30: nothing to load.
+    fireEvent.click(within(screen.getByTestId("graph-node-popup")).getByRole("button", { name: "Explore from here" }));
+    expect(api.related).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(ranges()).getByRole("button", { name: "Show results 31 to 60" }));
+    expect(await within(ranges()).findByRole("button", { name: "Show results 31 to 60" })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(within(screen.getByTestId("graph-node-popup")).getByRole("button", { name: "Explore from here" }));
+    expect(api.related).toHaveBeenCalledTimes(3);
+    expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 0 }), expect.anything());
   });
 
   it("keeps the canvas mount, selection, mode and ranges across desktop and compact", async () => {
@@ -659,7 +735,7 @@ describe("GraphPage (desktop)", () => {
     renderGraph();
     await ready();
     selectSeed();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Most recent" }));
+    fireEvent.click(within(bar()).getByRole("radio", { name: "Most recent" }));
     expect(api.related).not.toHaveBeenCalled();
     await loadFirstRange();
     expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ order: "recent" }), expect.anything());
@@ -672,14 +748,14 @@ describe("GraphPage (desktop)", () => {
     expect(within(summary).getByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Graph controls" }));
     const dialog = screen.getByRole("dialog", { name: "Graph controls" });
-    expect(within(dialog).getByRole("button", { name: "Most recent" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "true");
 
     // Growing past compact with the sheet open drops it for good.
     act(() => media.set(() => false));
     expect(screen.queryByRole("dialog", { name: "Graph controls" })).toBeNull();
-    expect(within(bar()).getByText("Citers of “Seed Paper”")).toBeInTheDocument();
-    expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
-    expect(within(bar()).getByRole("button", { name: "Most recent" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(bar()).getByText(/^Citers of/)).toHaveTextContent("Citers of Seed Paper");
+    expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
+    expect(within(bar()).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "true");
     expect(within(ranges()).getByRole("button", { name: "Show results 1 to 30" })).toHaveAttribute("aria-current", "true");
     expect(api.related).toHaveBeenCalledTimes(1);
 
@@ -728,9 +804,9 @@ describe("GraphPage (compact)", () => {
     expect(screen.getByRole("button", { name: "Fit to view" })).toBeInTheDocument();
     expect(trigger()).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("graph-bottombar")).toBeNull();
-    expect(screen.queryByRole("group", { name: "Direction" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Direction" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Expand pinned nodes" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Papers \(/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Papers" })).toBeNull();
     expect(screen.queryByText("Legend")).toBeNull();
     expect(screen.queryByTestId("graph-node-popup")).toBeNull();
     // Nothing selected, pending or failed: no summary row.
@@ -744,9 +820,9 @@ describe("GraphPage (compact)", () => {
     let dialog = openSheet();
     expect(trigger()).toHaveAttribute("aria-expanded", "true");
     expect(within(dialog).getByRole("heading", { level: 2, name: "Graph controls" })).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "References" }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: "References" }));
     // Nothing is selected, so the toggle loads nothing and the sheet stays.
-    expect(within(dialog).getByRole("button", { name: "References" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByRole("radio", { name: "References" })).toHaveAttribute("aria-checked", "true");
     expect(api.related).not.toHaveBeenCalled();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -754,7 +830,7 @@ describe("GraphPage (compact)", () => {
     expect(trigger()).toHaveFocus();
 
     dialog = openSheet();
-    expect(within(dialog).getByRole("button", { name: "References" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByRole("radio", { name: "References" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(trigger()).toHaveFocus();
@@ -800,7 +876,7 @@ describe("GraphPage (compact)", () => {
     const card = within(dialog).getByTestId("graph-node-popup");
     expect(within(card).getByRole("heading", { level: 2, name: "Seed Paper" })).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Pin “Seed Paper”" })).toHaveAttribute("aria-pressed", "false");
-    expect(within(dialog).getByText("Citers of “Seed Paper”")).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Citers of/)).toHaveTextContent("Citers of Seed Paper");
     expect(within(dialog).getByRole("navigation", { name: "Result ranges" })).toBeInTheDocument();
     expect(within(dialog).getByRole("group", { name: "View" })).toBeInTheDocument();
     expect(within(dialog).getByText("Legend")).toBeInTheDocument();
@@ -809,6 +885,59 @@ describe("GraphPage (compact)", () => {
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(within(summary()).getByRole("button", { name: "Seed Paper" })).toHaveFocus();
+  });
+
+  it("sums up direction, order and total under the title and steps to the next range", async () => {
+    renderGraph();
+    await ready();
+    selectSeedOnCanvas();
+    expect(within(summary()).getByText("Citers · Most cited")).toBeInTheDocument();
+    // Nothing loaded yet: no total and no Next.
+    expect(within(summary()).queryByText(/of 1,000/)).toBeNull();
+    expect(within(summary()).queryByRole("button", { name: /^Next/ })).toBeNull();
+
+    fireEvent.click(within(summary()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+    expect(await within(summary()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
+    expect(within(summary()).getByText("of 1,000")).toBeInTheDocument();
+    fireEvent.click(within(summary()).getByRole("button", { name: "Next 30" }));
+    expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 30 }), expect.anything());
+    expect(await within(summary()).findByRole("button", { name: "Show results 31 to 60" })).toBeInTheDocument();
+  });
+
+  it("states approximate totals in the summary as the range bar does", async () => {
+    api.related.mockImplementation((body: RelatedRangeRequest) =>
+      Promise.resolve({ ...rangeResponse(body, { total: 95, exact: false }), provider_total: 120 }),
+    );
+    renderGraph();
+    await ready();
+    selectSeedOnCanvas();
+    fireEvent.click(within(summary()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+    expect(await within(summary()).findByText("of about 95")).toBeInTheDocument();
+  });
+
+  it("names only the reachable cap in the summary when the total is capped", async () => {
+    api.related.mockImplementation((body: RelatedRangeRequest) =>
+      Promise.resolve({ ...rangeResponse(body, { total: 10000 }), total_capped: true, provider_total: 50000 }),
+    );
+    renderGraph();
+    await ready();
+    selectSeedOnCanvas();
+    fireEvent.click(within(summary()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+    expect(await within(summary()).findByText("of the first 10,000")).toBeInTheDocument();
+    expect(within(summary()).queryByText(/50,000/)).toBeNull();
+  });
+
+  it("explores from the selected paper inside the sheet and closes it", async () => {
+    renderGraph();
+    await ready();
+    selectSeedOnCanvas();
+    fireEvent.click(within(summary()).getByRole("button", { name: "Seed Paper" }));
+    const card = within(screen.getByRole("dialog", { name: "Graph controls" })).getByTestId("graph-node-popup");
+    fireEvent.click(within(card).getByRole("button", { name: "Explore from here" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ range_start: 0, last: false }), expect.anything());
+    expect(await within(summary()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
   });
 
   it("switches the Controls and Papers tabs with clicks and arrow keys", async () => {
@@ -875,7 +1004,7 @@ describe("GraphPage (compact)", () => {
     expect(await within(summary()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
 
     api.related.mockImplementationOnce(() => Promise.reject(httpError(502)));
-    fireEvent.click(within(openSheet()).getByRole("button", { name: "References" }));
+    fireEvent.click(within(openSheet()).getByRole("radio", { name: "References" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(api.related).toHaveBeenLastCalledWith(expect.objectContaining({ direction: "cites", range_start: 0 }), expect.anything());
 
@@ -883,7 +1012,7 @@ describe("GraphPage (compact)", () => {
     fireEvent.click(within(summary()).getByRole("button", { name: "Try again" }));
     expect(api.related).toHaveBeenCalledTimes(3);
     expect(await within(summary()).findByRole("button", { name: "Show results 1 to 30" })).toBeInTheDocument();
-    expect(within(openSheet()).getByRole("button", { name: "References" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(openSheet()).getByRole("radio", { name: "References" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("closes the sheet when Expand pinned nodes starts", async () => {
@@ -946,6 +1075,10 @@ describe("GraphPage (manual)", () => {
     renderGraph("/graph");
     expect(await screen.findByTestId("empty-state")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Citation graph" })).toBeInTheDocument();
+    // The bare page's way home; nothing precedes it, so no Back.
+    expect(within(header()).getByRole("link", { name: "OpenBib home" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("href", "/search");
     expect(screen.queryByTestId("graph-bottombar")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
@@ -1054,7 +1187,7 @@ describe("GraphPage (shared collection)", () => {
 
     expect(forceNode("group:Related-0")).toBeUndefined();
     expect(engine.props.graphData.nodes).toHaveLength(2);
-    expect(within(bar()).getByText("1 pinned")).toBeInTheDocument();
+    expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
     expect(screen.queryByTestId("graph-node-popup")).toBeNull();
   });
 

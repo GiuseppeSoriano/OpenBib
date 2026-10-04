@@ -1,40 +1,38 @@
 import type { Ref } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, List, Maximize2, SlidersHorizontal, ZoomIn, ZoomOut } from "lucide-react";
-
-export type GraphHeaderMode = "paper" | "collection" | "library";
+import { ChevronLeft, List, Maximize, Minus, Plus, SlidersHorizontal } from "lucide-react";
+import HomeLink from "@/components/shell/HomeLink";
 
 interface GraphHeaderProps {
-  mode: GraphHeaderMode;
-  /** Paper mode: the seed's display title, after "Citation graph". */
-  seedTitle: string | null;
+  /** The serif title under the "Citation graph" label: the seed, collection or library. */
+  title: string | null;
   hasGraph: boolean;
   nodeCount: number;
   edgeCount: number;
   pinnedCount: number;
   /** Compact presentation: Fit plus the "Graph controls" sheet trigger. */
   compact: boolean;
-  onBack: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onFit: () => void;
-  papersOpen: boolean;
-  papersListId: string;
-  onTogglePapers: () => void;
+  onBack?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onFit?: () => void;
+  papersOpen?: boolean;
+  papersListId?: string;
+  onTogglePapers?: () => void;
   controlsOpen?: boolean;
   controlsTriggerRef?: Ref<HTMLButtonElement>;
   onOpenControls?: () => void;
 }
 
 /**
- * The header takes real space above the canvas: back, the page `<h1>`, the
- * mode badge, counts and pins, then the view controls. Wide, that is one row;
- * narrow (container queries in em, so large text counts too), the title keeps
- * a row of its own beside Back and the rest wraps below it.
+ * The graph page's own header (no app shell here): the OpenBib mark home,
+ * Back, a small "Citation graph" label over the serif title (one `<h1>`),
+ * the counts, then the view controls. Narrow (container queries in em, so
+ * large text counts too), the counts fold into the label line and the
+ * controls wrap below the title.
  */
 export default function GraphHeader({
-  mode,
-  seedTitle,
+  title,
   hasGraph,
   nodeCount,
   edgeCount,
@@ -44,7 +42,7 @@ export default function GraphHeader({
   onZoomIn,
   onZoomOut,
   onFit,
-  papersOpen,
+  papersOpen = false,
   papersListId,
   onTogglePapers,
   controlsOpen = false,
@@ -52,79 +50,93 @@ export default function GraphHeader({
   onOpenControls,
 }: GraphHeaderProps) {
   const { t } = useTranslation();
-  const modeLabel =
-    mode === "paper" ? t("graph.modePaper") : mode === "collection" ? t("graph.modeCollection") : t("graph.modeLibrary");
+  const pinned = t("graph.pinnedCount", { count: pinnedCount });
 
   return (
-    <div className="graph-header" data-testid="graph-header">
+    <header className={`graph-header${compact ? " graph-header--compact" : ""}`} data-testid="graph-header">
       <div className="graph-header-row">
-        <button
-          type="button"
-          className="btn-ghost graph-icon-btn graph-back"
-          onClick={onBack}
-          aria-label={t("graph.back")}
-          title={t("graph.back")}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-        </button>
-        <h1 className={seedTitle ? "graph-title graph-title--seeded" : "graph-title"}>
-          <span className="graph-title-main">{t("graph.title")}</span>
-          {seedTitle && (
+        <HomeLink className="graph-home" />
+        {onBack && (
+          <button
+            type="button"
+            className="graph-icon-btn graph-view-btn graph-back"
+            onClick={onBack}
+            aria-label={t("graph.back")}
+            title={t("graph.back")}
+          >
+            <ChevronLeft size={16} aria-hidden="true" />
+          </button>
+        )}
+        <h1 className={title ? "graph-title graph-title--seeded" : "graph-title"}>
+          <span className="graph-title-main">
+            {t("graph.title")}
+            {/* Narrow headers show the pins in this line; the counts below say it to assistive tech. */}
+            {hasGraph && (
+              <span className="graph-title-pins tabular" aria-hidden="true">
+                {` · ${pinned}`}
+              </span>
+            )}
+          </span>
+          {title && (
             <span className="graph-title-seed">
               <span className="sr-only">: </span>
-              {seedTitle}
+              {title}
             </span>
           )}
         </h1>
-        <span className="graph-mode-badge">{modeLabel}</span>
         {hasGraph && (
-          <span className="graph-counts">
-            {t("graph.nodeCount", { count: nodeCount })} · {t("graph.edgeCount", { count: edgeCount })}
-          </span>
+          <p className="graph-counts tabular">
+            <span>
+              {t("graph.nodeCount", { count: nodeCount })} · {t("graph.edgeCount", { count: edgeCount })}
+            </span>
+            <span className="graph-counts-pins">
+              <span aria-hidden="true"> · </span>
+              {pinned}
+            </span>
+          </p>
         )}
-        {hasGraph && <span className="badge graph-pinned-badge">{t("graph.pinnedCount", { count: pinnedCount })}</span>}
         {hasGraph && (
           <div className="graph-header-actions">
             {!compact && (
               <>
                 <button
                   type="button"
-                  className="btn btn-secondary graph-btn"
+                  className="graph-view-btn graph-papers-btn"
                   aria-expanded={papersOpen}
                   aria-controls={papersOpen ? papersListId : undefined}
                   onClick={onTogglePapers}
                 >
                   <List size={15} aria-hidden="true" />
-                  {t("graph.papers", { count: nodeCount })}
+                  {t("graph.papersToggle")}
                 </button>
                 <button type="button" className="graph-icon-btn graph-view-btn" onClick={onZoomIn} aria-label={t("graph.zoomIn")} title={t("graph.zoomIn")}>
-                  <ZoomIn size={15} aria-hidden="true" />
+                  <Plus size={16} aria-hidden="true" />
                 </button>
                 <button type="button" className="graph-icon-btn graph-view-btn" onClick={onZoomOut} aria-label={t("graph.zoomOut")} title={t("graph.zoomOut")}>
-                  <ZoomOut size={15} aria-hidden="true" />
+                  <Minus size={16} aria-hidden="true" />
                 </button>
               </>
             )}
             <button type="button" className="graph-icon-btn graph-view-btn" onClick={onFit} aria-label={t("graph.fit")} title={t("graph.fit")}>
-              <Maximize2 size={15} aria-hidden="true" />
+              <Maximize size={15} aria-hidden="true" />
             </button>
             {compact && (
               <button
                 ref={controlsTriggerRef}
                 type="button"
-                className="btn btn-secondary graph-btn graph-controls-trigger"
+                className="graph-view-btn graph-controls-trigger"
                 aria-haspopup="dialog"
                 aria-expanded={controlsOpen}
                 aria-label={t("graph.controls")}
                 onClick={onOpenControls}
               >
-                <SlidersHorizontal size={15} aria-hidden="true" />
+                <SlidersHorizontal size={16} aria-hidden="true" />
                 <span className="graph-controls-label">{t("graph.controls")}</span>
               </button>
             )}
           </div>
         )}
       </div>
-    </div>
+    </header>
   );
 }
