@@ -2,56 +2,40 @@
   .collection-detail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
-  }
-
-  .cd-notfound {
-    color: var(--color-text-secondary);
-    text-align: center;
-    padding: var(--space-2xl) 0;
+    gap: var(--space-xl);
   }
 
   /* ── Header ─────────────────────────────────────────────── */
 
-  .cd-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-
   .cd-title-row {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
-  }
-
-  .cd-title-row h1 {
-    overflow-wrap: anywhere;
+    gap: var(--space-xs);
     min-width: 0;
-    font-family: var(--font-serif);
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -0.01em;
+  }
+  .cd-title-row h1 {
+    min-width: 0;
+  }
+  .cd-title-row h1:focus {
+    outline: none;
+  }
+  .cd-title-row h1:focus-visible {
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
+  }
+  .cd-edit {
+    flex-shrink: 0;
+    justify-content: center;
+    min-width: var(--control-min);
   }
 
   .cd-description {
     overflow-wrap: anywhere;
-    font-size: 0.9rem;
-    color: var(--color-text-secondary);
-    max-width: 640px;
   }
 
   .cd-meta {
-    font-size: 0.8rem;
-    color: var(--color-text-secondary);
-  }
-
-  .cd-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-    margin-top: var(--space-sm);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
   }
 
   .cd-edit-form {
@@ -59,6 +43,14 @@
     flex-direction: column;
     gap: var(--space-sm);
     max-width: 520px;
+  }
+
+  .cd-field {
+    display: grid;
+    gap: var(--space-xs);
+    min-width: 0;
+    font-size: var(--text-sm);
+    font-weight: 500;
   }
 
   .cd-edit-actions {
@@ -72,26 +64,42 @@
   .cd-papers {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+  }
+  .cd-papers .empty-state {
+    margin-top: var(--space-lg);
+  }
+  .cd-papers-count {
+    color: var(--color-text-secondary);
+  }
+
+  .cd-row {
+    padding-block: 18px;
   }
 
   .cd-state {
-    max-width: 170px;
+    max-width: 11rem;
+    margin-left: 8px;
+    margin-right: var(--space-xs);
   }
-  .cd-state .input {
-    font-size: 0.78rem;
-    padding: 0.25rem var(--space-sm);
+  /* Compact on wide screens only: phones keep the 16px input size so iOS
+     does not zoom on focus. */
+  @media (min-width: 640px) {
+    .cd-state .input {
+      font-size: var(--text-sm);
+      padding-block: 0.25rem;
+    }
   }
 
   .cd-remove {
     margin-left: auto;
   }
-  .cd-remove:hover {
+  .cd-remove:hover:not(:disabled) {
     color: var(--color-danger);
     background: var(--color-danger-soft);
   }
 
   .cd-paper-tags {
+    list-style: none;
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-xs);
@@ -103,16 +111,43 @@
   .cd-notes-section {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
     gap: var(--space-md);
+  }
+
+  /* The heading is the disclosure: the button fills it, title in serif. */
+  .cd-notes-heading {
+    padding-bottom: 0;
+  }
+  .cd-notes-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-min);
+    padding: 0 4px 6px 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    text-align: left;
+  }
+  .cd-notes-toggle svg {
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+  }
+  .cd-notes-toggle:hover .section-heading-title {
+    color: var(--color-accent);
+  }
+  .cd-notes-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
   }
 
   .cd-notes {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-md);
     width: 100%;
-    max-width: 640px;
+    max-width: 680px;
   }
 
   .cd-note-form {
@@ -128,17 +163,24 @@
   }
 
   .cd-note {
-    width: 100%;
-    padding: var(--space-sm) var(--space-md);
-    font-size: 0.87rem;
+    padding-block: var(--space-sm);
+    font-size: var(--text-md);
+    line-height: 1.55;
   }
-
+  .cd-note p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .cd-note-delete {
+    justify-content: center;
+    min-width: var(--control-min);
+  }
   .cd-note-meta {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: var(--space-xs);
-    font-size: 0.74rem;
-    color: var(--color-text-secondary);
+    margin-top: 2px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
   }
 }

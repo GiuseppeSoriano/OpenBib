@@ -2,7 +2,7 @@
   .library-filters {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: 12px;
   }
 
   .library-filters-bar {
@@ -15,12 +15,13 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    max-width: 32rem;
+    max-width: 36rem;
   }
 
   .library-filters-search .input {
-    min-height: var(--control-min);
-    padding-left: calc(var(--space-md) + 1.25rem);
+    min-height: max(40px, var(--control-min));
+    padding-left: calc(var(--space-md) + 1.375rem);
+    box-shadow: var(--shadow-sm);
   }
 
   .library-filters-search-icon {
@@ -32,68 +33,29 @@
     pointer-events: none;
   }
 
-  .library-filters-toggle {
-    flex: none;
-    min-height: var(--control-min);
-  }
-
-  .library-filters-panel {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: var(--space-sm) var(--space-md);
-  }
-
   .library-filters-panel[hidden] {
     display: none;
   }
 
-  .library-filters-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    flex: 0 1 12rem;
-    min-width: 0;
-  }
-
-  .library-filters-field label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-  }
-
-  .library-filters-field .input {
-    min-height: var(--control-min);
+  /* Long tag and collection lists scroll inside the popover. */
+  .library-filters-popover {
+    max-height: min(20rem, 60vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .library-filters-active {
-    display: flex;
+    display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-sm);
-    font-size: 0.8rem;
+    gap: 0 var(--space-xs);
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
-  }
-
-  .library-filters-reset {
-    min-height: var(--control-min);
-    padding-inline: var(--space-sm);
-    font-size: 0.8rem;
-    color: var(--color-accent);
   }
 
   @media (max-width: 639px), (max-height: 500px) {
     .library-filters-search {
       max-width: none;
-    }
-
-    .library-filters-panel {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .library-filters-field {
-      flex-basis: auto;
     }
   }
 }

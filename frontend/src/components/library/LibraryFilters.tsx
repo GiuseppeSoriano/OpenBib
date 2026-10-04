@@ -1,4 +1,13 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Search, SlidersHorizontal } from "lucide-react";
@@ -12,6 +21,8 @@ import {
   type LibraryFilterParams,
 } from "@/lib/libraryParams";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import Popover, { PopoverListbox, type ListboxOption } from "@/components/ui/Popover";
+import { MenuChip } from "@/components/ui/Chip";
 import { READING_STATES, type Collection, type LibrarySort, type ReadingState } from "@/types";
 import "./LibraryFilters.css";
 
@@ -33,8 +44,8 @@ interface Props {
 
 /**
  * Search, filters and sort for the Library list. The values live in the URL
- * (see lib/libraryParams); on compact screens everything but the search box
- * folds behind a Filters toggle.
+ * (see lib/libraryParams); each filter is a chip that opens a listbox
+ * popover, and on compact screens the chips fold behind a Filters toggle.
  */
 export default function LibraryFilters({ params, onChange, onReset }: Props) {
   const { t } = useTranslation();
@@ -78,22 +89,57 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
 
   const setFilter = (patch: LibraryFilterParams) => onChange({ ...params, ...patch });
 
-  const stateOptions: ReadingState[] = facets
+  const withCount = (label: string, count: number | undefined) =>
+    count === undefined ? label : t("library.optionCount", { label, count });
+
+  const stateValues: ReadingState[] = facets
     ? READING_STATES.filter(
         (state) => state === params.state || facets.states.some((f) => f.state === state),
       )
     : READING_STATES;
   const stateCount = (state: ReadingState) => facets?.states.find((f) => f.state === state)?.count;
-  const tagOptions = facets?.tags ?? [];
-  const selectedTagMissing = !!params.tag && !tagOptions.some((f) => f.tag === params.tag);
-  const collectionOptions = collections ?? [];
-  const selectedCollectionMissing =
-    !!params.collection_id && !collectionOptions.some((c) => c.id === params.collection_id);
+  const stateOptions: ListboxOption<string>[] = [
+    { value: "", label: t("library.anyState") },
+    ...stateValues.map((state) => ({
+      value: state,
+      label: withCount(t(`paper.states.${state}`), stateCount(state)),
+    })),
+  ];
 
-  const withCount = (label: string, count: number | undefined) =>
-    count === undefined ? label : t("library.optionCount", { label, count });
+  const tagFacets = facets?.tags ?? [];
+  const selectedTagMissing = !!params.tag && !tagFacets.some((f) => f.tag === params.tag);
+  const tagOptions: ListboxOption<string>[] = [
+    { value: "", label: t("library.anyTag") },
+    ...(selectedTagMissing && params.tag ? [{ value: params.tag, label: params.tag }] : []),
+    ...tagFacets.map((facet) => ({ value: facet.tag, label: withCount(facet.tag, facet.count) })),
+  ];
+
+  const collectionList = collections ?? [];
+  const selectedCollectionMissing =
+    !!params.collection_id && !collectionList.some((c) => c.id === params.collection_id);
+  const collectionOptions: ListboxOption<string>[] = [
+    { value: "", label: t("library.anyCollection") },
+    ...(selectedCollectionMissing && params.collection_id
+      ? [{ value: params.collection_id, label: t("library.otherCollection") }]
+      : []),
+    ...collectionList.map((collection) => ({ value: collection.id, label: collection.name })),
+  ];
+
+  const sortOptions: ListboxOption<string>[] = LIBRARY_SORTS.map((sort) => ({
+    value: sort,
+    label: t(SORT_LABELS[sort]),
+  }));
+  const sort = params.sort ?? DEFAULT_LIBRARY_SORT;
 
   const panelId = `${id}-panel`;
+  const activeSummary = activeCount > 0 && (
+    <span className="library-filters-active">
+      <span>{t("common.filtersActive", { count: activeCount })}</span>
+      <button type="button" className="btn-quiet" onClick={onReset}>
+        {t("common.resetFilters")}
+      </button>
+    </span>
+  );
 
   return (
     <section className="library-filters" aria-label={t("common.filters")}>
@@ -102,7 +148,7 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
           <label htmlFor={`${id}-q`} className="sr-only">
             {t("library.searchLabel")}
           </label>
-          <Search size={15} className="library-filters-search-icon" aria-hidden="true" />
+          <Search size={16} className="library-filters-search-icon" aria-hidden="true" />
           <input
             id={`${id}-q`}
             type="search"
@@ -116,107 +162,160 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
         {compact && (
           <button
             type="button"
-            className="btn btn-secondary library-filters-toggle"
+            className={activeCount > 0 ? "chip chip--active" : "chip"}
             aria-expanded={open}
             aria-controls={panelId}
             onClick={() => setOpen((value) => !value)}
           >
             <SlidersHorizontal size={14} aria-hidden="true" />
             {t("common.filters")}
-            {activeCount > 0 && <span className="badge">{activeCount}</span>}
+            {activeCount > 0 && (
+              <>
+                <span className="chip-count" aria-hidden="true">
+                  · {activeCount}
+                </span>
+                <span className="sr-only">{t("common.filtersActive", { count: activeCount })}</span>
+              </>
+            )}
           </button>
         )}
       </div>
 
-      <div id={panelId} className="library-filters-panel" hidden={compact && !open}>
-        {stateOptions.length > 0 && (
-          <div className="library-filters-field">
-            <label htmlFor={`${id}-state`}>{t("library.filterState")}</label>
-            <select
-              id={`${id}-state`}
-              className="input"
-              value={params.state ?? ""}
-              onChange={(event) =>
-                setFilter({ state: (event.target.value || undefined) as ReadingState | undefined })
-              }
-            >
-              <option value="">{t("library.anyState")}</option>
-              {stateOptions.map((state) => (
-                <option key={state} value={state}>
-                  {withCount(t(`paper.states.${state}`), stateCount(state))}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div id={panelId} className="chip-row library-filters-panel" hidden={compact && !open}>
+        {stateValues.length > 0 && (
+          <FilterMenu
+            label={t("library.filterState")}
+            options={stateOptions}
+            value={params.state ?? ""}
+            valueLabel={params.state ? t(`paper.states.${params.state}`) : undefined}
+            onSelect={(value) => setFilter({ state: (value || undefined) as ReadingState | undefined })}
+          />
         )}
-
-        {(tagOptions.length > 0 || params.tag) && (
-          <div className="library-filters-field">
-            <label htmlFor={`${id}-tag`}>{t("library.filterTag")}</label>
-            <select
-              id={`${id}-tag`}
-              className="input"
-              value={params.tag ?? ""}
-              onChange={(event) => setFilter({ tag: event.target.value || undefined })}
-            >
-              <option value="">{t("library.anyTag")}</option>
-              {selectedTagMissing && <option value={params.tag}>{params.tag}</option>}
-              {tagOptions.map((facet) => (
-                <option key={facet.tag} value={facet.tag}>
-                  {withCount(facet.tag, facet.count)}
-                </option>
-              ))}
-            </select>
-          </div>
+        {(tagFacets.length > 0 || params.tag) && (
+          <FilterMenu
+            label={t("library.filterTag")}
+            options={tagOptions}
+            value={params.tag ?? ""}
+            valueLabel={params.tag}
+            onSelect={(value) => setFilter({ tag: value || undefined })}
+          />
         )}
-
-        {(collectionOptions.length > 0 || params.collection_id) && (
-          <div className="library-filters-field">
-            <label htmlFor={`${id}-collection`}>{t("library.filterCollection")}</label>
-            <select
-              id={`${id}-collection`}
-              className="input"
-              value={params.collection_id ?? ""}
-              onChange={(event) => setFilter({ collection_id: event.target.value || undefined })}
-            >
-              <option value="">{t("library.anyCollection")}</option>
-              {selectedCollectionMissing && (
-                <option value={params.collection_id}>{t("library.otherCollection")}</option>
-              )}
-              {collectionOptions.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {collection.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        {(collectionList.length > 0 || params.collection_id) && (
+          <FilterMenu
+            label={t("library.filterCollection")}
+            options={collectionOptions}
+            value={params.collection_id ?? ""}
+            valueLabel={
+              params.collection_id
+                ? (collectionList.find((c) => c.id === params.collection_id)?.name ??
+                  t("library.otherCollection"))
+                : undefined
+            }
+            onSelect={(value) => setFilter({ collection_id: value || undefined })}
+          />
         )}
-
-        <div className="library-filters-field">
-          <label htmlFor={`${id}-sort`}>{t("common.sortBy")}</label>
-          <select
-            id={`${id}-sort`}
-            className="input"
-            value={params.sort ?? DEFAULT_LIBRARY_SORT}
-            onChange={(event) => setFilter({ sort: event.target.value as LibrarySort })}
-          >
-            {LIBRARY_SORTS.map((sort) => (
-              <option key={sort} value={sort}>
-                {t(SORT_LABELS[sort])}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span className="chip-row-spacer" aria-hidden="true" />
+        <FilterMenu
+          label={t("common.sortBy")}
+          options={sortOptions}
+          value={sort}
+          valueLabel={t(SORT_LABELS[sort])}
+          sort={sort !== DEFAULT_LIBRARY_SORT ? "changed" : "default"}
+          onSelect={(value) => setFilter({ sort: value as LibrarySort })}
+        />
+        {!compact && activeSummary}
       </div>
-
-      {activeCount > 0 && (
-        <div className="library-filters-active">
-          <span>{t("common.filtersActive", { count: activeCount })}</span>
-          <button type="button" className="btn-ghost library-filters-reset" onClick={onReset}>
-            {t("common.resetFilters")}
-          </button>
-        </div>
-      )}
+      {/* On compact screens the summary and Reset stay visible with the panel closed. */}
+      {compact && activeSummary}
     </section>
+  );
+}
+
+/**
+ * One filter chip and its listbox popover. A filter chip names its value
+ * once set ("Tag: ml"); the sort chip always shows "Sort by  <order>".
+ */
+function FilterMenu({
+  label,
+  options,
+  value,
+  valueLabel,
+  sort,
+  onSelect,
+}: {
+  label: string;
+  options: ListboxOption<string>[];
+  value: string;
+  valueLabel?: string;
+  /** A sort chip; "changed" when the order is not the default. */
+  sort?: "default" | "changed";
+  onSelect: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  const active = sort ? sort === "changed" : !!value;
+  let text = label;
+  if (sort) text = valueLabel ?? label;
+  else if (valueLabel) text = t("library.filterValue", { label, value: valueLabel });
+  return (
+    <Popover
+      haspopup="listbox"
+      align={sort ? "end" : "start"}
+      className="library-filters-popover"
+      trigger={(props) => (
+        // The trailing space keeps the prefix and value apart in the accessible name.
+        <MenuChip {...props} active={active} prefix={sort ? `${label} ` : undefined}>
+          {text}
+        </MenuChip>
+      )}
+    >
+      {(close) => (
+        <FilterListbox>
+          <PopoverListbox
+            label={label}
+            options={options}
+            value={value}
+            onSelect={(next) => {
+              close();
+              if (next !== value) onSelect(next);
+            }}
+          />
+        </FilterListbox>
+      )}
+    </Popover>
+  );
+}
+
+/**
+ * Long tag and collection lists scroll inside the popover: on open the
+ * selected option is scrolled into view (the popover focuses it without
+ * scrolling), and a typed letter jumps to the next option starting with it,
+ * as the native selects did.
+ */
+function FilterListbox({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const selected = ref.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
+  }, []);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const key = event.key.toLocaleLowerCase();
+    if (key.length !== 1 || key === " " || event.ctrlKey || event.metaKey || event.altKey) return;
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    for (let step = 1; step <= items.length; step++) {
+      const item = items[(current + step) % items.length]!;
+      if ((item.textContent ?? "").trim().toLocaleLowerCase().startsWith(key)) {
+        event.preventDefault();
+        item.focus();
+        return;
+      }
+    }
+  };
+
+  return (
+    <div ref={ref} onKeyDown={onKeyDown}>
+      {children}
+    </div>
   );
 }

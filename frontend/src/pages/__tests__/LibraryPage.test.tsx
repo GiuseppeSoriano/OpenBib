@@ -280,15 +280,21 @@ describe("LibraryPage filters", () => {
     expect(vi.mocked(library.listEntries).mock.calls).toHaveLength(2);
   });
 
-  it("applies state, tag, collection and sort from the selects", async () => {
+  it("applies state, tag, collection and sort from the filter chips", async () => {
     const user = userEvent.setup();
     renderLibrary();
     await screen.findByText("First Library Paper");
 
-    await user.selectOptions(screen.getByLabelText("Reading state"), "reading");
-    await user.selectOptions(await screen.findByLabelText("Tag"), "ml");
-    await user.selectOptions(await screen.findByLabelText("Collection"), COLLECTION_ID);
-    await user.selectOptions(screen.getByLabelText("Sort by"), "citations");
+    // Each chip opens a listbox; facet counts label the options.
+    const pick = async (chip: RegExp, option: string) => {
+      await user.click(await screen.findByRole("button", { name: chip }));
+      await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: option }));
+      expect(screen.queryByRole("listbox")).toBeNull();
+    };
+    await pick(/^Reading state/, "Reading (1)");
+    await pick(/^Tag/, "ml (1)");
+    await pick(/^Collection/, "Reading group");
+    await pick(/^Sort by/, "Most cited");
 
     await waitFor(() =>
       expect(lastListParams()).toMatchObject({
@@ -302,9 +308,62 @@ describe("LibraryPage filters", () => {
       `?state=reading&tag=ml&collection_id=${COLLECTION_ID}&sort=citations`,
     );
     expect(screen.getByText("3 filters active")).toBeInTheDocument();
-    // Facet counts label the options.
-    expect(screen.getByRole("option", { name: "ml (1)" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Reading group" })).toBeInTheDocument();
+    // The chips name their values and show them as applied.
+    expect(screen.getByRole("button", { name: "Reading state: Reading" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Tag: ml" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Collection: Reading group" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Sort by Most cited" })).toHaveClass("chip--active");
+  });
+
+  it("marks the current value in a filter listbox and keeps it on Escape", async () => {
+    const user = userEvent.setup();
+    renderLibrary("/library?tag=ml");
+    await screen.findByText("First Library Paper");
+
+    const chip = await screen.findByRole("button", { name: "Tag: ml" });
+    await user.click(chip);
+    expect(chip).toHaveAttribute("aria-expanded", "true");
+    const selected = screen.getByRole("option", { name: "ml (1)" });
+    expect(selected).toHaveAttribute("aria-selected", "true");
+    expect(selected).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(chip).toHaveFocus();
+    expect(screen.getByTestId("location")).toHaveTextContent("?tag=ml");
+  });
+
+  it("scrolls a long tag list to the selected tag and jumps by typed letter", async () => {
+    const tags = Array.from({ length: 40 }, (_, i) => ({ tag: `alpha-${i}`, count: 1 }));
+    const previous = vi.mocked(library.getFacets).getMockImplementation()!;
+    vi.mocked(library.getFacets).mockResolvedValue({
+      tags: [...tags, { tag: "beta", count: 2 }, { tag: "zeta", count: 1 }],
+      states: [],
+      total: 2,
+      unresolved: 0,
+    });
+    // jsdom has no layout, so record the call instead.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const user = userEvent.setup();
+      renderLibrary("/library?tag=zeta");
+      await screen.findByText("First Library Paper");
+
+      await user.click(await screen.findByRole("button", { name: "Tag: zeta" }));
+      const selected = screen.getByRole("option", { name: "zeta (1)" });
+      expect(selected).toHaveFocus();
+      expect(scrollIntoView.mock.contexts).toContain(selected);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+      await user.keyboard("b");
+      expect(screen.getByRole("option", { name: "beta (2)" })).toHaveFocus();
+      await user.keyboard("a");
+      expect(screen.getByRole("option", { name: "Any tag" })).toHaveFocus();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+      vi.mocked(library.getFacets).mockImplementation(previous);
+    }
   });
 
   it("reads filters from the URL and resets them", async () => {
@@ -350,7 +409,7 @@ describe("LibraryPage filters", () => {
     renderLibrary(`/library?collection_id=${goneId}`);
 
     expect(await screen.findByText("No papers match these filters")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Selected collection" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collection: Selected collection" })).toBeInTheDocument();
   });
 
   it("offers the reset when the API rejects a filter value", async () => {
@@ -399,8 +458,8 @@ describe("LibraryPage filters", () => {
     renderLibrary();
     await screen.findByText("First Library Paper");
 
-    await waitFor(() => expect(screen.queryByLabelText("Reading state")).toBeNull());
-    expect(screen.getByLabelText("Sort by")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Reading state/ })).toBeNull());
+    expect(screen.getByRole("button", { name: /^Sort by/ })).toBeInTheDocument();
   });
 
   it("folds the filters behind a toggle on compact screens", async () => {
@@ -416,13 +475,18 @@ describe("LibraryPage filters", () => {
 
       const toggle = screen.getByRole("button", { name: /Filters/ });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("1");
-      expect(screen.getByLabelText("Reading state")).not.toBeVisible();
+      expect(toggle).toHaveTextContent("· 1");
+      expect(toggle).toHaveAccessibleName(/1 filter active/);
+      const stateChip = screen.getByRole("button", { name: /^Reading state/, hidden: true });
+      expect(stateChip).not.toBeVisible();
+      // The active summary and Reset stay reachable while the panel is closed.
+      expect(screen.getByText("1 filter active", { selector: ".library-filters-active span" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Reset filters" })).toBeVisible();
 
       await user.click(toggle);
 
       expect(toggle).toHaveAttribute("aria-expanded", "true");
-      expect(screen.getByLabelText("Reading state")).toBeVisible();
+      expect(stateChip).toBeVisible();
     } finally {
       window.matchMedia = original;
     }

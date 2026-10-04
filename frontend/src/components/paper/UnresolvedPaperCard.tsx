@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import AnnouncedText from "@/components/ui/AnnouncedText";
 import type { LibraryResolveResult } from "@/types";
 import "./PaperCard.css";
+import "./UnresolvedPaperCard.css";
 
 interface UnresolvedPaperCardProps {
   /** The paper key exactly as stored. */
@@ -131,7 +132,7 @@ export default function UnresolvedPaperCard({
   }
 
   return (
-    <article className="card paper-card paper-card--unresolved" aria-labelledby={titleId}>
+    <article className="paper-card unresolved-card" aria-labelledby={titleId}>
       <div className="paper-title-row">
         {onOpenDetails ? (
           <button
@@ -157,7 +158,7 @@ export default function UnresolvedPaperCard({
       <p className="paper-identifier" id={identifierId}>
         <IdentifierText view={view} addedAt={addedAt} />
       </p>
-      <p className="paper-meta">
+      <p className="paper-meta unresolved-explanation">
         {canEdit ? t("paper.unresolvedExplanation") : t("paper.unresolvedExplanationReadOnly")}
       </p>
       {status && (
@@ -207,11 +208,11 @@ export default function UnresolvedPaperCard({
       )}
 
       {canEdit && (
-        <div className="paper-actions">
+        <div className="paper-actions unresolved-actions">
           {canRetry && (
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn-quiet btn-quiet--accent"
               onClick={() => resolve.mutate(null)}
               disabled={resolve.isPending || errorText.waiting}
               aria-describedby={identifierId}
@@ -223,7 +224,7 @@ export default function UnresolvedPaperCard({
           <button
             ref={fixButton}
             type="button"
-            className={canRetry ? "btn btn-secondary" : "btn btn-primary"}
+            className={canRetry ? "btn-quiet" : "btn-quiet btn-quiet--accent"}
             onClick={() => (fixOpen ? closeFix() : setFixOpen(true))}
             aria-expanded={fixOpen}
             aria-controls={fixOpen ? formId : undefined}

@@ -13,9 +13,18 @@ interface AddToCollectionMenuProps {
   canonicalKey: string;
   /** Collection ids this paper is already saved in (from paper-memberships). */
   savedInCollections?: string[];
-  /** "button" = labeled secondary button; "icon" = compact icon-only trigger. */
-  variant?: "button" | "icon";
+  /**
+   * "button" = labeled secondary button; "quiet" = labeled quiet row action;
+   * "icon" = compact icon-only trigger.
+   */
+  variant?: "button" | "quiet" | "icon";
 }
+
+const TRIGGER_CLASSES = {
+  button: "btn btn-secondary",
+  quiet: "btn-quiet",
+  icon: "btn-ghost",
+} as const;
 
 function editableOnly(collections: Collection[]): Collection[] {
   return collections.filter((collection) => collection.can_edit);
@@ -82,16 +91,16 @@ export default function AddToCollectionMenu({
     <Menu
       align="left"
       button={
-        variant === "button" ? (
+        variant === "icon" ? (
+          <FolderPlus size={15} aria-hidden="true" />
+        ) : (
           <>
-            <FolderPlus size={14} />
+            <FolderPlus size={14} aria-hidden="true" />
             {t("paper.addToCollection")}
           </>
-        ) : (
-          <FolderPlus size={15} />
         )
       }
-      buttonClassName={variant === "button" ? "btn btn-secondary" : "btn-ghost"}
+      buttonClassName={TRIGGER_CLASSES[variant]}
       buttonAriaLabel={t("paper.addToCollection")}
       buttonTitle={t("paper.addToCollection")}
       onOpen={() => setEnabled(true)}

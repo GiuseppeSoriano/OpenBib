@@ -51,7 +51,7 @@ export default function TagEditor({ paperKey }: { paperKey: string }) {
               disabled={removeMutation.isPending}
               aria-label={`${t("common.delete")} ${tag}`}
             >
-              <X size={11} />
+              <X size={11} aria-hidden="true" />
             </button>
           </span>
         ))}
@@ -69,7 +69,7 @@ export default function TagEditor({ paperKey }: { paperKey: string }) {
           className="btn btn-secondary"
           disabled={!newTag.trim() || addMutation.isPending}
         >
-          <Plus size={13} />
+          <Plus size={13} aria-hidden="true" />
           {t("paper.addTag")}
         </button>
       </form>

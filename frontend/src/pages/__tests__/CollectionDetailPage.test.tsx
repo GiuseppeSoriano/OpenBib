@@ -106,7 +106,8 @@ describe("CollectionDetailPage", () => {
 
     expect(await screen.findByText("Attention Is All You Need")).toBeInTheDocument();
     expect(screen.getByText("Ashish Vaswani")).toBeInTheDocument();
-    expect(screen.getByText(/NeurIPS · 2017/)).toBeInTheDocument();
+    // The row sets the venue in italics, so the meta line spans several elements.
+    expect(document.querySelector(".paper-meta")).toHaveTextContent(/NeurIPS · 2017/);
     // The raw canonical key must no longer be the visible label.
     expect(screen.queryByText("doi:10.1/attention")).toBeNull();
   });
@@ -117,6 +118,23 @@ describe("CollectionDetailPage", () => {
     expect(await screen.findByText("Deep Learning Classics")).toBeInTheDocument();
     expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText(/1 paper ·/)).toBeInTheDocument();
+  });
+
+  it("lists the papers as rows under a section heading and folds notes behind a disclosure", async () => {
+    renderPage();
+    await screen.findByText("Attention Is All You Need");
+
+    expect(screen.getByText("Collection").closest(".page-header-eyebrow")).not.toBeNull();
+    const papers = screen.getByRole("region", { name: "Papers" });
+    expect(within(papers).getAllByRole("listitem").filter((li) => li.classList.contains("list-row"))).toHaveLength(1);
+    expect(within(papers).getByText("1 paper")).toBeInTheDocument();
+
+    const notes = screen.getByRole("button", { name: "Notes" });
+    expect(notes.closest("h2")).not.toBeNull();
+    expect(notes).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(notes);
+    expect(notes).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("textbox", { name: "Notes" })).toBeInTheDocument();
   });
 
   it("exposes a reading-state selector on each paper row", async () => {
@@ -405,7 +423,7 @@ describe("CollectionDetailPage — import", () => {
       const { user, dialog } = await openImport(lines.join("\n"));
       await user.click(within(dialog).getByRole("button", { name: "Import 30 DOIs" }));
 
-      await waitFor(() => expect(document.querySelector(".cd-notfound")).not.toBeNull());
+      expect(await screen.findByText("Collection unavailable or access no longer granted.", { selector: ".empty-state-title" })).toBeInTheDocument();
       const report = screen.getByRole("dialog", { name: "Import DOIs" });
       expect(within(report).getByText("Import stopped: you can no longer edit this collection.")).toBeInTheDocument();
       expect(within(report).getAllByText("Added")).toHaveLength(25);

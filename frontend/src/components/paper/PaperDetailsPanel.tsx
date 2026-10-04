@@ -260,13 +260,15 @@ export default function PaperDetailsPanel({
           )}
 
           <p className="pd-venue">
-            {[paper.venue, formatDate(paper.publication_date)].filter(Boolean).join(" · ")}
+            {paper.venue && <span className="pd-venue-name">{paper.venue}</span>}
+            {paper.venue && paper.publication_date && " · "}
+            {formatDate(paper.publication_date)}
             {paper.volume && ` · Vol. ${paper.volume}`}
             {paper.issue && ` (${paper.issue})`}
             {paper.pages && `, ${paper.pages}`}
           </p>
 
-          <div className="pd-counts">
+          <div className="pd-counts tabular">
             {paper.cited_by_count != null && (
               <span>{t("paper.citations", { count: paper.cited_by_count })}</span>
             )}
@@ -286,7 +288,7 @@ export default function PaperDetailsPanel({
               className="btn btn-secondary"
               onClick={onClose}
             >
-              <GitFork size={14} />
+              <GitFork size={14} aria-hidden="true" />
               {t("paper.exploreGraph")}
             </Link>
             {user && (
@@ -297,7 +299,7 @@ export default function PaperDetailsPanel({
                   onClick={() => saveMutation.mutate()}
                   disabled={inLibrary || saveMutation.isPending}
                 >
-                  <BookMarked size={14} />
+                  <BookMarked size={14} aria-hidden="true" />
                   {inLibrary ? t("paper.inLibrary") : t("paper.saveToLibrary")}
                 </button>
                 <AddToCollectionMenu
@@ -310,7 +312,7 @@ export default function PaperDetailsPanel({
 
           {paragraphs.length > 0 && (
             <section className="pd-section">
-              <h3>{t("paper.abstractHeading")}</h3>
+              <h3 className="label-caps">{t("paper.abstractHeading")}</h3>
               <div className="pd-abstract">
                 {paragraphs.map((paragraph, index) => (
                   <p key={index}>
@@ -324,7 +326,7 @@ export default function PaperDetailsPanel({
 
           {(paper.doi || paper.arxiv_id || pubmed || fullText.length > 0 || semanticScholar) && (
             <section className="pd-section">
-              <h3>{t("paper.linksHeading")}</h3>
+              <h3 className="label-caps">{t("paper.linksHeading")}</h3>
               <div className="pd-links">
                 {paper.doi && (
                   <ExternalLinkChip href={`https://doi.org/${paper.doi}`}>
@@ -367,7 +369,7 @@ export default function PaperDetailsPanel({
 
           {entry && entry.pinned_versions.length > 0 ? (
             <section className="pd-section" data-testid="managed-versions">
-              <h3>{t("library.pinnedVersions")}</h3>
+              <h3 className="label-caps">{t("library.pinnedVersions")}</h3>
               <ul className="pd-versions">
                 {entry.pinned_versions.map((pin, index) => {
                   const isPrimary = pin.paper_canonical_key === entry.primary_canonical_key;
@@ -392,7 +394,7 @@ export default function PaperDetailsPanel({
                               aria-label={t("library.repinTitle")}
                               aria-describedby={labelId}
                             >
-                              <Pin size={13} />
+                              <Pin size={13} aria-hidden="true" />
                             </button>
                             <button
                               type="button"
@@ -405,7 +407,7 @@ export default function PaperDetailsPanel({
                               aria-label={t("library.removeVersionTitle")}
                               aria-describedby={labelId}
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={13} aria-hidden="true" />
                             </button>
                           </>
                         )}
@@ -418,7 +420,7 @@ export default function PaperDetailsPanel({
           ) : (
             paper.versions.length > 1 && (
               <section className="pd-section">
-                <h3>{t("paper.versionsHeading")}</h3>
+                <h3 className="label-caps">{t("paper.versionsHeading")}</h3>
                 <ul className="pd-versions">
                   {paper.versions.map((version) => {
                     const info = labels.get(version.canonical_key);
@@ -443,23 +445,23 @@ export default function PaperDetailsPanel({
           {user ? (
             <>
               <section className="pd-section">
-                <h3>{t("paper.readingState")}</h3>
+                <h3 className="label-caps">{t("paper.readingState")}</h3>
                 <ReadingStateSelect paperKey={paper.canonical_key} />
               </section>
               <section className="pd-section">
-                <h3>{t("paper.tags")}</h3>
+                <h3 className="label-caps">{t("paper.tags")}</h3>
                 <TagEditor paperKey={paper.canonical_key} />
               </section>
               <section className="pd-section">
-                <h3>{t("paper.notes")}</h3>
+                <h3 className="label-caps">{t("paper.notes")}</h3>
                 <NotesPanel paperKey={paper.canonical_key} paperGroupKey={paper.paper_group_key} />
               </section>
             </>
           ) : (
-            <div className="pd-signin card">
+            <div className="pd-signin">
               <p>{t("paper.signInToSave")}</p>
               <Link to="/login" className="btn btn-primary" onClick={onClose}>
-                <LogIn size={14} />
+                <LogIn size={14} aria-hidden="true" />
                 {t("nav.signIn")}
               </Link>
             </div>

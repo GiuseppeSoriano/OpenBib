@@ -4,12 +4,13 @@
   .cd-add-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 6px;
+    max-width: 44rem;
   }
 
   .cd-add-label,
   .cd-import-label {
-    font-size: 0.84rem;
+    font-size: var(--text-sm);
     font-weight: 500;
   }
 
@@ -25,13 +26,13 @@
   .cd-add-hint,
   .cd-import-hint,
   .cd-import-summary {
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
 
   .cd-add-error,
   .cd-import-error {
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     color: var(--color-danger);
     overflow-wrap: anywhere;
   }
@@ -51,12 +52,12 @@
   .cd-import-text {
     resize: vertical;
     font-family: var(--font-mono);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
   }
 
   .cd-import-invalid h4,
   .cd-import-results-heading {
-    font-size: 0.84rem;
+    font-size: var(--text-sm);
     font-weight: 600;
   }
   .cd-import-results-heading:focus {
@@ -70,8 +71,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
   }
   .cd-import-invalid ul:focus-visible,
   .cd-import-results:focus-visible {
@@ -88,21 +88,21 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
   }
   .cd-import-progress progress {
     width: 100%;
     accent-color: var(--color-accent);
   }
 
+  /* One report line per row: a coloured rule marks its outcome. */
   .cd-import-result {
     display: flex;
     flex-wrap: wrap;
     gap: 0 var(--space-sm);
-    padding: var(--space-xs) var(--space-sm);
-    border-left: 3px solid var(--color-border);
-    background: var(--color-surface-hover);
-    border-radius: var(--radius-sm);
+    padding: 6px var(--space-sm);
+    border-left: 2px solid var(--color-border-strong);
+    border-bottom: 1px solid var(--color-hairline);
   }
   .cd-import-result--ok {
     border-left-color: var(--color-success);
@@ -116,6 +116,7 @@
 
   .cd-import-line {
     color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
   }
   .cd-import-input {
     font-family: var(--font-mono);

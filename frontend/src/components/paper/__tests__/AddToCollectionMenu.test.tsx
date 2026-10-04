@@ -35,6 +35,14 @@ vi.mock("@/lib/api", () => ({
 beforeEach(() => post.mockClear());
 
 describe("AddToCollectionMenu", () => {
+  it("renders a labelled quiet trigger for list rows", () => {
+    renderWithProviders(<AddToCollectionMenu canonicalKey="doi:10.1/add" variant="quiet" />);
+    const trigger = screen.getByRole("button", { name: "Add to collection" });
+    expect(trigger).toHaveClass("btn-quiet");
+    expect(trigger).toHaveTextContent("Add to collection");
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+  });
+
   it("lists collections lazily when opened and adds the paper", async () => {
     renderWithProviders(
       <AddToCollectionMenu canonicalKey="doi:10.1/add" savedInCollections={[]} />,

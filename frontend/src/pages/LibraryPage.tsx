@@ -15,7 +15,7 @@ import { useToast } from "@/components/ui/Toast";
 import type { BlockingCollection, LibraryEntryListItem, LibraryResolveResult } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import Modal from "@/components/ui/Modal";
-import { SkeletonCard } from "@/components/ui/Skeleton";
+import RowSkeletons from "@/components/paper/RowSkeletons";
 import EmptyState from "@/components/ui/EmptyState";
 import QueryError from "@/components/ui/QueryError";
 import PaperCard from "@/components/paper/PaperCard";
@@ -154,16 +154,16 @@ export default function LibraryPage() {
 
   return (
     <div className="library-page">
-      <header className="library-header">
-        <div>
-          <h1 ref={headingRef} tabIndex={-1}>
+      <header className="page-header library-header">
+        <div className="page-header-text">
+          <h1 ref={headingRef} tabIndex={-1} className="page-header-title">
             {t("library.title")}
           </h1>
-          <p className="library-subtitle">{t("library.subtitle")}</p>
+          <p className="page-header-description">{t("library.subtitle")}</p>
         </div>
-        <div className="library-toolbar">
+        <div className="page-header-actions">
           <Link to="/graph/library" className="btn btn-secondary">
-            <GitFork size={14} /> {t("library.viewGraph")}
+            <GitFork size={14} aria-hidden="true" /> {t("library.viewGraph")}
           </Link>
           <Link to="/settings#your-data" className="btn btn-secondary">
             <Download size={14} aria-hidden="true" /> {t("library.exportData")}
@@ -174,11 +174,11 @@ export default function LibraryPage() {
 
       <LibraryFilters params={params} onChange={setParams} onReset={resetFilters} />
 
-      <p className="library-count" role="status">
+      <p className="library-count tabular" role="status">
         {countText}
       </p>
 
-      {entriesQuery.isLoading && <SkeletonCard count={4} />}
+      {entriesQuery.isLoading && <RowSkeletons count={4} />}
 
       {loaded && total === 0 && !filtered && (
         <EmptyState
@@ -226,7 +226,7 @@ export default function LibraryPage() {
         />
       )}
 
-      <div className="library-list">
+      <ul className="list-rows list-rows--ruled library-list" hidden={entries.length === 0}>
         {entries.map((item) => (
           <LibraryEntry
             key={item.paper_group_key}
@@ -241,7 +241,7 @@ export default function LibraryPage() {
             }}
           />
         ))}
-      </div>
+      </ul>
 
       {entriesQuery.isFetchNextPageError && (
         <QueryError busy={entriesQuery.isFetching} onRetry={() => void entriesQuery.fetchNextPage()} />
@@ -372,70 +372,76 @@ function LibraryEntry({
   // Entries without details offer recovery (and deletion) instead of the graph.
   if (!item.resolved || !primary) {
     return (
-      <UnresolvedPaperCard
-        canonicalKey={item.primary_canonical_key}
-        addedAt={item.created_at}
-        canEdit
-        onOpenDetails={() => onOpenDetails(item.primary_canonical_key)}
-        onResolved={onResolved}
-        actions={(describedBy) => (
-          <button
-            type="button"
-            className="btn btn-secondary library-delete"
-            onClick={onRequestDelete}
-            aria-describedby={describedBy}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            {t("common.delete")}
-          </button>
-        )}
-      />
+      <li className="list-row library-row">
+        <UnresolvedPaperCard
+          canonicalKey={item.primary_canonical_key}
+          addedAt={item.created_at}
+          canEdit
+          onOpenDetails={() => onOpenDetails(item.primary_canonical_key)}
+          onResolved={onResolved}
+          actions={(describedBy) => (
+            <button
+              type="button"
+              className="btn-quiet btn-quiet--muted library-delete"
+              onClick={onRequestDelete}
+              aria-describedby={describedBy}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              {t("common.delete")}
+            </button>
+          )}
+        />
+      </li>
     );
   }
 
   return (
-    <PaperCard
-      paper={primary}
-      onOpenDetails={() => onOpenDetails(item.primary_canonical_key)}
-      showAbstract={false}
-      headerBadges={
-        item.version_count > 1 ? (
-          <span className="badge badge--neutral">
-            <Layers3 size={11} /> {t("paper.versions", { count: item.version_count })}
-          </span>
-        ) : undefined
-      }
-      actions={
-        <>
-          <AddToCollectionMenu canonicalKey={item.primary_canonical_key} />
-          <Link
-            to={`/graph/${encodeURIComponent(item.primary_canonical_key)}`}
-            className="btn btn-secondary"
-          >
-            <GitFork size={14} />
-            {t("paper.exploreGraph")}
-          </Link>
-          <button
-            type="button"
-            className="btn-ghost library-delete"
-            onClick={onRequestDelete}
-            title={t("library.deleteFromLibrary")}
-            aria-label={t("library.deleteFromLibrary")}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-          </button>
-        </>
-      }
-    >
-      {item.tags.length > 0 && (
-        <div className="library-entry-tags">
-          {item.tags.map((tag) => (
-            <span key={tag} className="paper-tag">
-              {tag}
+    <li className="list-row library-row">
+      <PaperCard
+        paper={primary}
+        onOpenDetails={() => onOpenDetails(item.primary_canonical_key)}
+        showAbstract={false}
+        variant="row"
+        headerBadges={
+          item.version_count > 1 ? (
+            <span className="badge badge--neutral">
+              <Layers3 size={11} aria-hidden="true" /> {t("paper.versions", { count: item.version_count })}
             </span>
-          ))}
-        </div>
-      )}
-    </PaperCard>
+          ) : undefined
+        }
+        actions={
+          <>
+            <AddToCollectionMenu canonicalKey={item.primary_canonical_key} variant="quiet" />
+            <Link
+              to={`/graph/${encodeURIComponent(item.primary_canonical_key)}`}
+              className="btn-quiet"
+            >
+              <GitFork size={14} aria-hidden="true" />
+              {t("paper.exploreGraph")}
+            </Link>
+            <button
+              type="button"
+              className="btn-quiet btn-quiet--muted library-delete"
+              onClick={onRequestDelete}
+              title={t("library.deleteFromLibrary")}
+              aria-label={t("library.deleteFromLibrary")}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              {t("common.delete")}
+            </button>
+          </>
+        }
+      >
+        {item.tags.length > 0 && (
+          <ul className="library-entry-tags" aria-label={t("paper.tags")}>
+            {item.tags.map((tag) => (
+              <li key={tag} className="paper-tag">
+                {tag}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PaperCard>
+    </li>
   );
 }

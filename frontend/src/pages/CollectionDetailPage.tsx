@@ -14,8 +14,10 @@ import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
 import AddPaperForm from "@/components/collections/AddPaperForm";
 import ImportIdentifiersModal from "@/components/collections/ImportIdentifiersModal";
 import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
-import { SkeletonCard } from "@/components/ui/Skeleton";
+import RowSkeletons from "@/components/paper/RowSkeletons";
 import EmptyState from "@/components/ui/EmptyState";
+import SectionHeading from "@/components/ui/SectionHeading";
+import { useTopBarTitle } from "@/components/shell/ShellContext";
 import { useToast } from "@/components/ui/Toast";
 import {
   Trash2,
@@ -24,8 +26,10 @@ import {
   ChevronDown,
   ChevronUp,
   Edit3,
+  Share2,
   Upload,
   FileText,
+  FolderOpen,
 } from "lucide-react";
 import "./CollectionDetailPage.css";
 import CollectionSharing from "@/components/collections/CollectionSharing";
@@ -75,6 +79,9 @@ export default function CollectionDetailPage() {
     gcTime: 0, staleTime: 0, refetchOnWindowFocus: "always", retry: false,
     enabled: !!collection,
   });
+
+  // The breadcrumb names the open collection.
+  useTopBarTitle(collection?.name);
 
   useEffect(() => {
     if (collection === null) {
@@ -169,7 +176,10 @@ export default function CollectionDetailPage() {
   });
 
   const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(i18n.language).format(new Date(value));
+    // The Collections list's style ("Oct 3, 2026"), not a locale-ambiguous 10/3/2026.
+    new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, { dateStyle: "medium" }).format(
+      new Date(value),
+    );
 
   // Rendered at the same place in both branches below: a mid-import 403/404
   // that makes the collection unavailable keeps the per-line report open until Done.
@@ -188,11 +198,27 @@ export default function CollectionDetailPage() {
     }
   };
 
-  if (isLoading || authLoading) return <SkeletonCard count={3} />;
+  if (isLoading || authLoading) {
+    return (
+      <div className="collection-detail">
+        <RowSkeletons count={3} />
+      </div>
+    );
+  }
   if (!collection || collectionError) {
     return (
       <>
-        <div className="cd-notfound"><p>{t("sharing.unavailable")}</p>{!user && <Link to="/login" state={{ returnTo: access.returnTo }} className="btn btn-primary">{t("sharing.login")}</Link>}</div>
+        <EmptyState
+          icon={FolderOpen}
+          title={t("sharing.unavailable")}
+          action={
+            !user ? (
+              <Link to="/login" state={{ returnTo: access.returnTo }} className="btn btn-primary">
+                {t("sharing.login")}
+              </Link>
+            ) : undefined
+          }
+        />
         {importModal}
       </>
     );
@@ -218,21 +244,14 @@ export default function CollectionDetailPage() {
                 updateMutation.mutate();
               }}
             >
-              <input
-                className="input"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder={t("collections.namePlaceholder")}
-                aria-label={t("collections.namePlaceholder")}
-                required
-              />
-              <input
-                className="input"
-                value={editDesc}
-                onChange={(e) => setEditDesc(e.target.value)}
-                placeholder={t("collections.descriptionPlaceholder")}
-                aria-label={t("collections.descriptionPlaceholder")}
-              />
+              <label className="cd-field">
+                {t("collections.namePlaceholder")}
+                <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+              </label>
+              <label className="cd-field">
+                {t("collections.descriptionPlaceholder")}
+                <input className="input" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
+              </label>
               <div className="cd-edit-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setEditing(false)}>
                   {t("common.cancel")}
@@ -243,52 +262,74 @@ export default function CollectionDetailPage() {
               </div>
             </form>
           ) : (
-            <>
-              <div className="cd-title-row">
-                <h1 ref={headingRef} tabIndex={-1}>{collection.name}</h1>
-                <span className="badge badge--neutral">{t(collection.is_owner ? "sharing.owner" : collection.can_edit ? "sharing.editor" : "sharing.reader")}</span>
-                {collection.can_edit && (
-                  <button
-                    className="btn-ghost"
-                    onClick={() => {
-                      setEditRevision(collection.revision);
-                      setEditName(collection.name);
-                      setEditDesc(collection.description || "");
-                      setEditing(true);
-                    }}
-                    title={t("collections.edit")}
-                    aria-label={t("collections.edit")}
-                  >
-                    <Edit3 size={15} aria-hidden="true" />
+            <div className="page-header cd-header-main">
+              <div className="page-header-text">
+                <p className="page-header-eyebrow">
+                  <span>{t("collections.eyebrow")}</span>
+                  <span aria-hidden="true"> · </span>
+                  <span>{t(collection.is_owner ? "sharing.owner" : collection.can_edit ? "sharing.editor" : "sharing.reader")}</span>
+                </p>
+                <div className="cd-title-row">
+                  <h1 ref={headingRef} tabIndex={-1} className="page-header-title">
+                    {collection.name}
+                  </h1>
+                  {collection.can_edit && (
+                    <button
+                      type="button"
+                      className="btn-quiet btn-quiet--muted cd-edit"
+                      onClick={() => {
+                        setEditRevision(collection.revision);
+                        setEditName(collection.name);
+                        setEditDesc(collection.description || "");
+                        setEditing(true);
+                      }}
+                      title={t("collections.edit")}
+                      aria-label={t("collections.edit")}
+                    >
+                      <Edit3 size={15} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+                {collection.description && <p className="page-header-description cd-description">{collection.description}</p>}
+                <p className="cd-meta tabular">
+                  {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
+                  {t("collections.createdOn", { date: formatDate(collection.created_at) })}
+                </p>
+              </div>
+              <div className="page-header-actions">
+                {collection.can_manage_access && (
+                  <button type="button" className="btn btn-primary" onClick={() => setShowSharing(true)}>
+                    <Share2 size={14} aria-hidden="true" /> {t("sharing.title")}
                   </button>
                 )}
-              </div>
-              {collection.description && <p className="cd-description">{collection.description}</p>}
-              <p className="cd-meta">
-                {t("collections.paperCount", { count: collection.paper_count })} ·{" "}
-                {t("collections.createdOn", { date: formatDate(collection.created_at) })}
-              </p>
-              <div className="cd-toolbar">
-                {collection.can_manage_access && <button className="btn btn-primary" onClick={() => setShowSharing(true)}>{t("sharing.title")}</button>}
                 {!user && <Link className="btn btn-secondary" to="/login" state={{ returnTo: access.returnTo }}>{t("sharing.login")}</Link>}
                 <Link to={`/graph/collection/${id}${access.fragment}`} className="btn btn-secondary">
-                  <GitFork size={14} /> {t("collections.viewGraph")}
+                  <GitFork size={14} aria-hidden="true" /> {t("collections.viewGraph")}
                 </Link>
                 {user && collection.can_edit && (
-                  <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowImport(true)}>
                     <Upload size={14} aria-hidden="true" /> {t("collections.importDois")}
                   </button>
                 )}
                 <ZoteroSyncButton collectionId={id} headers={access.headers} />
               </div>
-            </>
+            </div>
           )}
         </header>
 
         {collection.can_edit && <AddPaperForm collectionId={id!} onAccessError={refreshAccessAfterError} />}
 
         {/* Paper list */}
-        <section className="cd-papers">
+        <section className="cd-papers" aria-labelledby="cd-papers-title">
+          <SectionHeading
+            id="cd-papers-title"
+            title={t("collections.papersHeading")}
+            action={
+              <span className="cd-papers-count tabular">
+                {t("collections.paperCount", { count: papers?.length ?? collection.paper_count })}
+              </span>
+            }
+          />
           {papers && papers.length === 0 && (
             <EmptyState
               icon={FileText}
@@ -296,30 +337,42 @@ export default function CollectionDetailPage() {
               description={t(collection.can_edit ? "collections.emptyPapersDescription" : "collections.emptyPapersReadOnly")}
             />
           )}
-          {papers?.map((cp) => (
-            <CollectionPaperItem
-              key={cp.paper_canonical_key}
-              item={cp}
-              canEdit={collection.can_edit}
-              onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
-              onOpenDetails={(key) => setDetails({ key, unresolved: isUnresolved(cp) })}
-              onResolved={onRowResolved}
-              onAccessError={refreshAccessAfterError}
-            />
-          ))}
+          {papers && papers.length > 0 && (
+            <ul className="list-rows cd-paper-list">
+              {papers.map((cp) => (
+                <CollectionPaperItem
+                  key={cp.paper_canonical_key}
+                  item={cp}
+                  canEdit={collection.can_edit}
+                  onRemove={() => setPendingDeleteKey(cp.paper_canonical_key)}
+                  onOpenDetails={(key) => setDetails({ key, unresolved: isUnresolved(cp) })}
+                  onResolved={onRowResolved}
+                  onAccessError={refreshAccessAfterError}
+                />
+              ))}
+            </ul>
+          )}
         </section>
 
-        {/* Collection notes */}
+        {/* Collection notes: a disclosure under a section heading. */}
         {user && (
           <section className="cd-notes-section">
-            <button className="btn btn-secondary" onClick={() => setShowNotes((s) => !s)} aria-expanded={showNotes}>
-              <StickyNote size={14} />
-              {t("collections.notes")}
-              {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+            <h2 className="section-heading cd-notes-heading">
+              <button
+                type="button"
+                className="cd-notes-toggle"
+                onClick={() => setShowNotes((s) => !s)}
+                aria-expanded={showNotes}
+                aria-controls="cd-notes"
+              >
+                <StickyNote size={16} aria-hidden="true" />
+                <span className="section-heading-title">{t("collections.notes")}</span>
+                {showNotes ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+              </button>
+            </h2>
 
             {showNotes && (
-              <div className="cd-notes">
+              <div className="cd-notes" id="cd-notes">
                 <form
                   onSubmit={(e: FormEvent) => {
                     e.preventDefault();
@@ -340,22 +393,27 @@ export default function CollectionDetailPage() {
                   </button>
                 </form>
 
-                {notes?.map((note) => (
-                  <div key={note.id} className="card cd-note">
-                    <p>{note.content}</p>
-                    <div className="cd-note-meta">
-                      <span>{formatDate(note.updated_at)}</span>
-                      <button
-                        className="btn-ghost"
-                        onClick={() => deleteNoteMutation.mutate(note.id)}
-                        title={t("common.delete")}
-                        aria-label={t("common.delete")}
-                      >
-                        <Trash2 size={12} aria-hidden="true" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                {notes && notes.length > 0 && (
+                  <ul className="list-rows cd-note-list">
+                    {notes.map((note) => (
+                      <li key={note.id} className="list-row cd-note">
+                        <p>{note.content}</p>
+                        <div className="cd-note-meta">
+                          <span>{formatDate(note.updated_at)}</span>
+                          <button
+                            type="button"
+                            className="btn-quiet btn-quiet--muted cd-note-delete"
+                            onClick={() => deleteNoteMutation.mutate(note.id)}
+                            title={t("common.delete")}
+                            aria-label={t("common.delete")}
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
           </section>
@@ -448,31 +506,33 @@ function CollectionPaperItem({
   if (unresolved || !item.paper) {
     // No details to explore yet: offer recovery instead of the graph and reading state.
     return (
-      <UnresolvedPaperCard
-        canonicalKey={item.paper_canonical_key}
-        addedAt={item.added_at}
-        canEdit={canEdit}
-        onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
-        onResolved={onResolved}
-        onResolveError={(err) => {
-          const status = apiStatus(err);
-          if (status !== 403 && status !== 404) return false;
-          onAccessError();
-          return true;
-        }}
-        actions={(describedBy) => (
-          <button
-            type="button"
-            className="btn btn-secondary cd-remove"
-            onClick={onRemove}
-            aria-describedby={describedBy}
-            title={t("collections.removeFromCollection")}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            {t("collections.remove")}
-          </button>
-        )}
-      />
+      <li className="list-row cd-row">
+        <UnresolvedPaperCard
+          canonicalKey={item.paper_canonical_key}
+          addedAt={item.added_at}
+          canEdit={canEdit}
+          onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
+          onResolved={onResolved}
+          onResolveError={(err) => {
+            const status = apiStatus(err);
+            if (status !== 403 && status !== 404) return false;
+            onAccessError();
+            return true;
+          }}
+          actions={(describedBy) => (
+            <button
+              type="button"
+              className="btn-quiet btn-quiet--muted cd-remove"
+              onClick={onRemove}
+              aria-describedby={describedBy}
+              title={t("collections.removeFromCollection")}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              {t("collections.remove")}
+            </button>
+          )}
+        />
+      </li>
     );
   }
 
@@ -483,42 +543,44 @@ function CollectionPaperItem({
           <ReadingStateSelect paperKey={item.paper_canonical_key} fromList />
         </div>
       )}
-      <Link
-        to={`/graph/${encodeURIComponent(item.paper_canonical_key)}`}
-        className="btn btn-secondary"
-      >
-        <GitFork size={14} />
+      <Link to={`/graph/${encodeURIComponent(item.paper_canonical_key)}`} className="btn-quiet">
+        <GitFork size={14} aria-hidden="true" />
         {t("paper.exploreGraph")}
       </Link>
       {canEdit && (
         <button
-          className="btn-ghost cd-remove"
+          type="button"
+          className="btn-quiet btn-quiet--muted cd-remove"
           onClick={onRemove}
           title={t("collections.removeFromCollection")}
           aria-label={t("collections.removeFromCollection")}
         >
           <Trash2 size={14} aria-hidden="true" />
+          {t("collections.remove")}
         </button>
       )}
     </>
   );
 
   return (
-    <PaperCard
-      paper={item.paper}
-      onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
-      showAbstract={false}
-      actions={actions}
-    >
-      {tags && tags.length > 0 && (
-        <div className="cd-paper-tags">
-          {tags.slice(0, 4).map(({ tag }) => (
-            <span key={tag} className="paper-tag">
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-    </PaperCard>
+    <li className="list-row cd-row">
+      <PaperCard
+        paper={item.paper}
+        onOpenDetails={() => onOpenDetails(item.paper_canonical_key)}
+        showAbstract={false}
+        variant="row"
+        actions={actions}
+      >
+        {tags && tags.length > 0 && (
+          <ul className="cd-paper-tags" aria-label={t("paper.tags")}>
+            {tags.slice(0, 4).map(({ tag }) => (
+              <li key={tag} className="paper-tag">
+                {tag}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PaperCard>
+    </li>
   );
 }

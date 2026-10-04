@@ -53,12 +53,12 @@ export default function NotesPanel({ paperKey, paperGroupKey }: NotesPanelProps)
                 </span>
                 <button
                   type="button"
-                  className="btn-ghost note-delete"
+                  className="btn-quiet btn-quiet--muted note-delete"
                   onClick={() => deleteMutation.mutate(note.id)}
                   disabled={deleteMutation.isPending}
                   aria-label={t("common.delete")}
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={13} aria-hidden="true" />
                 </button>
               </div>
             </li>
