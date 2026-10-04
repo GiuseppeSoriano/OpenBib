@@ -190,7 +190,7 @@ describe("CitationGraph", () => {
     expect(ctx.fillText).toHaveBeenCalledWith(label, expect.any(Number), expect.any(Number));
   });
 
-  it("draws the selection hollow with a soft halo and labels it in the theme's amber", () => {
+  it("keeps the selected node's fill, rings it with a soft halo and labels it in the theme's amber", () => {
     const style = document.documentElement.style;
     style.setProperty("--graph-canvas", "#f8faf9");
     style.setProperty("--graph-node", "#a0a8a4");
@@ -232,10 +232,12 @@ describe("CitationGraph", () => {
       engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
       expect(strokes[0]).toEqual({ style: "#8f5b14", alpha: 0.18 });
       expect(strokes[1]).toEqual({ style: "#8f5b14", alpha: 1 });
+      // Then the canvas-coloured gap between the fill and the ring.
+      expect(strokes[2]).toEqual({ style: "#f8faf9", alpha: 1 });
       engine.props.nodeCanvasObject(data.nodes[1], ctx, 1);
       expect(labels).toEqual(["#7a4d11", "#1a1e1d"]);
-      // The selected node is canvas-filled inside its ring; others keep their fill.
-      expect(fills).toEqual(["#f8faf9", "#a0a8a4"]);
+      // The selected node keeps its own fill inside the ring, like the others.
+      expect(fills).toEqual(["#a0a8a4", "#a0a8a4"]);
       expect(ctx.globalAlpha).toBe(1);
     } finally {
       style.removeProperty("--graph-canvas");

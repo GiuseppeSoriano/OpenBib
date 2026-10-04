@@ -425,6 +425,7 @@ function GraphExplorer({
         <GraphSelectionSummary
           state={state}
           node={selectedNode}
+          saved={!!selectedNode && savedGroupKeys.has(selectedNode.id)}
           rangeControls={controls}
           titleRef={summaryTitleRef}
           onTogglePin={() => selectedNode && togglePin(selectedNode.id)}

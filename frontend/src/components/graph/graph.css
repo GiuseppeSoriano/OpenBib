@@ -457,7 +457,9 @@
     gap: var(--space-sm);
   }
 
-  /* Pin toggle: the name stays constant; pressed is a filled accent. */
+  /* Pin toggle: the name stays constant. Pressed fills the pin glyph in the
+     accent (a shape change as well as a colour one, WCAG 1.4.1/1.4.11) over
+     the active-chip ground, echoing the pinned node's filled circle. */
   .graph-pin-toggle {
     display: inline-flex;
     align-items: center;
@@ -479,21 +481,22 @@
     color: var(--color-text);
   }
   .graph-pin-toggle[aria-pressed="true"] {
-    background: var(--color-accent);
+    background: var(--color-accent-soft);
     border-color: var(--color-accent);
-    color: var(--color-on-accent);
+    color: var(--color-accent);
   }
   .graph-pin-toggle[aria-pressed="true"]:hover {
-    background: var(--color-accent-hover);
-    border-color: var(--color-accent-hover);
+    color: var(--color-accent-strong);
   }
-  /* In list rows and the summary: no outline at rest; pinned keeps the solid
-     accent fill, so the pressed state stays 3:1 against the row (WCAG 1.4.11). */
-  .graph-pin-toggle--quiet:not([aria-pressed="true"]) {
+  /* In list rows and the summary: no outline or ground, pressed or not; the
+     filled accent pin alone marks a pin, so pinned rows stay quiet. */
+  .graph-pin-toggle--quiet,
+  .graph-pin-toggle--quiet[aria-pressed="true"] {
     border-color: transparent;
     background: transparent;
   }
-  .graph-pin-toggle--quiet:not([aria-pressed="true"]):hover {
+  .graph-pin-toggle--quiet:hover,
+  .graph-pin-toggle--quiet[aria-pressed="true"]:hover {
     background: var(--color-hover-quiet);
   }
 
@@ -576,14 +579,12 @@
   .graph-dot--saved {
     background: var(--graph-node-saved);
   }
-  .graph-dot--selected {
-    background: var(--graph-node-selected);
-  }
-  .graph-dot--ring {
-    width: 10px;
-    height: 10px;
-    background: transparent;
-    box-shadow: 0 0 0 2px var(--graph-node-selected);
+  /* Selected: the state fill stays; an amber ring sits outside a gap that
+     shows whatever ground is behind it (an offset outline follows the radius). */
+  .graph-dot--selected,
+  .legend-dot--selected {
+    outline: 2px solid var(--graph-node-selected);
+    outline-offset: 1.5px;
   }
 
   /* ── Legend ─────────────────────────────────────────────── */
@@ -629,25 +630,37 @@
     border-radius: 50%;
     background: var(--graph-node);
   }
-  /* The canvas marks pins with an inner stroke too, not by colour alone. */
+  /* The swatches draw exactly what the canvas does: plain filled circles,
+     and the selection (.legend-dot--selected, with the dots above) as an
+     amber ring outside a gap around a node. */
   .legend-dot--pinned {
     background: var(--graph-node-pinned);
-    box-shadow: inset 0 0 0 1.5px var(--color-surface);
-    outline: 1px solid var(--graph-node-pinned);
   }
+  /* Clear room for the ring (the rows above have it in their padding). */
   .legend-dot--selected {
-    background: var(--graph-canvas);
-    box-shadow: 0 0 0 2px var(--graph-node-selected);
+    margin: 0 3.5px;
+  }
+  /* The sheet's column: every swatch in a box as wide as the arrow. */
+  .graph-legend--inline .legend-dot {
+    margin: 0 6.5px;
   }
   .legend-dot--saved {
     background: var(--graph-node-saved);
   }
-  .legend-line {
-    display: inline-block;
+  /* Edge direction: a line with the canvas's arrowhead at the cited end. A
+     shade stronger than --graph-edge, which is too faint for a small swatch. */
+  .legend-arrow {
     flex-shrink: 0;
-    width: 20px;
-    height: 0;
-    border-top: 2px solid var(--graph-edge);
+    width: 22px;
+    height: 10px;
+    color: var(--color-text-muted);
+  }
+  .legend-arrow line {
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+  .legend-arrow path {
+    fill: currentColor;
   }
   .legend-hint {
     font-style: italic;

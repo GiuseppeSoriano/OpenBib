@@ -3,13 +3,12 @@ import { useTranslation } from "react-i18next";
 interface GraphLegendProps {
   /**
    * "overlay" is the pill floating at the canvas's bottom left (wide
-   * screens): node colours and the selection ring. "inline" sits in the
-   * controls sheet and adds the edge direction and the pinning hint.
+   * screens). "inline" sits in the controls sheet and adds the pinning hint.
    */
   variant?: "overlay" | "inline";
 }
 
-/** Node colours, the selection ring, and inline also edges and the pinning hint. */
+/** Node colours, the selection ring and the edge direction; inline also the pinning hint. */
 export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
   const { t } = useTranslation();
   const inline = variant === "inline";
@@ -30,14 +29,14 @@ export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
       <li>
         <span className="legend-dot" aria-hidden="true" /> {t("graph.legendPaper")}
       </li>
-      {inline && (
-        <>
-          <li>
-            <span className="legend-line" aria-hidden="true" /> {t("graph.legendEdge")}
-          </li>
-          <li className="legend-hint">{t("graph.dragHint")}</li>
-        </>
-      )}
+      <li>
+        <svg className="legend-arrow" viewBox="0 0 22 10" aria-hidden="true" focusable="false">
+          <line x1="1" y1="5" x2="15" y2="5" />
+          <path d="M14 1.5 21 5 14 8.5Z" />
+        </svg>{" "}
+        {t("graph.legendEdge")}
+      </li>
+      {inline && <li className="legend-hint">{t("graph.dragHint")}</li>}
     </ul>
   );
 }

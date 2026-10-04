@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { PinToggle } from "@/components/graph/GraphNodePopup";
 import GraphStatus from "@/components/graph/GraphStatus";
 import { adjacentRanges, isRangeCapped, type RangeSelection } from "@/components/graph/RangeNavigator";
+import { graphDotClass } from "@/components/graph/nodeStyle";
 import { isUnresolved, paperTitle } from "@/components/graph/paperText";
 import type { ExplorationState, RangeControls } from "@/components/graph/graphExploration";
 import type { GraphNode } from "@/types";
@@ -10,6 +11,8 @@ import type { GraphNode } from "@/types";
 interface GraphSelectionSummaryProps {
   state: ExplorationState;
   node: GraphNode | null;
+  /** The selected paper is in the library (its dot takes the saved colour). */
+  saved?: boolean;
   rangeControls: RangeControls | null;
   titleRef?: Ref<HTMLButtonElement>;
   onTogglePin: () => void;
@@ -33,6 +36,7 @@ interface GraphSelectionSummaryProps {
 export default function GraphSelectionSummary({
   state,
   node,
+  saved = false,
   rangeControls,
   titleRef,
   onTogglePin,
@@ -68,7 +72,7 @@ export default function GraphSelectionSummary({
       {node && (
         <>
           <div className="graph-summary-row">
-            <span className="graph-dot graph-dot--ring" aria-hidden="true" />
+            <span className={graphDotClass(state.pinned.has(node.id), saved, true)} aria-hidden="true" />
             <button
               ref={titleRef}
               type="button"

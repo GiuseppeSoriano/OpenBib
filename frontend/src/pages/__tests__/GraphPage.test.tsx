@@ -261,10 +261,11 @@ describe("GraphPage (desktop)", () => {
     const order = within(bar()).getByRole("radiogroup", { name: "Order" });
     expect(within(order).getByRole("radio", { name: "Most cited" })).toHaveAttribute("aria-checked", "true");
     expect(within(order).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "false");
-    // A pill legend floats on the canvas.
+    // A pill legend floats on the canvas, edge direction included.
     const legend = screen.getByRole("list", { name: "Legend" });
     expect(within(legend).getByText("Pinned")).toBeInTheDocument();
     expect(within(legend).getByText("In library")).toBeInTheDocument();
+    expect(within(legend).getByText("A → B: A cites B")).toBeInTheDocument();
 
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText(/Expand entire graph/)).toBeNull();
@@ -288,7 +289,10 @@ describe("GraphPage (desktop)", () => {
     await ready();
     const list = selectSeed();
 
-    expect(within(list).getByRole("button", { name: /^Seed Paper/ })).toHaveAttribute("aria-current", "true");
+    const seedRow = within(list).getByRole("button", { name: /^Seed Paper/ });
+    expect(seedRow).toHaveAttribute("aria-current", "true");
+    // The selected pin keeps its pinned dot and gains the selection ring.
+    expect(seedRow.querySelector(".graph-dot")).toHaveClass("graph-dot--pinned", "graph-dot--selected");
     const popup = screen.getByTestId("graph-node-popup");
     expect(within(popup).getByRole("heading", { level: 2, name: "Seed Paper" })).toBeInTheDocument();
     expect(within(bar()).getByText(/^Citers of/)).toHaveTextContent("Citers of Seed Paper");
@@ -862,6 +866,7 @@ describe("GraphPage (compact)", () => {
     const row = summary();
     expect(within(row).getByRole("button", { name: "Seed Paper" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Pin “Seed Paper”" })).toHaveAttribute("aria-pressed", "true");
+    expect(row.querySelector(".graph-dot")).toHaveClass("graph-dot--pinned", "graph-dot--selected");
     expect(within(row).getByRole("button", { name: "View details" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "1–30 — not loaded yet, tap to load" })).toBeInTheDocument();
     expect(screen.queryByTestId("graph-node-popup")).toBeNull();
@@ -882,6 +887,7 @@ describe("GraphPage (compact)", () => {
     expect(within(dialog).getByText("Legend")).toBeInTheDocument();
     expect(within(dialog).getByText("Pinned")).toBeInTheDocument();
     expect(within(dialog).getByText("Selected")).toBeInTheDocument();
+    expect(within(dialog).getByText("A → B: A cites B")).toBeInTheDocument();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(within(summary()).getByRole("button", { name: "Seed Paper" })).toHaveFocus();

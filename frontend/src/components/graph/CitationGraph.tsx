@@ -77,7 +77,6 @@ function readThemeColors(): ThemeStyle {
     saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
     selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
     background: cssVar("--graph-node-gap") || canvas,
-    surface: cssVar("--color-surface") || "#ffffff",
     edge: cssVar("--graph-edge") || "#d6dcd8",
     label: cssVar("--color-text") || "#1a1e1d",
     selectedLabel: cssVar("--color-state-toread-text") || "#7a4d11",
@@ -265,22 +264,12 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         colors,
       );
 
-      // The selected node is hollow (canvas-filled inside its amber ring), as
-      // the legend's Selected swatch shows; its state colour moves to the
-      // pin stroke and version ring below.
+      // Every node, pinned and selected ones included, is a plain filled
+      // circle in its state colour; selection only adds the ring below.
       ctx.beginPath();
       ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = style.selectedRing ? colors.canvas : style.fill;
+      ctx.fillStyle = style.fill;
       ctx.fill();
-
-      // A thin inner stroke marks pins without relying on color alone.
-      if (style.innerStroke) {
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(r - 1.5 * px, r * 0.5), 0, 2 * Math.PI);
-        ctx.strokeStyle = style.selectedRing ? style.fill : style.innerStroke;
-        ctx.lineWidth = px;
-        ctx.stroke();
-      }
 
       // Dashed ring marks multi-version groups.
       if (style.versionRing) {
@@ -293,7 +282,8 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         ctx.setLineDash([]);
       }
 
-      // Selection: a soft halo, then an outer ring over a canvas-colored gap ring.
+      // Selection, outside the node: a soft halo, then a 3px amber ring held
+      // clear of the fill by a canvas-coloured gap, readable on both themes.
       if (style.selectedRing) {
         ctx.beginPath();
         ctx.arc(x, y, r + 7.5 * px, 0, 2 * Math.PI);
@@ -308,9 +298,9 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         ctx.lineWidth = 3 * px;
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(x, y, r + 2 * px, 0, 2 * Math.PI);
+        ctx.arc(x, y, r + 1.5 * px, 0, 2 * Math.PI);
         ctx.strokeStyle = style.selectedRing.gapColor;
-        ctx.lineWidth = 2 * px;
+        ctx.lineWidth = 3 * px;
         ctx.stroke();
       }
 

@@ -87,7 +87,7 @@
     --graph-node-selected: var(--color-warning);
     /* Soft halo outside the selected node's amber ring */
     --graph-node-halo: color-mix(in srgb, var(--graph-node-selected) 18%, transparent);
-    /* Gap ring that lifts pinned nodes off the canvas */
+    /* Gap between a selected node and its amber selection ring */
     --graph-node-gap: var(--graph-canvas);
     --graph-edge: #d6dcd8;
     /* Floating legend pill over the canvas */

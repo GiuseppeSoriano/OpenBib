@@ -1,6 +1,7 @@
 import { useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { PinToggle } from "@/components/graph/GraphNodePopup";
+import { graphDotClass } from "@/components/graph/nodeStyle";
 import { paperTitle } from "@/components/graph/paperText";
 import type { GraphNode } from "@/types";
 
@@ -76,12 +77,9 @@ export default function GraphPaperList({
     { key: "other", label: t("graph.sectionOther"), nodes: otherNodes },
   ];
 
-  const dotClass = (nodeId: string) => {
-    if (nodeId === selectedId) return "graph-dot graph-dot--selected";
-    if (pinned.has(nodeId)) return "graph-dot graph-dot--pinned";
-    if (saved.has(nodeId)) return "graph-dot graph-dot--saved";
-    return "graph-dot";
-  };
+  // As on the canvas: the state colour, plus the amber ring when selected.
+  const dotClass = (nodeId: string) =>
+    graphDotClass(pinned.has(nodeId), saved.has(nodeId), nodeId === selectedId);
 
   return (
     <aside id={id} className={`graph-paper-list ${className}`.trim()} aria-labelledby={headingId}>

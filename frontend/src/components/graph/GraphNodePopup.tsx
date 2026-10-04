@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Pin, PinOff } from "lucide-react";
+import { Pin } from "lucide-react";
 import VersionPicker from "@/components/search/VersionPicker";
 import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
 import type { GraphNode, PaperMetadata } from "@/types";
@@ -14,11 +14,11 @@ interface PinToggleProps {
 
 /**
  * Pin toggle with a constant accessible name ("Pin “T”"): only aria-pressed
- * and the icon change, so screen readers announce one state.
+ * and the icon change, so screen readers announce one state. Pressed fills
+ * the pin in the accent, like the pinned node's filled circle on the canvas.
  */
 export function PinToggle({ pinned, title, onToggle, className = "" }: PinToggleProps) {
   const { t } = useTranslation();
-  const Icon = pinned ? PinOff : Pin;
   return (
     <button
       type="button"
@@ -27,7 +27,7 @@ export function PinToggle({ pinned, title, onToggle, className = "" }: PinToggle
       aria-label={t("graph.pinPaper", { title })}
       onClick={onToggle}
     >
-      <Icon size={16} aria-hidden="true" />
+      <Pin size={16} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
     </button>
   );
 }
