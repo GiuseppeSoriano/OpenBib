@@ -116,7 +116,6 @@
     --leading-tight: 1.25;
     --leading-snug: 1.35;
     --tracking-caps: 0.06em;
-    --tracking-caps-wide: 0.08em;
     --tracking-display: -0.015em;
 
     /* Motion — subtle; zeroed under prefers-reduced-motion below. */
@@ -146,6 +145,13 @@
 
     /* Focus */
     --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+    /* Rows inside a popover or a clipped box (menus, listboxes, a chip's
+       remove button): the ring is drawn inside, so no edge clips it. */
+    --focus-ring-inset: inset 0 0 0 2px var(--color-accent);
+
+    /* Icon sizes: one per role, so sibling labels start at the same x. */
+    --icon-btn: 15px; /* inside .btn */
+    --icon-row: 16px; /* nav rows, menu items, dialog close */
 
     /* Layout — bar heights scale with the browser text size (56px at 16px). */
     --nav-height: calc(2.25rem + 20px);

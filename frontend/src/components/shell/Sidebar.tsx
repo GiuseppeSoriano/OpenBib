@@ -76,7 +76,7 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
         title={rail ? t("shell.searchOrJump") : undefined}
         data-testid="palette-button"
       >
-        <Search size={15} aria-hidden="true" />
+        <Search size={16} aria-hidden="true" />
         {label(t("shell.searchOrJump"))}
         {!rail && <kbd aria-hidden="true">{shortcutLabel()}</kbd>}
       </button>
@@ -111,7 +111,7 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
                 aria-label={t("collections.new")}
                 title={t("collections.new")}
               >
-                <Plus size={15} aria-hidden="true" />
+                <Plus size={16} aria-hidden="true" />
               </button>
             </div>
             {listed.map((c, index) => (

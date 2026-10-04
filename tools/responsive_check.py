@@ -1221,10 +1221,18 @@ def settings_links_check(runner: Runner, s: Session):
             "privacy page has no link to /settings#your-data",
         )
         s.nav("/library")
+        export = 'a[href="/settings#your-data"]'
+        if s.page.locator(export).count() == 0:
+            # Export data lives in the header's More actions menu.
+            more = s.page.locator(".page-header-actions button[aria-haspopup=menu]").first
+            if more.count():
+                more.click()
+                s.page.wait_for_timeout(300)
         r.expect(
-            s.page.locator('a[href="/settings#your-data"]').count() > 0,
+            s.page.locator(export).count() > 0,
             "Library has no Export data link",
         )
+        s.page.keyboard.press("Escape")
 
     def notices_present(page) -> dict:
         return page.evaluate(

@@ -9,6 +9,10 @@ import navCss from "@/components/nav/nav.css?raw";
 import shellCss from "@/components/shell/shell.css?raw";
 import graphCss from "@/pages/GraphPage.css?raw";
 import graphHeaderCss from "@/components/graph/graph.css?raw";
+import searchFiltersCss from "@/components/search/SearchFilters.css?raw";
+import settingsCss from "@/pages/SettingsPage.css?raw";
+import securityCss from "@/components/settings/SecuritySettings.css?raw";
+import stateChipCss from "@/components/paper/ReadingStateSelect.css?raw";
 import indexHtml from "../../../index.html?raw";
 import { COMPACT_QUERY, TOUCH_QUERY } from "@/lib/breakpoints";
 
@@ -39,7 +43,27 @@ function declarations(css: string, selector: string): string {
     .join(" ");
 }
 
-const sources = { tokensCss, indexCss, navCss, shellCss, graphCss, graphHeaderCss, indexHtml };
+const sources = {
+  tokensCss,
+  indexCss,
+  navCss,
+  shellCss,
+  graphCss,
+  graphHeaderCss,
+  searchFiltersCss,
+  settingsCss,
+  securityCss,
+  stateChipCss,
+  indexHtml,
+};
+
+/** The block whose selector list is exactly `selectors` (one shared rule). */
+function sharedRule(css: string, selectors: string[]): string {
+  const rule = rules(css).find(
+    (r) => r.selectors.length === selectors.length && selectors.every((s) => r.selectors.includes(s)),
+  );
+  return rule?.body ?? "";
+}
 
 describe("layout contract", () => {
   it("loads every source as raw text", () => {
@@ -197,14 +221,13 @@ describe("layout contract", () => {
         "min-height: var(--control-min);",
       );
     }
-    // The compact controls grow to the full target on touch screens.
+    // The compact controls grow to the full target on touch screens; the
+    // popover options follow --control-min, which is 44px there.
     const touch = squash(indexCss);
     expect(touch).toContain(
-      `@media ${TOUCH_QUERY} { .btn--sm, .btn-quiet { min-height: var(--touch-target); } }`,
+      `@media ${TOUCH_QUERY} { .btn--sm, .btn-quiet { min-height: var(--touch-target); } .btn-quiet--icon { min-width: var(--touch-target); } }`,
     );
-    expect(touch).toContain(
-      `@media ${TOUCH_QUERY} { .popover-option { min-height: var(--touch-target); } }`,
-    );
+    expect(declarations(indexCss, ".popover-option")).toContain("min-height: var(--control-min);");
     const chip = declarations(indexCss, ".chip");
     expect(chip).toContain("max-width: 100%;");
     expect(chip).not.toContain("white-space: nowrap");
@@ -225,10 +248,23 @@ describe("layout contract", () => {
     expect(declarations(indexCss, ".segmented")).not.toContain("overflow: hidden");
   });
 
-  it("sets caps labels in the UI face, also on serif headings", () => {
-    for (const selector of [".label-caps", ".panel-title"]) {
-      expect(declarations(indexCss, selector), selector).toContain("font-family: var(--font-sans);");
+  it("has one caps label style and one overlay heading", () => {
+    // The page eyebrow is the sidebar's and the popovers' caps label.
+    const caps = sharedRule(indexCss, [".label-caps", ".page-header-eyebrow"]);
+    expect(caps).toContain("font-family: var(--font-sans);");
+    expect(caps).toContain("font-size: var(--text-2xs);");
+    expect(caps).toContain("font-weight: 500;");
+    expect(caps).toContain("letter-spacing: var(--tracking-caps);");
+    for (const [name, css] of Object.entries(sources)) {
+      expect(css, name).not.toContain("--tracking-caps-wide");
     }
+    // Dialogs and sheets (details, graph controls, the Filters sheet) share
+    // the serif title; no sheet title is a caps label any more.
+    const title = sharedRule(indexCss, [".modal-title", ".panel-title"]);
+    expect(title).toContain("font-family: var(--font-serif);");
+    expect(title).toContain("font-size: var(--text-xl);");
+    expect(declarations(indexCss, ".panel-title")).not.toContain("text-transform");
+    expect(declarations(searchFiltersCss, ".search-sheet-title")).not.toContain("font-size");
   });
 
   it("bounds menus to the viewport height, as a fixed sidebar cannot scroll them into view", () => {
@@ -293,5 +329,135 @@ describe("layout contract", () => {
     expect(palette).toContain("max-height: min(32rem, 76dvh);");
     expect(declarations(shellCss, ".palette-list")).toContain("overflow-y: auto;");
     expect(declarations(shellCss, ".palette-option")).toContain("min-height: var(--control-min);");
+  });
+
+  describe("sibling controls are identical by construction", () => {
+    it("draws every control and list row on the 6px radius token, never a literal 5px or 8px", () => {
+      for (const [name, css] of Object.entries({ indexCss, settingsCss, shellCss, navCss })) {
+        expect(css, name).not.toMatch(/border-radius: (5|8)px/);
+      }
+      for (const selector of [".btn", ".btn-quiet", ".chip", ".menu-item", ".input"]) {
+        expect(declarations(indexCss, selector), selector).toContain("border-radius: var(--radius-sm);");
+      }
+      expect(declarations(settingsCss, ".settings-theme-card")).toContain("border-radius: var(--radius-sm);");
+    });
+
+    it("shares one list-row spec across menus, listbox options and the palette", () => {
+      const row = sharedRule(indexCss, [".menu-item", ".popover-option"]);
+      for (const decl of [
+        "min-height: var(--control-min);",
+        "padding: 0.375rem 10px;",
+        "border-radius: var(--radius-sm);",
+        "font-size: var(--text-md);",
+        "line-height: var(--leading-tight);",
+      ]) {
+        expect(row, decl).toContain(decl);
+        expect(declarations(shellCss, ".palette-option"), decl).toContain(decl);
+      }
+      expect(sharedRule(indexCss, [".menu-item:focus-visible", ".popover-option:focus-visible"])).toContain(
+        "box-shadow: var(--focus-ring-inset);",
+      );
+      expect(declarations(tokensCss, ":root")).toContain("--focus-ring-inset: inset 0 0 0 2px var(--color-accent);");
+      // A wrapped palette name clamps like a menu label; the active row has no bent left bar.
+      expect(declarations(shellCss, ".palette-option-label")).toContain("-webkit-line-clamp: 2;");
+      expect(declarations(shellCss, ".palette-option--active")).not.toContain("inset 2px 0 0");
+      // Icons and checks share one 16px column, so labels start at one x.
+      expect(declarations(indexCss, ".menu-item > svg")).toContain("width: var(--icon-row);");
+      expect(declarations(indexCss, ".menu-item-check")).toContain("width: var(--icon-row);");
+      expect(declarations(indexCss, ".menu-header")).toContain("padding: var(--space-sm) 10px;");
+      // Sign out is set apart by its colour and separator, not a heavier weight.
+      expect(navCss).not.toContain("menu-item--signout");
+    });
+
+    it("sizes icons by role: one in buttons, one for rows and every close X", () => {
+      const root = declarations(tokensCss, ":root");
+      expect(root).toContain("--icon-btn: 15px;");
+      expect(root).toContain("--icon-row: 16px;");
+      expect(declarations(indexCss, ".btn > svg")).toContain("width: var(--icon-btn);");
+      for (const selector of [".panel-header .btn-ghost > svg", ".modal-close > svg", ".toast-close > svg"]) {
+        expect(declarations(indexCss, selector), selector).toContain("width: var(--icon-row);");
+      }
+    });
+
+    it("gives the visitors' Search link and Sign in one type size, gap and height", () => {
+      expect(declarations(navCss, ".topnav-search")).toContain("font-size: var(--text-md);");
+      expect(declarations(navCss, ".topnav-search")).toContain("gap: var(--space-sm);");
+      expect(declarations(navCss, ".topnav-search > svg")).toContain("width: var(--icon-btn);");
+      const signin = declarations(navCss, ".topnav-signin");
+      expect(signin).not.toContain("font-size");
+      expect(signin).not.toContain("padding");
+      expect(signin).toContain("min-height: var(--touch-target);");
+    });
+
+    it("shapes chips alike on every page: 6px on desktop, pills on compact screens", () => {
+      expect(squash(indexCss)).toContain(
+        "@media (max-width: 639px), (max-height: 500px) { .chip { border-radius: var(--radius-full); } .chip-remove { border-radius: 0 var(--radius-full) var(--radius-full) 0; } }",
+      );
+      expect(searchFiltersCss).not.toContain(".chip");
+      // The reading-state trigger among a row's quiet actions is one of them.
+      expect(declarations(stateChipCss, ".state-chip")).not.toContain("font-weight");
+      const quiet = declarations(stateChipCss, ".paper-actions .state-chip");
+      expect(quiet).toContain("border-color: transparent;");
+      expect(quiet).toContain("min-height: 30px;");
+    });
+
+    it("splits block segmented groups equally and keeps inline ones hugging their labels", () => {
+      expect(declarations(indexCss, ".segmented button")).toContain("flex: 1 1 auto;");
+      const block = declarations(indexCss, ".segmented--block button");
+      expect(block).toContain("flex: 1 1 0;");
+      expect(block).toContain("min-width: 0;");
+    });
+
+    it("draws toasts with a uniform border; the icon carries the status", () => {
+      const toast = declarations(indexCss, ".toast");
+      expect(toast).toContain("border: 1px solid var(--color-border-strong);");
+      expect(toast).not.toContain("border-left");
+      expect(indexCss).not.toContain(".toast::before");
+      for (const variant of ["success", "error", "info"]) {
+        expect(declarations(indexCss, ".toast--" + variant + " .toast-icon"), variant).toMatch(/^color: var\(--color-[a-z]+\);$/);
+      }
+    });
+
+    it("leaves room for a 3px focus ring inside clipping scroll boxes", () => {
+      expect(declarations(shellCss, ".sidebar-scroll")).toContain("padding: 4px;");
+      expect(declarations(indexCss, ".chip-row--scroll")).toContain("padding: 4px;");
+      expect(declarations(shellCss, ".sidebar-link:focus-visible")).toContain("z-index: 1;");
+      // Settings deep-link targets get an offset ring, clear of their text.
+      const target = sharedRule(settingsCss, [".settings-section:focus-visible", ".settings-row:focus-visible"]);
+      expect(target).toContain("outline-offset: 6px;");
+      expect(target).not.toContain("box-shadow");
+    });
+
+    it("lines the sidebar's brand, search and account rows up on the nav rows' columns", () => {
+      expect(declarations(shellCss, ".sidebar-search")).toContain("padding: 0.25rem 9px;");
+      expect(declarations(shellCss, ".sidebar-search")).toContain("gap: 10px;");
+      expect(declarations(shellCss, ".sidebar-account")).toContain("padding: 6px 7px;");
+      expect(declarations(shellCss, ".sidebar-account .user-avatar")).toContain("width: 22px;");
+      expect(declarations(shellCss, ".topbar-brand")).toContain("flex: 0 1 auto;");
+    });
+
+    it("places Settings controls in the second column on every row", () => {
+      expect(squash(securityCss)).toContain(
+        "@container (min-width: 32rem) { .settings-security-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
+      );
+      expect(declarations(securityCss, ".settings-security-row")).toContain("align-items: start;");
+      expect(declarations(securityCss, ".settings-security-action")).toContain("justify-self: start;");
+    });
+
+    it("keeps graph controls on the app's button, field and tab rules", () => {
+      expect(declarations(graphHeaderCss, ".graph-btn")).not.toContain("font-size");
+      expect(declarations(graphHeaderCss, ".graph-view-btn")).toContain("font-size: var(--text-md);");
+      expect(declarations(graphHeaderCss, ".graph-list-filter-input")).toContain(
+        "border: 1px solid var(--color-border-strong);",
+      );
+      expect(declarations(indexCss, "input")).toContain("font-family: inherit;");
+      expect(declarations(graphHeaderCss, ".graph-sheet-tab")).toContain("margin-bottom: -1px;");
+      expect(declarations(graphHeaderCss, ".graph-range-gap")).toContain("font-size: var(--text-sm);");
+      const meta = declarations(graphHeaderCss, ".graph-summary-meta");
+      expect(meta).toContain("display: block;");
+      expect(meta).not.toContain("column-gap");
+      expect(declarations(graphHeaderCss, ".graph-summary-range")).toContain("white-space: nowrap;");
+      expect(declarations(indexCss, ".sheet-submit")).toContain("width: 100%;");
+    });
   });
 });

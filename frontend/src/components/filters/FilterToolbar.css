@@ -18,8 +18,9 @@
     max-width: 36rem;
   }
 
+  /* The chips' and buttons' height: one 34px rhythm down the toolbar. */
   .library-filters-search .input {
-    min-height: max(40px, var(--control-min));
+    min-height: var(--control-min);
     padding-left: calc(var(--space-md) + 1.375rem);
     box-shadow: var(--shadow-sm);
   }

@@ -112,7 +112,7 @@ export default function GraphControlsSheet({
         {tab === "controls" ? controls : papers}
       </div>
       <div className="graph-sheet-footer">
-        <button type="button" className="btn btn-primary graph-btn" onClick={onClose}>
+        <button type="button" className="btn btn-primary sheet-submit" onClick={onClose}>
           {t("common.done")}
         </button>
       </div>

@@ -44,7 +44,7 @@ export default function Modal({
           onClick={onClose}
           aria-label={t("common.close")}
         >
-          <X size={18} />
+          <X size={16} />
         </button>
       </div>
       {children}

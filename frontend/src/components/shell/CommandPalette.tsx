@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, FolderPlus, History, LayoutDashboard, LogIn, Moon, Search, Settings, Share2, Sun, type LucideIcon } from "lucide-react";
+import { FolderOpen, FolderPlus, History, GitFork, LayoutDashboard, LogIn, Moon, Search, Settings, Sun, type LucideIcon } from "lucide-react";
 import DialogSurface from "@/components/ui/DialogSurface";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -78,7 +78,7 @@ export default function CommandPalette({ onClose, onNewCollection }: CommandPale
       : [
         { to: "/", label: t("nav.home"), icon: LayoutDashboard },
         { to: "/search", label: t("nav.search"), icon: Search },
-        { to: "/graph", label: t("nav.graph"), icon: Share2 },
+        { to: "/graph", label: t("nav.graph"), icon: GitFork },
         { to: "/login", label: t("nav.signIn"), icon: LogIn },
       ];
     for (const page of pages) {
@@ -187,7 +187,7 @@ export default function CommandPalette({ onClose, onNewCollection }: CommandPale
                   onClick={() => activate(item)}
                 >
                   <Icon size={16} aria-hidden="true" />
-                  <span className="palette-option-label">{item.label}</span>
+                  <span className="palette-option-label" title={item.label}>{item.label}</span>
                 </div>
               );
             })}

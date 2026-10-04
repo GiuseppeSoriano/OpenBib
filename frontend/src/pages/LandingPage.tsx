@@ -8,10 +8,10 @@ import {
   Download,
   FileInput,
   FolderOpen,
+  GitFork,
   LibraryBig,
   RefreshCw,
   Search,
-  Share2,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -25,7 +25,7 @@ const FEATURES: ReadonlyArray<{ key: string; icon: LucideIcon }> = [
   { key: "search", icon: Search },
   { key: "library", icon: LibraryBig },
   { key: "collections", icon: FolderOpen },
-  { key: "graph", icon: Share2 },
+  { key: "graph", icon: GitFork },
   { key: "import", icon: FileInput },
   { key: "zotero", icon: RefreshCw },
 ];
@@ -212,10 +212,8 @@ export default function LandingPage() {
         </ol>
       </section>
 
-      <section className="landing-trust" aria-labelledby="landing-trust-title">
-        <h2 id="landing-trust-title" className="landing-trust-title">
-          {t("landing.trustTitle")}
-        </h2>
+      <section className="landing-section" aria-labelledby="landing-trust-title">
+        <SectionHeading id="landing-trust-title" title={t("landing.trustTitle")} />
         <ul className="landing-trust-list">
           {TRUST.map(({ key, icon: Icon }) => (
             <li key={key} className="landing-trust-item">
@@ -237,11 +235,11 @@ export default function LandingPage() {
           <p className="landing-cta-text">{t("landing.ctaText")}</p>
         </div>
         <div className="landing-cta-actions">
-          <Link to="/register" className="btn btn-primary landing-cta-btn">
+          <Link to="/register" className="btn btn-primary">
             {t("auth.createAccount")}
-            <ArrowRight size={16} aria-hidden="true" />
+            <ArrowRight size={15} aria-hidden="true" />
           </Link>
-          <Link to="/search" className="btn btn-secondary landing-cta-btn">
+          <Link to="/search" className="btn btn-secondary">
             {t("landing.ctaSearch")}
           </Link>
         </div>

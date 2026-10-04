@@ -7,8 +7,8 @@
   }
 
   .zotero-hint {
-    font-size: 0.78rem;
-    line-height: 1.4;
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
     color: var(--color-text-secondary);
     max-width: 34ch;
   }

@@ -17,17 +17,12 @@ interface ZoteroSyncButtonProps {
   headers?: Record<string, string>;
 }
 
-/**
- * "Sync to Zotero" for any signed-in user. Without a Zotero connection it is
- * a link to the Settings section that sets one up, with a visible hint —
- * never a disabled button explained only by a tooltip.
- */
-export default function ZoteroSyncButton({ collectionId, headers }: ZoteroSyncButtonProps) {
+/** The Zotero connection status and the sync mutation, for either rendering. */
+function useZoteroSync({ collectionId, headers }: ZoteroSyncButtonProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const hintId = useId();
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["zotero-status"],
@@ -62,6 +57,19 @@ export default function ZoteroSyncButton({ collectionId, headers }: ZoteroSyncBu
     },
   });
 
+  return { user, status, busy: isLoading || sync.isPending, sync };
+}
+
+/**
+ * "Sync to Zotero" for any signed-in user. Without a Zotero connection it is
+ * a link to the Settings section that sets one up, with a visible hint —
+ * never a disabled button explained only by a tooltip.
+ */
+export default function ZoteroSyncButton(props: ZoteroSyncButtonProps) {
+  const { t } = useTranslation();
+  const hintId = useId();
+  const { user, status, busy, sync } = useZoteroSync(props);
+
   if (!user) return null;
 
   if (status && !status.connected) {
@@ -77,7 +85,6 @@ export default function ZoteroSyncButton({ collectionId, headers }: ZoteroSyncBu
     );
   }
 
-  const busy = isLoading || sync.isPending;
   return (
     <button
       type="button"
@@ -87,6 +94,50 @@ export default function ZoteroSyncButton({ collectionId, headers }: ZoteroSyncBu
       aria-busy={busy || undefined}
     >
       <BookUp size={14} aria-hidden="true" /> {sync.isPending ? t("zotero.syncing") : t("zotero.sync")}
+    </button>
+  );
+}
+
+/**
+ * The same action as an item of a page's More menu (Library, collection
+ * detail), so the page header keeps to its own actions. Disconnected, the
+ * item links to Settings and the hint stays visible under it.
+ */
+export function ZoteroSyncMenuItem({ onSelect, ...props }: ZoteroSyncButtonProps & { onSelect: () => void }) {
+  const { t } = useTranslation();
+  const hintId = useId();
+  const { user, status, busy, sync } = useZoteroSync(props);
+
+  if (!user) return null;
+
+  if (status && !status.connected) {
+    return (
+      <>
+        <Link to="/settings#zotero" role="menuitem" className="menu-item" aria-describedby={hintId} onClick={onSelect}>
+          <BookUp size={16} aria-hidden="true" />
+          {t("zotero.connectToSync")}
+        </Link>
+        <p id={hintId} className="menu-hint">
+          {t("zotero.notConnectedHint")}
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className="menu-item"
+      disabled={busy}
+      aria-busy={busy || undefined}
+      onClick={() => {
+        onSelect();
+        sync.mutate();
+      }}
+    >
+      <BookUp size={16} aria-hidden="true" />
+      {sync.isPending ? t("zotero.syncing") : t("zotero.sync")}
     </button>
   );
 }

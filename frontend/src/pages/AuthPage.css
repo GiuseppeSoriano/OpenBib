@@ -58,10 +58,11 @@
     border-bottom: 1px solid var(--color-rule);
   }
 
+  /* The app's one caps label (.label-caps). */
   .auth-eyebrow {
-    font-size: var(--text-xs);
+    font-size: var(--text-2xs);
     font-weight: 500;
-    letter-spacing: var(--tracking-caps-wide);
+    letter-spacing: var(--tracking-caps);
     text-transform: uppercase;
     color: var(--color-text-muted);
   }

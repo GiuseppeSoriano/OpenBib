@@ -54,8 +54,14 @@
 
   button {
     cursor: pointer;
-    font-family: inherit;
     color: inherit;
+  }
+  /* Form controls take the UI face too, not the user agent's default. */
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
   }
 
   /* Headings are serif, as in a journal; components size them. */
@@ -144,6 +150,13 @@
     text-align: center;
     overflow-wrap: break-word;
   }
+  /* One icon size in every button, whatever size the markup asks for, so
+     labels in sibling buttons start at the same offset. */
+  .btn > svg {
+    flex-shrink: 0;
+    width: var(--icon-btn);
+    height: var(--icon-btn);
+  }
   .btn:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
@@ -151,6 +164,11 @@
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Icon only (a page's More menu): square, as tall as its neighbours. */
+  .btn--icon {
+    min-width: var(--control-min);
+    padding-inline: 0;
   }
   /* Compact action inside a popover footer or a dense toolbar. */
   .btn--sm {
@@ -221,7 +239,7 @@
     min-height: 30px;
     padding: 0.125rem 0.5rem;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
     font-size: var(--text-sm);
@@ -257,12 +275,21 @@
   .btn-quiet--danger {
     color: var(--color-danger);
   }
+  /* Icon only (Edit, Delete): a square, 30px, or 44px on touch screens. */
+  .btn-quiet--icon {
+    justify-content: center;
+    min-width: 30px;
+    padding: 0;
+  }
 
   /* Touch screens: the small controls grow to the full target. */
   @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
     .btn--sm,
     .btn-quiet {
       min-height: var(--touch-target);
+    }
+    .btn-quiet--icon {
+      min-width: var(--touch-target);
     }
   }
 
@@ -329,10 +356,16 @@
     outline: none;
     box-shadow: var(--focus-ring);
   }
-  /* Full-width variant for sheets (sort in the mobile Filters dialog). */
+  /* Full-width variant for sheets (sort in the mobile Filters dialog, the
+     graph controls): the options share the track equally, so stacked groups
+     split at the same x. Inline groups keep hugging their labels. */
   .segmented--block {
     display: flex;
     width: 100%;
+  }
+  .segmented--block button {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   /* Cards — only for floating things now (selected paper, dialogs). */
@@ -554,7 +587,18 @@
   }
   .chip-remove:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--color-accent);
+    box-shadow: var(--focus-ring-inset);
+  }
+  /* Compact screens (COMPACT_QUERY, where Search and the Library and
+     collection toolbars fold their filters): every chip is a pill, as in
+     MobileSearch.dc.html. Desktop chips keep the 6px control radius. */
+  @media (max-width: 639px), (max-height: 500px) {
+    .chip {
+      border-radius: var(--radius-full);
+    }
+    .chip-remove {
+      border-radius: 0 var(--radius-full) var(--radius-full) 0;
+    }
   }
   /* A wrapping toolbar of chips; .chip-row--scroll scrolls sideways (phones). */
   .chip-row {
@@ -568,7 +612,10 @@
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
-    padding-block: 2px;
+    /* Room for a 3px focus ring inside the scroll box, which clips it. */
+    padding: 4px;
+    margin-inline: -4px;
+    scroll-padding-inline: 4px;
   }
   .chip-row--scroll .chip {
     white-space: nowrap;
@@ -577,8 +624,10 @@
     flex: 1 1 auto;
   }
 
-  /* Small-caps label: section index, popover titles, sidebar groups. */
-  .label-caps {
+  /* Small-caps label: section index, popover titles, sidebar groups, the
+     page eyebrow. The app's only uppercase label style. */
+  .label-caps,
+  .page-header-eyebrow {
     font-family: var(--font-sans);
     font-size: var(--text-2xs);
     font-weight: 500;
@@ -628,12 +677,6 @@
     gap: 6px;
     min-width: 0;
     max-width: 100%;
-  }
-  .page-header-eyebrow {
-    font-size: var(--text-xs);
-    letter-spacing: var(--tracking-caps-wide);
-    text-transform: uppercase;
-    color: var(--color-text-muted);
   }
   .page-header-title {
     font-family: var(--font-serif);
@@ -845,22 +888,14 @@
     /* The 44px close button supplies the height; keep the card compact. */
     padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
     background: var(--color-surface);
+    /* A uniform 1px border like every floating card; the coloured icon alone
+       carries the status (a stripe would meet the rounded corners). */
     border: 1px solid var(--color-border-strong);
-    border-left-width: 3px;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     font-size: var(--text-md);
     line-height: 1.45;
     animation: toast-in var(--duration-slow) var(--ease-out);
-  }
-  .toast--success {
-    border-left-color: var(--color-success);
-  }
-  .toast--error {
-    border-left-color: var(--color-danger);
-  }
-  .toast--info {
-    border-left-color: var(--color-accent);
   }
   .toast--success .toast-icon {
     color: var(--color-success);
@@ -940,7 +975,9 @@
     justify-content: space-between;
     gap: var(--space-md);
   }
-  .modal-title {
+  /* One overlay heading for dialogs and sheets: a serif title. */
+  .modal-title,
+  .panel-title {
     font-family: var(--font-serif);
     font-size: var(--text-xl);
     line-height: var(--leading-tight);
@@ -957,6 +994,19 @@
   .toast-close {
     min-width: var(--touch-target);
     min-height: var(--touch-target);
+  }
+  /* One X size for every overlay. */
+  .panel-header .btn-ghost > svg,
+  .modal-close > svg,
+  .toast-close > svg {
+    width: var(--icon-row);
+    height: var(--icon-row);
+  }
+  /* The dialog and sheet X: its glyph, not its 44px target, lines up with
+     the content column's right edge, as the title does on the left. */
+  .panel-header .btn-ghost,
+  .modal-close {
+    margin-right: calc((var(--icon-row) - var(--touch-target)) / 2);
   }
   .modal:focus,
   .panel:focus {
@@ -1018,16 +1068,8 @@
     border-bottom: 1px solid var(--color-hairline);
     flex-shrink: 0;
   }
-  /* An h2: back to the UI face, as a caps label. */
   .panel-title {
-    font-family: var(--font-sans);
-    font-weight: 500;
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-caps);
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
   }
   .panel-body {
     flex: 1;
@@ -1073,6 +1115,13 @@
   .panel--bottom .panel-header,
   .panel--bottom .panel-body {
     padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
+  }
+  /* A sheet's closing action (Show N results, Done): one full-width button,
+     the same in every sheet (MobileFilters.dc.html). */
+  .sheet-submit {
+    width: 100%;
+    min-height: 48px;
+    font-size: var(--text-base);
   }
   @keyframes sheet-in {
     from {
@@ -1191,7 +1240,11 @@
       transform: translateY(0);
     }
   }
-  .menu-item {
+  /* One list-row spec for every list in a popover: menu items and listbox
+     options (and the palette's, shell.css) share size, height, radius and
+     the inset focus ring, like the sidebar's rows. */
+  .menu-item,
+  .popover-option {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
@@ -1200,20 +1253,28 @@
     padding: 0.375rem 10px;
     border: none;
     background: transparent;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     color: var(--color-text);
     font-size: var(--text-md);
     line-height: var(--leading-tight);
     text-align: left;
     text-decoration: none;
   }
-  .menu-item:hover {
+  .menu-item:hover,
+  .popover-option:hover {
     background: var(--color-hover-quiet);
     color: var(--color-text);
   }
-  .menu-item:focus-visible {
+  .menu-item:focus-visible,
+  .popover-option:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--color-accent);
+    box-shadow: var(--focus-ring-inset);
+  }
+  /* Icons sit in the same 16px column as the radio items' check. */
+  .menu-item > svg {
+    flex-shrink: 0;
+    width: var(--icon-row);
+    height: var(--icon-row);
   }
   .menu-item--danger {
     color: var(--color-danger);
@@ -1225,7 +1286,7 @@
   .menu-item-check {
     display: inline-flex;
     flex-shrink: 0;
-    width: 16px;
+    width: var(--icon-row);
     justify-content: center;
     color: var(--color-accent);
   }
@@ -1236,7 +1297,7 @@
   .menu-header {
     display: flex;
     flex-direction: column;
-    padding: var(--space-sm);
+    padding: var(--space-sm) 10px;
     gap: 1px;
     overflow-wrap: anywhere;
   }
@@ -1253,6 +1314,14 @@
     height: 1px;
     background: var(--color-hairline);
     margin: var(--space-xs) 0;
+  }
+  /* A visible note under an item (its aria-describedby), indented to the
+     item's label column: row padding, icon column and gap. */
+  .menu-hint {
+    padding: 0 10px var(--space-xs) calc(10px + var(--icon-row) + var(--space-sm));
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
   }
   .menu-empty {
     padding: var(--space-sm);
@@ -1308,29 +1377,10 @@
     display: flex;
     flex-direction: column;
   }
-  /* A preset or listbox option row. */
+  /* A preset or listbox option row: the list-row spec above (.menu-item). */
   .popover-option {
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    width: 100%;
-    min-height: 32px;
-    padding: 0.25rem 10px;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--color-text);
-    font-size: var(--text-sm);
-    text-align: left;
     transition: background var(--duration-fast) ease;
-  }
-  .popover-option:hover {
-    background: var(--color-hover-quiet);
-  }
-  .popover-option:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 2px var(--color-accent);
   }
   .popover-option--active,
   .popover-option[aria-selected="true"] {
@@ -1341,7 +1391,7 @@
   .popover-option-check {
     display: inline-flex;
     flex-shrink: 0;
-    width: 16px;
+    width: var(--icon-row);
     margin-left: auto;
     color: var(--color-accent);
   }
@@ -1356,11 +1406,6 @@
     justify-content: flex-end;
     gap: 6px;
     padding: 8px 6px 2px;
-  }
-  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
-    .popover-option {
-      min-height: var(--touch-target);
-    }
   }
 
   /* Shared list feedback: a failed query's retry and the "Show more" row. */

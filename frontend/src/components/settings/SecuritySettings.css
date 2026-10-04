@@ -1,17 +1,21 @@
 @layer pages {
-  /* Credential rows share the settings row rhythm: hairline-separated, the
-     summary on the left and the action on the right. */
-  .settings-security-list { margin: 0; }
+  /* Credential rows share the settings row grid (.settings-row): two equal
+     columns once both fit 15rem, the summary in the first and the action at
+     the start of the second, top-aligned; stacked below that, like the other
+     rows. The list is the container, so the switch matches theirs. */
+  .settings-security-list {
+    margin: 0;
+    container-type: inline-size;
+  }
   .settings-security-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
     gap: var(--space-xs) var(--space-xl);
     padding: 20px 0;
     border-bottom: 1px solid var(--color-hairline);
   }
   .settings-security-row dt {
-    grid-column: 1;
     display: flex;
     align-items: center;
     gap: var(--space-sm);
@@ -21,8 +25,6 @@
   }
   .settings-security-row dt svg { flex-shrink: 0; color: var(--color-text-muted); }
   .settings-security-description {
-    grid-column: 1;
-    grid-row: 2;
     margin: 0;
     font-size: var(--text-sm);
     line-height: 1.5;
@@ -38,7 +40,26 @@
     color: var(--color-accent);
     white-space: nowrap;
   }
-  .settings-security-action { margin: 0; grid-column: 2; grid-row: 1 / span 2; }
+  .settings-security-action {
+    margin: 0;
+    margin-top: var(--space-sm);
+    justify-self: start;
+  }
+  /* 2 × 15rem plus the 2rem column gap. */
+  @container (min-width: 32rem) {
+    .settings-security-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .settings-security-row dt,
+    .settings-security-description {
+      grid-column: 1;
+    }
+    .settings-security-action {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      margin-top: 0;
+    }
+  }
   .settings-security-notice {
     margin-top: var(--space-md);
     font-size: var(--text-sm);

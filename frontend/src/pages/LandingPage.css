@@ -42,10 +42,11 @@
     min-width: 0;
   }
 
+  /* The app's one caps label (.label-caps), in the accent. */
   .landing-eyebrow {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    letter-spacing: var(--tracking-caps-wide);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: var(--tracking-caps);
     text-transform: uppercase;
     color: var(--color-accent);
   }
@@ -93,7 +94,8 @@
     min-height: 48px;
     padding: 0 14px;
     border: 1px solid var(--color-border-strong);
-    border-radius: var(--radius-md);
+    /* The control radius, as on the Search page's field. */
+    border-radius: var(--radius-sm);
     background: var(--color-surface);
     box-shadow: var(--shadow-md);
     transition:
@@ -129,10 +131,10 @@
     display: none;
   }
 
+  /* As tall as the field it submits. */
   .landing-search-btn {
     min-height: 48px;
     padding-inline: var(--space-lg);
-    border-radius: var(--radius-md);
   }
 
   /* Example queries: "Try  [graph neural networks] [CRISPR …]". */
@@ -146,7 +148,7 @@
   .landing-examples-label {
     font-size: var(--text-2xs);
     font-weight: 500;
-    letter-spacing: var(--tracking-caps-wide);
+    letter-spacing: var(--tracking-caps);
     text-transform: uppercase;
     color: var(--color-text-muted);
   }
@@ -374,25 +376,6 @@
   }
 
   /* Trust strip: four short facts on one quiet plate. */
-  .landing-trust {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-lg);
-    padding: var(--space-xl) clamp(var(--space-lg), 4vw, var(--space-2xl));
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-  }
-
-  .landing-trust-title {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    letter-spacing: var(--tracking-caps-wide);
-    text-transform: uppercase;
-    color: var(--color-text-muted);
-  }
-
   .landing-trust-list {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -470,11 +453,6 @@
     gap: var(--space-sm);
   }
 
-  .landing-cta-btn {
-    min-height: 44px;
-    padding-inline: var(--space-lg);
-  }
-
   /* ── Columns as room allows ───────────────────────────── */
   @container landing (min-width: 34em) {
     .landing-features,
@@ -544,7 +522,7 @@
       padding-top: 0;
     }
     .landing-search-btn,
-    .landing-cta-btn {
+    .landing-cta-actions .btn {
       flex: 1 1 100%;
     }
     .landing-cta-actions {

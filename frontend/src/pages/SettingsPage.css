@@ -132,9 +132,12 @@
   .settings-row:focus {
     outline: none;
   }
+  /* An offset outline, clear of the label and the controls, which sit
+     flush with the target's edges (the phone gutter is 16px, so 6px fits). */
   .settings-section:focus-visible,
   .settings-row:focus-visible {
-    box-shadow: var(--focus-ring);
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+    outline-offset: 6px;
     border-radius: var(--radius-sm);
   }
 
@@ -308,7 +311,7 @@
     min-height: var(--control-min);
     padding: var(--space-sm);
     border: 1px solid var(--color-border-strong);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text);
     font-size: var(--text-sm);
@@ -338,7 +341,7 @@
   .settings-theme-preview {
     display: block;
     height: 54px;
-    border-radius: 5px;
+    border-radius: calc(var(--radius-sm) - 2px);
     border: 1px solid var(--color-hairline);
   }
   .settings-theme-preview--light {
@@ -375,7 +378,8 @@
     z-index: 50;
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    /* The back button's focus ring keeps clear of the title. */
+    gap: var(--space-sm);
     min-height: 56px;
     margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-md)) var(--space-md);
     padding: 0 var(--space-md);

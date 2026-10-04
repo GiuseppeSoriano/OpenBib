@@ -189,8 +189,9 @@ export function FilterMenu({
       align={sort ? "end" : "start"}
       className="library-filters-popover"
       trigger={(props) => (
-        // The trailing space keeps the prefix and value apart in the accessible name.
-        <MenuChip {...props} active={active} prefix={sort ? `${label} ` : undefined}>
+        // Search's sort chip prefix ("Sort"), so every sort chip reads alike. The
+        // trailing space keeps the prefix and value apart in the accessible name.
+        <MenuChip {...props} active={active} prefix={sort ? `${t("search.sortChip")} ` : undefined}>
           {text}
         </MenuChip>
       )}

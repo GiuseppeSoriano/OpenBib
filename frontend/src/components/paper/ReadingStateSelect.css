@@ -4,7 +4,26 @@
   .state-chip {
     gap: 7px;
     padding-inline: 10px 8px;
-    font-weight: 400;
+  }
+  /* Among a row's quiet actions (collection rows) the trigger is one of
+     them: the .btn-quiet height, padding, radius, ink and hover, no border.
+     The dot and the caret still mark it as a state picker. */
+  .paper-actions .state-chip {
+    min-height: 30px;
+    padding: 0.125rem 0.5rem;
+    border-color: transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+  }
+  .paper-actions button.state-chip:hover:not(:disabled) {
+    background: var(--color-hover-quiet);
+    color: var(--color-text);
+  }
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    .paper-actions .state-chip {
+      min-height: var(--touch-target);
+    }
   }
   .state-chip .chip-caret {
     color: var(--color-text-muted);

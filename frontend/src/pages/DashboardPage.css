@@ -14,7 +14,6 @@
   /* What the figures count (S06), as a quiet line under the greeting. */
   .dashboard-header .page-header-description {
     margin-top: var(--space-xs);
-    font-size: var(--text-sm);
   }
 
   /* Header: date line and greeting on the left, inline figures on the right. */

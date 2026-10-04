@@ -1,4 +1,4 @@
-import { FolderOpen, LayoutDashboard, LibraryBig, Search, Share2, type LucideIcon } from "lucide-react";
+import { FolderOpen, GitFork, LayoutDashboard, LibraryBig, Search, type LucideIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import api, { library } from "@/lib/api";
 import type { Collection } from "@/types";
@@ -16,7 +16,7 @@ export const PRIMARY_NAV: readonly NavItem[] = [
   { to: "/search", labelKey: "nav.search", icon: Search, end: false },
   { to: "/library", labelKey: "nav.library", icon: LibraryBig, end: false },
   { to: "/collections", labelKey: "nav.collections", icon: FolderOpen, end: false },
-  { to: "/graph/library", labelKey: "nav.graph", icon: Share2, end: false },
+  { to: "/graph/library", labelKey: "nav.graph", icon: GitFork, end: false },
 ];
 
 /** The user's collections, shared with the Collections page and Dashboard cache. */

@@ -315,7 +315,7 @@ describe("LibraryPage filters", () => {
     await pick(/^Reading state/, "Reading (1)");
     await pick(/^Tag/, "ml (1)");
     await pick(/^Collection/, "Reading group");
-    await pick(/^Sort by/, "Most cited");
+    await pick(/^Sort /, "Most cited");
 
     await waitFor(() =>
       expect(lastListParams()).toMatchObject({
@@ -333,7 +333,7 @@ describe("LibraryPage filters", () => {
     expect(screen.getByRole("button", { name: "Reading state: Reading" })).toHaveClass("chip--active");
     expect(screen.getByRole("button", { name: "Tag: ml" })).toHaveClass("chip--active");
     expect(screen.getByRole("button", { name: "Collection: Reading group" })).toHaveClass("chip--active");
-    expect(screen.getByRole("button", { name: "Sort by Most cited" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Sort Most cited" })).toHaveClass("chip--active");
   });
 
   it("marks the current value in a filter listbox and keeps it on Escape", async () => {
@@ -480,7 +480,7 @@ describe("LibraryPage filters", () => {
     await screen.findByText("First Library Paper");
 
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Reading state/ })).toBeNull());
-    expect(screen.getByRole("button", { name: /^Sort by/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Sort / })).toBeInTheDocument();
   });
 
   it("folds the filters behind a toggle on compact screens", async () => {
@@ -646,14 +646,19 @@ describe("LibraryPage — recovery, deletion and export", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("links to the data export and, without Zotero, to its settings", async () => {
+  it("links to the data export and, without Zotero, to its settings from the More menu", async () => {
+    const user = userEvent.setup();
     testAuth.authenticated = true;
     renderLibrary();
     await screen.findByText("First Library Paper");
+    // The header keeps to the graph link and More, last.
+    expect(screen.queryByRole("link", { name: "Export data" })).toBeNull();
 
-    expect(screen.getByRole("link", { name: "Export data" })).toHaveAttribute("href", "/settings#your-data");
-    const connect = await screen.findByRole("link", { name: "Connect Zotero to sync" });
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Export data" })).toHaveAttribute("href", "/settings#your-data");
+    const connect = await screen.findByRole("menuitem", { name: "Connect Zotero to sync" });
     expect(connect).toHaveAttribute("href", "/settings#zotero");
     expect(screen.getByText("Zotero isn’t connected. Add your API key in Settings.")).toBeVisible();
+    expect(connect).toHaveAccessibleDescription("Zotero isn’t connected. Add your API key in Settings.");
   });
 });

@@ -237,7 +237,7 @@ describe("SearchPage — results", () => {
     expect(screen.queryByRole("button", { name: "Not relevant" })).toBeNull();
     // Cite and the citation graph need no account.
     expect(screen.getAllByRole("button", { name: "Cite" })).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: "Citation graph" })[0]).toHaveAttribute(
+    expect(screen.getAllByRole("link", { name: "Explore graph" })[0]).toHaveAttribute(
       "href",
       "/graph/doi%3A10.1%2Fsolo",
     );
@@ -806,7 +806,7 @@ describe("SearchPage — signed-in filters and row actions", () => {
     expect(await screen.findByText("Reference copied to the clipboard")).toBeInTheDocument();
   });
 
-  it("folds Cite, Citation graph and Not relevant into a More menu on phones", async () => {
+  it("folds Cite, Explore graph and Not relevant into a More menu on phones", async () => {
     signIn();
     mockMatchMedia((query) => query === COMPACT_QUERY);
     try {
@@ -818,7 +818,7 @@ describe("SearchPage — signed-in filters and row actions", () => {
       fireEvent.click(more);
       const menu = within(row).getByRole("menu");
       expect(within(menu).getByRole("menuitem", { name: "Cite" })).toBeInTheDocument();
-      expect(within(menu).getByRole("menuitem", { name: "Citation graph" })).toHaveAttribute(
+      expect(within(menu).getByRole("menuitem", { name: "Explore graph" })).toHaveAttribute(
         "href",
         "/graph/doi%3A10.1%2Fsolo",
       );

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -8,7 +8,7 @@ import { Plus, Trash2, FolderOpen } from "lucide-react";
 import QueryError from "@/components/ui/QueryError";
 import { useToast } from "@/components/ui/Toast";
 import ConfirmModal from "@/components/ConfirmModal";
-import Modal from "@/components/ui/Modal";
+import NewCollectionDialog from "@/components/shell/NewCollectionDialog";
 import RowSkeletons from "@/components/paper/RowSkeletons";
 import EmptyState from "@/components/ui/EmptyState";
 import PageHeader from "@/components/ui/PageHeader";
@@ -22,8 +22,6 @@ export default function CollectionsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Collection | null>(null);
 
   const { data: collections, isLoading, isError, isFetching, refetch } = useQuery({
@@ -32,19 +30,6 @@ export default function CollectionsPage() {
       const { data } = await api.get<Collection[]>("/collections");
       return data;
     },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      await api.post("/collections", { name, description: description || null });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["collections"] });
-      setShowCreate(false);
-      setName("");
-      setDescription("");
-    },
-    onError: () => toast(t("collections.createFailed"), "error"),
   });
 
   const deleteMutation = useMutation({
@@ -59,11 +44,6 @@ export default function CollectionsPage() {
     onError: () => toast(t("collections.deleteFailed"), "error"),
   });
 
-  const handleCreate = (e: FormEvent) => {
-    e.preventDefault();
-    if (name.trim()) createMutation.mutate();
-  };
-
   const formatDate = (value: string) => {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
@@ -76,7 +56,7 @@ export default function CollectionsPage() {
     c.is_owner && (
       <button
         type="button"
-        className="btn-quiet btn-quiet--muted collection-delete"
+        className="btn-quiet btn-quiet--muted btn-quiet--icon collection-delete"
         onClick={() => setPendingDelete(c)}
         title={t("collections.deleteCollectionTitle")}
         aria-label={t("collections.deleteCollectionTitle")}
@@ -173,36 +153,7 @@ export default function CollectionsPage() {
         />
       )}
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title={t("collections.new")}>
-        <form onSubmit={handleCreate} className="collection-create-form">
-          <label className="collection-field">
-            {t("collections.namePlaceholder")}
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-          <label className="collection-field">
-            {t("collections.descriptionPlaceholder")}
-            <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
-          </label>
-          <div className="confirm-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShowCreate(false)}
-            >
-              {t("common.cancel")}
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={!name.trim() || createMutation.isPending}>
-              {t("collections.create")}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {showCreate && <NewCollectionDialog onClose={() => setShowCreate(false)} />}
 
       {pendingDelete && (
         <ConfirmModal

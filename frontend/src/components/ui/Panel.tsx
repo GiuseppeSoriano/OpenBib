@@ -59,7 +59,7 @@ export default function Panel({
           {title}
         </h2>
         <button type="button" className="btn-ghost" onClick={onClose} aria-label={t("common.close")}>
-          <X size={18} />
+          <X size={16} />
         </button>
       </div>
       <div className="panel-body">{children}</div>

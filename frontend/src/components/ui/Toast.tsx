@@ -62,7 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   onClick={() => dismiss(item.id)}
                   aria-label={t("common.dismiss")}
                 >
-                  <X size={14} />
+                  <X size={16} />
                 </button>
               </div>
             );

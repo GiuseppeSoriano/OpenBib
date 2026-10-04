@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { BookMarked, Check, EyeOff, FolderCheck, MoreHorizontal, Quote, Share2, Undo2 } from "lucide-react";
+import { BookMarked, Check, EyeOff, FolderCheck, GitFork, MoreHorizontal, Quote, Undo2 } from "lucide-react";
 import api, { library } from "@/lib/api";
 import { copyText, formatCitation } from "@/lib/citation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,13 +23,13 @@ interface SearchResultCardProps {
   note?: ReactNode;
   /** Version picker for grouped results, rendered inside the card. */
   children?: ReactNode;
-  /** Phones: Cite, Citation graph and Not relevant fold into a More menu. */
+  /** Phones: Cite, Explore graph and Not relevant fold into a More menu. */
   compact?: boolean;
 }
 
 /**
  * A search result row: the shared PaperCard (row variant) with quiet
- * actions: Save, Add to collection, Cite, Citation graph, Not relevant.
+ * actions: Save, Add to collection, Cite, Explore graph, Not relevant.
  */
 export default function SearchResultCard({
   paper,
@@ -184,8 +184,8 @@ export default function SearchResultCard({
                   {t("paper.cite.action")}
                 </button>
                 <Link to={graphPath} role="menuitem" className="menu-item" onClick={close}>
-                  <Share2 size={15} aria-hidden="true" />
-                  {t("search.citationGraph")}
+                  <GitFork size={15} aria-hidden="true" />
+                  {t("paper.exploreGraph")}
                 </Link>
                 <button type="button" role="menuitem" className="menu-item" onClick={fromMenu(close, toggleDismissed)}>
                   <DismissIcon size={15} aria-hidden="true" />
@@ -212,10 +212,10 @@ export default function SearchResultCard({
           <Quote size={14} aria-hidden="true" />
           {t("paper.cite.action")}
         </button>
-        {/* Share2: the same icon as the sidebar's Citation graph item. */}
+        {/* GitFork: the citation graph's icon everywhere (sidebar, headers, rows). */}
         <Link to={graphPath} className="btn-quiet">
-          <Share2 size={14} aria-hidden="true" />
-          {t("search.citationGraph")}
+          <GitFork size={14} aria-hidden="true" />
+          {t("paper.exploreGraph")}
         </Link>
         {user && (
           <button

@@ -20,7 +20,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import QueryError from "@/components/ui/QueryError";
 import PaperCard from "@/components/paper/PaperCard";
 import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
-import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
+import { ZoteroSyncMenuItem } from "@/components/zotero/ZoteroSyncButton";
+import Menu from "@/components/ui/Menu";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
 import LibraryFilters from "@/components/library/LibraryFilters";
@@ -30,6 +31,7 @@ import {
   Download,
   GitFork,
   Layers3,
+  MoreHorizontal,
   RotateCcw,
   SearchX,
   Trash2,
@@ -57,6 +59,7 @@ export default function LibraryPage() {
   } | null>(null);
   const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
 
   // Keyed by the serialized filters so unrelated URL changes (?focus=) keep
   // the same params object and query.
@@ -163,12 +166,33 @@ export default function LibraryPage() {
         </div>
         <div className="page-header-actions">
           <Link to="/graph/library" className="btn btn-secondary">
-            <GitFork size={14} aria-hidden="true" /> {t("library.viewGraph")}
+            <GitFork size={15} aria-hidden="true" /> {t("library.viewGraph")}
           </Link>
-          <Link to="/settings#your-data" className="btn btn-secondary">
-            <Download size={14} aria-hidden="true" /> {t("library.exportData")}
-          </Link>
-          <ZoteroSyncButton />
+          {/* Secondary actions, last: export and Zotero, as on a collection. */}
+          <div ref={moreRef}>
+            <Menu
+              align="right"
+              button={<MoreHorizontal size={16} aria-hidden="true" />}
+              buttonClassName="btn btn-secondary btn--icon"
+              buttonAriaLabel={t("collections.moreActions")}
+              buttonTitle={t("collections.moreActions")}
+            >
+              {(close) => (
+                <>
+                  <Link to="/settings#your-data" role="menuitem" className="menu-item" onClick={close}>
+                    <Download size={16} aria-hidden="true" />
+                    {t("library.exportData")}
+                  </Link>
+                  <ZoteroSyncMenuItem
+                    onSelect={() => {
+                      close();
+                      moreRef.current?.querySelector<HTMLElement>("button[aria-haspopup]")?.focus();
+                    }}
+                  />
+                </>
+              )}
+            </Menu>
+          </div>
         </div>
       </header>
 

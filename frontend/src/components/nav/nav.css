@@ -67,13 +67,20 @@
     padding: var(--space-sm);
   }
 
+  /* Search and Sign in sit side by side: one label size (the .btn's 14px),
+     one icon size, one gap, one 44px height, like the icon buttons. */
   .topnav-search {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     color: var(--color-text-secondary);
     font-size: var(--text-md);
     font-weight: 500;
+  }
+  .topnav-search > svg {
+    flex-shrink: 0;
+    width: var(--icon-btn);
+    height: var(--icon-btn);
   }
   .topnav-search:hover {
     color: var(--color-text);
@@ -84,11 +91,9 @@
   }
 
   .topnav-signin {
-    font-size: var(--text-sm);
-    padding: 0.35rem 0.75rem;
     margin-left: var(--space-xs);
-    min-width: var(--control-min);
-    min-height: var(--control-min);
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 
   .user-menu-btn {
@@ -117,11 +122,6 @@
     color: var(--color-on-accent);
     font-size: var(--text-xs);
     font-weight: 600;
-  }
-
-  /* The account menu's last item: easy to spot, apart from the preferences. */
-  .menu-item--signout {
-    font-weight: 500;
   }
 
   /* ── Bottom tab bar (phones) ────────────────────────────── */

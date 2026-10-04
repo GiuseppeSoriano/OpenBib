@@ -77,7 +77,7 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
           {!inSidebar && (
             <>
               <Link to="/settings" role="menuitem" className="menu-item" onClick={close}>
-                <Settings size={15} aria-hidden="true" />
+                <Settings size={16} aria-hidden="true" />
                 {t("nav.settings")}
               </Link>
               <div className="menu-separator" />
@@ -134,7 +134,7 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
                   void signOut();
                 }}
               >
-                <LogOut size={15} aria-hidden="true" />
+                <LogOut size={16} aria-hidden="true" />
                 {t("nav.signOut")}
               </button>
             </>

@@ -60,39 +60,14 @@
     }
   }
 
-  /* Phone chip row (MobileSearch.dc.html): rounded pills. */
-  .search-filters--compact .chip {
-    border-radius: var(--radius-full);
-  }
-
-  .search-filters--compact .chip-remove {
-    border-radius: 0 var(--radius-full) var(--radius-full) 0;
-  }
-
-  /* Phone Filters sheet (MobileFilters.dc.html). */
-  .search-sheet-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg) 0;
-    padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
-    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
-    flex-shrink: 0;
-  }
-
+  /* Phone Filters sheet (MobileFilters.dc.html): the shared sheet header
+     (.panel-header, .panel-title), with Reset beside the title. */
   .search-sheet-title {
     flex: 1 1 auto;
-    min-width: 0;
-    font-size: var(--text-xl);
   }
 
   .search-sheet-title:focus {
     outline: none;
-  }
-
-  .search-sheet-close {
-    min-width: var(--touch-target);
-    min-height: var(--touch-target);
   }
 
   .search-sheet-body {
@@ -162,12 +137,6 @@
     padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
     padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
     border-top: 1px solid var(--color-hairline);
-  }
-
-  .search-sheet-submit {
-    width: 100%;
-    min-height: 48px;
-    font-size: var(--text-base);
   }
 
   /* The sheet's footer carries the safe area, not the body. */

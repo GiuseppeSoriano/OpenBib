@@ -81,10 +81,10 @@ describe("SearchResultCard actions", () => {
     for (const element of [save, ...names.map((name) => screen.getByRole("button", { name }))]) {
       expect(leadingIcon(element).getAttribute("width")).toBe("14");
     }
-    const graph = screen.getByRole("link", { name: "Citation graph" });
+    const graph = screen.getByRole("link", { name: "Explore graph" });
     expect(graph).toHaveAttribute("href", "/graph/s2%3Aabc");
-    // The sidebar's Citation graph item uses the same Share2 icon.
-    expect(leadingIcon(graph).getAttribute("class")).toMatch(/lucide-share-?2/);
+    // The citation graph has one icon everywhere: sidebar, headers and rows.
+    expect(leadingIcon(graph).getAttribute("class")).toMatch(/lucide-git-?fork/);
   });
 
   it("keeps an icon on In Library and Undo dismiss", async () => {
@@ -97,8 +97,8 @@ describe("SearchResultCard actions", () => {
     renderCard({ compact: true });
     fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
     leadingIcon(screen.getByRole("menuitem", { name: "Cite" }));
-    expect(leadingIcon(screen.getByRole("menuitem", { name: "Citation graph" })).getAttribute("class")).toMatch(
-      /lucide-share-?2/,
+    expect(leadingIcon(screen.getByRole("menuitem", { name: "Explore graph" })).getAttribute("class")).toMatch(
+      /lucide-git-?fork/,
     );
     leadingIcon(screen.getByRole("menuitem", { name: "Not relevant" }));
   });

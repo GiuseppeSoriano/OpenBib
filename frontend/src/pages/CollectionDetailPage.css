@@ -7,10 +7,11 @@
 
   /* ── Header ─────────────────────────────────────────────── */
 
+  /* The edit button's 3px focus ring keeps clear of the title. */
   .cd-title-row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     min-width: 0;
   }
   .cd-title-row h1 {
@@ -25,14 +26,6 @@
   }
   .cd-edit {
     flex-shrink: 0;
-    justify-content: center;
-    min-width: var(--control-min);
-  }
-
-  /* The More menu's trigger: an icon button as tall as its neighbours. */
-  .cd-more-button {
-    min-width: var(--control-min);
-    padding-inline: 0;
   }
 
   .cd-description {
@@ -95,14 +88,19 @@
     margin-top: calc(-1 * var(--space-sm));
   }
 
+  /* Under the toolbar, as on the Library: the list opens with a rule. */
+  .cd-filters + .cd-paper-list {
+    margin-top: var(--space-md);
+  }
+
   .cd-row {
     padding-block: 18px;
   }
 
+  /* The state trigger is a quiet action like its siblings: no offset, so its
+     dot lines up with the row's text as their icons do. */
   .cd-state {
     max-width: 11rem;
-    margin-left: 8px;
-    margin-right: var(--space-xs);
   }
 
   .cd-remove {

@@ -93,8 +93,8 @@ export default function SearchFiltersSheet({
       testId="search-filters-sheet"
     >
       <div className="panel-handle" aria-hidden="true" />
-      <div className="search-sheet-header">
-        <h2 ref={titleRef} id={titleId} className="search-sheet-title" tabIndex={-1}>
+      <div className="panel-header search-sheet-header">
+        <h2 ref={titleRef} id={titleId} className="panel-title search-sheet-title" tabIndex={-1}>
           {t("common.filters")}
         </h2>
         {canReset && (
@@ -108,7 +108,7 @@ export default function SearchFiltersSheet({
           </button>
         )}
         <button type="button" className="btn-ghost search-sheet-close" aria-label={t("common.close")} onClick={onClose}>
-          <X size={18} aria-hidden="true" />
+          <X size={16} aria-hidden="true" />
         </button>
       </div>
 
@@ -168,7 +168,7 @@ export default function SearchFiltersSheet({
       </div>
 
       <div className="search-sheet-footer">
-        <button type="button" className="btn btn-primary search-sheet-submit" onClick={onShowResults}>
+        <button type="button" className="btn btn-primary sheet-submit" onClick={onShowResults}>
           {resultCount === null
             ? t("search.showResultsAny")
             : t("search.showResults", { count: resultCount })}

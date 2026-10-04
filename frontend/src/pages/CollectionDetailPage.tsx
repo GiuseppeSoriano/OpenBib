@@ -13,12 +13,14 @@ import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
 import ImportIdentifiersModal from "@/components/collections/ImportIdentifiersModal";
 import CollectionFilters from "@/components/collections/CollectionFilters";
-import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
+import { ZoteroSyncMenuItem } from "@/components/zotero/ZoteroSyncButton";
 import RowSkeletons from "@/components/paper/RowSkeletons";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Menu from "@/components/ui/Menu";
 import { useTopBarTitle } from "@/components/shell/ShellContext";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { PHONE_QUERY } from "@/lib/breakpoints";
 import { useToast } from "@/components/ui/Toast";
 import {
   Trash2,
@@ -74,6 +76,7 @@ export default function CollectionDetailPage() {
   const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const phone = useMediaQuery(PHONE_QUERY);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -276,6 +279,8 @@ export default function CollectionDetailPage() {
     (resetRef.current ?? statusRef.current)?.focus();
   }, [visibleKeys, filtered]);
 
+  const graphPath = `/graph/collection/${id}${access.fragment}`;
+
   // A More menu item closes the menu; focus goes back to its trigger, where the dialog returns it.
   const fromMenu = (close: () => void, action: () => void) => () => {
     close();
@@ -361,7 +366,7 @@ export default function CollectionDetailPage() {
                   {collection.can_edit && (
                     <button
                       type="button"
-                      className="btn-quiet btn-quiet--muted cd-edit"
+                      className="btn-quiet btn-quiet--muted btn-quiet--icon cd-edit"
                       onClick={() => {
                         setEditRevision(collection.revision);
                         setEditName(collection.name);
@@ -385,42 +390,60 @@ export default function CollectionDetailPage() {
                 {/* Papers are added from Search, where every result offers "Add to collection". */}
                 {user && collection.can_edit && (
                   <Link to="/search" className="btn btn-primary">
-                    <Plus size={14} aria-hidden="true" /> {t("collections.addPapers")}
+                    <Plus size={15} aria-hidden="true" /> {t("collections.addPapers")}
                   </Link>
                 )}
                 {collection.can_manage_access && (
                   <button type="button" className="btn btn-secondary cd-share" onClick={() => setShowSharing(true)}>
-                    <Share2 size={14} aria-hidden="true" /> {t("sharing.title")}
+                    <Share2 size={15} aria-hidden="true" /> {t("sharing.title")}
                   </button>
                 )}
                 {!user && <Link className="btn btn-secondary" to="/login" state={{ returnTo: access.returnTo }}>{t("sharing.login")}</Link>}
-                <Link to={`/graph/collection/${id}${access.fragment}`} className="btn btn-secondary">
-                  <GitFork size={14} aria-hidden="true" /> {t("collections.viewGraph")}
-                </Link>
-                {user && collection.can_edit && (
+                {!(phone && user) && (
+                  <Link to={graphPath} className="btn btn-secondary">
+                    <GitFork size={15} aria-hidden="true" /> {t("collections.viewGraph")}
+                  </Link>
+                )}
+                {/* Secondary actions, always last: Import DOIs, Zotero and, on
+                    phones, the graph, so the row stays [Primary][Share][…]. */}
+                {user && (
                   <div ref={moreRef} className="cd-more">
                     <Menu
                       align="right"
                       button={<MoreHorizontal size={16} aria-hidden="true" />}
-                      buttonClassName="btn btn-secondary cd-more-button"
+                      buttonClassName="btn btn-secondary btn--icon cd-more-button"
                       buttonAriaLabel={t("collections.moreActions")}
                       buttonTitle={t("collections.moreActions")}
                     >
                       {(close) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="menu-item"
-                          onClick={fromMenu(close, () => setShowImport(true))}
-                        >
-                          <Upload size={15} aria-hidden="true" />
-                          {t("collections.importDois")}
-                        </button>
+                        <>
+                          {phone && (
+                            <Link to={graphPath} role="menuitem" className="menu-item" onClick={close}>
+                              <GitFork size={16} aria-hidden="true" />
+                              {t("collections.viewGraph")}
+                            </Link>
+                          )}
+                          {collection.can_edit && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="menu-item"
+                              onClick={fromMenu(close, () => setShowImport(true))}
+                            >
+                              <Upload size={16} aria-hidden="true" />
+                              {t("collections.importDois")}
+                            </button>
+                          )}
+                          <ZoteroSyncMenuItem
+                            collectionId={id}
+                            headers={access.headers}
+                            onSelect={fromMenu(close, () => undefined)}
+                          />
+                        </>
                       )}
                     </Menu>
                   </div>
                 )}
-                <ZoteroSyncButton collectionId={id} headers={access.headers} />
               </div>
             </div>
           )}
@@ -471,7 +494,7 @@ export default function CollectionDetailPage() {
           )}
           {visibleRows.length > 0 && (
             <ul
-              className="list-rows cd-paper-list"
+              className="list-rows list-rows--ruled cd-paper-list"
               onFocus={() => {
                 listFocused.current = true;
               }}

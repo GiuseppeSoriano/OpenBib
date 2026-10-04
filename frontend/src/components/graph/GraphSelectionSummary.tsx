@@ -98,19 +98,22 @@ export default function GraphSelectionSummary({
               {range && (
                 <>
                   <span aria-hidden="true"> · </span>
-                  <button
-                    type="button"
-                    className={`graph-range-btn graph-range-chip is-current${range.loaded ? "" : " is-unloaded"}`}
-                    aria-label={
-                      range.loaded
-                        ? t("graph.showRange", { start: range.start, end: range.end })
-                        : t("graph.rangeNotLoaded", { start: range.start, end: range.end })
-                    }
-                    onClick={() => onRange({ index: range.index })}
-                  >
-                    {number.format(range.start)}–{number.format(range.end)}
-                  </button>
-                  {total && <span className="tabular"> {total}</span>}
+                  {/* "1–30 of about 9,913" never splits across lines. */}
+                  <span className="graph-summary-range">
+                    <button
+                      type="button"
+                      className={`graph-range-btn graph-range-chip is-current${range.loaded ? "" : " is-unloaded"}`}
+                      aria-label={
+                        range.loaded
+                          ? t("graph.showRange", { start: range.start, end: range.end })
+                          : t("graph.rangeNotLoaded", { start: range.start, end: range.end })
+                      }
+                      onClick={() => onRange({ index: range.index })}
+                    >
+                      {number.format(range.start)}–{number.format(range.end)}
+                    </button>
+                    {total && <span className="tabular"> {total}</span>}
+                  </span>
                 </>
               )}
             </p>
@@ -118,7 +121,7 @@ export default function GraphSelectionSummary({
               {next && (
                 <button
                   type="button"
-                  className="btn btn-secondary btn--sm"
+                  className="btn btn-secondary graph-btn"
                   title={t("graph.showRange", { start: next.start, end: next.end })}
                   onClick={() => onRange({ index: next.index })}
                 >
@@ -128,7 +131,7 @@ export default function GraphSelectionSummary({
               {!isUnresolved(node.selected_version) && (
                 <button
                   type="button"
-                  className="btn btn-primary btn--sm"
+                  className="btn btn-primary graph-btn"
                   aria-label={t("paper.viewDetails")}
                   onClick={onViewDetails}
                 >

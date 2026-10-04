@@ -7,7 +7,10 @@ import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import type { Collection } from "@/types";
 
-/** "+" in the sidebar and the palette's New collection: create one, then open it. */
+/**
+ * New collection, from every entry point (the sidebar "+", the palette and
+ * the Collections page): one labelled form; creates the collection, then opens it.
+ */
 export default function NewCollectionDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -36,22 +39,20 @@ export default function NewCollectionDialog({ onClose }: { onClose: () => void }
   return (
     <Modal open onClose={onClose} title={t("collections.new")}>
       <form onSubmit={submit} className="shell-form">
-        <input
-          className="input"
-          aria-label={t("collections.namePlaceholder")}
-          placeholder={t("collections.namePlaceholder")}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-          autoFocus
-        />
-        <input
-          className="input"
-          aria-label={t("collections.descriptionPlaceholder")}
-          placeholder={t("collections.descriptionPlaceholder")}
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-        />
+        <label className="shell-field">
+          {t("collections.namePlaceholder")}
+          <input
+            className="input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+            autoFocus
+          />
+        </label>
+        <label className="shell-field">
+          {t("collections.descriptionPlaceholder")}
+          <input className="input" value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
         <div className="confirm-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             {t("common.cancel")}

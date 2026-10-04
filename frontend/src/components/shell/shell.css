@@ -44,13 +44,18 @@
     flex-direction: column;
   }
 
+  /* Every sidebar row shares two columns: a 16px icon column centred 18px
+     in (10px of row padding plus half the icon) and the label column after a
+     10px gap. The brand, search and account rows size their padding and gap
+     so their mark centres on the icon column and their text starts on the
+     label column. */
   .sidebar-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     min-width: 0;
     min-height: var(--control-min);
-    padding: 0 var(--space-sm);
+    padding: 0 7px;
     border-radius: var(--radius-sm);
     color: var(--color-text);
   }
@@ -92,9 +97,10 @@
   .sidebar-search {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: 10px;
     min-height: var(--control-min);
-    padding: 0.25rem 10px;
+    /* 9px plus the 1px border: the icon on the nav rows' column. */
+    padding: 0.25rem 9px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
@@ -124,9 +130,10 @@
     gap: var(--space-md);
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* Room for focus rings inside the scroll box. */
-    margin-inline: -4px;
-    padding: 2px 4px;
+    /* Room for a 3px focus ring on every side inside the scroll box, which
+       clips it; the negative margin keeps the rows where they were. */
+    margin: -2px -4px;
+    padding: 4px;
   }
 
   .sidebar-nav,
@@ -283,11 +290,12 @@
   .sidebar-account {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     width: 100%;
     min-width: 0;
     min-height: var(--control-min);
-    padding: 6px var(--space-sm);
+    /* A 22px avatar centred on the icon column; the name on the label column. */
+    padding: 6px 7px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -297,6 +305,11 @@
   .sidebar-account:hover,
   .sidebar-account[aria-expanded="true"] {
     background: var(--color-hover-quiet);
+  }
+  .sidebar-account .user-avatar {
+    width: 22px;
+    height: 22px;
+    font-size: var(--text-2xs);
   }
   .sidebar-account--rail {
     justify-content: center;
@@ -338,6 +351,13 @@
   .sidebar-account:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+  /* Rows sit 2px apart, closer than the 3px ring: the focused row paints
+     above its neighbours, so an active row's fill never cuts its ring. */
+  .sidebar-link:focus-visible,
+  .sidebar-recent-link:focus-visible {
+    position: relative;
+    z-index: 1;
   }
 
   /* ── Top bar: breadcrumb and page actions ───────────────── */
@@ -438,13 +458,17 @@
     backdrop-filter: none;
     container: topbar / inline-size;
   }
+  /* The brand hugs "logo + OpenBib", its ring 4px clear of the logo; the
+     buttons are pushed to the right edge instead. */
   .topbar-brand {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     min-height: var(--touch-target);
+    padding-inline: var(--space-xs);
+    margin-left: calc(-1 * var(--space-xs));
     color: var(--color-text);
     border-radius: var(--radius-sm);
   }
@@ -465,6 +489,9 @@
     min-width: var(--touch-target);
     min-height: var(--touch-target);
     padding: var(--space-sm);
+  }
+  .topbar-actions:empty + .topbar-iconbtn {
+    margin-left: auto;
   }
   .topbar-brand:focus-visible,
   .breadcrumb a:focus-visible {
@@ -572,32 +599,46 @@
   .palette-group-label {
     padding: var(--space-sm) 10px var(--space-xs);
   }
+  /* The list-row spec of menus and the sidebar (index.css .menu-item). */
   .palette-option {
     display: flex;
     align-items: center;
     gap: 10px;
     min-height: var(--control-min);
     padding: 0.375rem 10px;
+    /* The first line sits where a one-line row centres its label, so the
+       top-aligned icon below lines up with it in both cases. */
+    padding-block: calc((var(--control-min) - 1lh) / 2);
     border-radius: var(--radius-sm);
     color: var(--color-text);
     font-size: var(--text-md);
+    line-height: var(--leading-tight);
     cursor: pointer;
   }
+  /* The icon stays on the first line of a long, wrapped name. */
   .palette-option svg {
     flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: calc((1lh - var(--icon-row)) / 2);
     color: var(--color-text-secondary);
   }
-  /* The active option: filled and outlined, not colour alone. */
+  /* The active option: filled and ringed inside, not colour alone (a left
+     bar would bend round the row's radius). */
   .palette-option--active {
     background: var(--color-accent-soft);
     color: var(--color-accent-strong);
-    box-shadow: inset 2px 0 0 var(--color-accent);
+    box-shadow: var(--focus-ring-inset);
   }
   .palette-option--active svg {
     color: var(--color-accent-strong);
   }
+  /* Long names wrap to two lines, then end in an ellipsis, as in menus. */
   .palette-option-label {
     min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     overflow-wrap: anywhere;
   }
   .palette-empty {
@@ -624,10 +665,18 @@
     }
   }
 
-  /* New collection dialog (sidebar "+", palette). */
+  /* New collection dialog (sidebar "+", palette, Collections page): visible
+     labels above the fields. */
   .shell-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-md);
+  }
+  .shell-field {
+    display: grid;
+    gap: var(--space-xs);
+    min-width: 0;
+    font-size: var(--text-sm);
+    font-weight: 500;
   }
 }

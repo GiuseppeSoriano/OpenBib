@@ -35,7 +35,7 @@ export default function TopNav({ actionsRef, pending = false }: TopNavProps) {
             replace={location.pathname === "/search" || undefined}
             className={({ isActive }) => `btn-ghost topnav-iconbtn topnav-search${isActive ? " topnav-search--active" : ""}`}
           >
-            <Search size={17} aria-hidden="true" />
+            <Search size={15} aria-hidden="true" />
             <span className="topnav-search-label">{t("nav.search")}</span>
           </NavLink>
           <ThemeToggle />
@@ -45,7 +45,7 @@ export default function TopNav({ actionsRef, pending = false }: TopNavProps) {
             state={{ returnTo: location.pathname + location.search + location.hash }}
             className="btn btn-primary topnav-signin"
           >
-            <LogIn size={14} aria-hidden="true" />
+            <LogIn size={15} aria-hidden="true" />
             <span className="topnav-signin-label">{t("nav.signIn")}</span>
           </Link>
         </div>

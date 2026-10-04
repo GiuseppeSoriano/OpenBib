@@ -263,12 +263,31 @@ describe("CollectionDetailPage — adding papers", () => {
   });
 
   it("shows readers no add, import or remove controls", async () => {
+    const user = userEvent.setup();
     collection.can_edit = false; collection.can_manage_access = false; collection.is_owner = false;
     renderPage();
     await screen.findByText("Attention Is All You Need");
     expect(screen.queryByRole("link", { name: "Add papers" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove from collection/ })).toBeNull();
+    // Their More menu holds only Zotero, never Import DOIs.
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Connect Zotero to sync" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Import DOIs" })).toBeNull();
+  });
+
+  it("keeps the header to its own actions, with More last and Zotero inside it", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Attention Is All You Need");
+    const actions = screen.getByRole("link", { name: "Add papers" }).parentElement!;
+    const last = actions.lastElementChild!;
+    expect(within(last as HTMLElement).getByRole("button", { name: "More actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect Zotero to sync" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    const connect = await screen.findByRole("menuitem", { name: "Connect Zotero to sync" });
+    expect(connect).toHaveAttribute("href", "/settings#zotero");
+    expect(connect).toHaveAccessibleDescription("Zotero isn’t connected. Add your API key in Settings.");
   });
 });
 
@@ -743,7 +762,7 @@ describe("CollectionDetailPage — filters", () => {
     paperRows.current = filterRows();
     renderPage();
     await screen.findByText("Deep Residual Learning");
-    await user.click(screen.getByRole("button", { name: "Sort by Collection order" }));
+    await user.click(screen.getByRole("button", { name: "Sort Collection order" }));
     await user.click(screen.getByRole("option", { name: label }));
     await waitFor(() => expect(rowLabels()).toEqual(order));
     expect(screen.getByTestId("location")).toHaveTextContent(`/collections/c1?sort=${sort}`);
@@ -778,7 +797,7 @@ describe("CollectionDetailPage — filters", () => {
 
     await user.type(screen.getByRole("searchbox", { name: "Filter this collection" }), "attention");
     await waitFor(() => expect(rowLabels()).toEqual(["Attention Is All You Need"]));
-    await user.click(screen.getByRole("button", { name: "Sort by Collection order" }));
+    await user.click(screen.getByRole("button", { name: "Sort Collection order" }));
     await user.click(screen.getByRole("option", { name: "Most cited" }));
     // Filters that do not apply leave the URL; the read link's fragment stays.
     await waitFor(() =>

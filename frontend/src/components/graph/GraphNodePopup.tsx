@@ -104,12 +104,12 @@ export default function GraphNodePopup({
       {(!unresolved || onExplore) && (
         <div className="graph-popup-actions">
           {!unresolved && (
-            <button type="button" className="btn btn-primary btn--sm" onClick={onViewDetails}>
+            <button type="button" className="btn btn-primary graph-btn" onClick={onViewDetails}>
               {t("paper.viewDetails")}
             </button>
           )}
           {onExplore && (
-            <button type="button" className="btn btn-secondary btn--sm" onClick={onExplore}>
+            <button type="button" className="btn btn-secondary graph-btn" onClick={onExplore}>
               {t("graph.exploreFromHere")}
             </button>
           )}
