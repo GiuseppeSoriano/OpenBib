@@ -572,7 +572,12 @@ class Session:
 
     def logout(self):
         page = self.page
-        page.locator(".user-menu-btn").first.click()
+        # The account menu: the sidebar's account button, or the avatar in the phone app bar
+        # (pages with their own phone header, like Search and Settings, have no app bar).
+        menu = page.locator("[data-testid=user-menu]:visible")
+        if not menu.count():
+            self.nav("/")
+        menu.first.click()
         page.locator(".menu-item--danger").click()
         page.wait_for_function("() => !document.querySelector('.user-avatar')", timeout=15000)
         self.signed_in = False
@@ -805,11 +810,14 @@ class Runner:
 # --------------------------------------------------------------------------- page-level checks
 
 HEADER_JS = """() => {
-  const header = document.querySelector('.topnav');
+  // Visitors get .topnav; signed-in members the shell's .topbar (slim bar or phone app bar).
+  const header = document.querySelector('.topnav, .topbar');
   if (!header) return null;
   const visible = (el) => { const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
-  const items = [...header.querySelectorAll('.topnav-brand, .topnav-link, .topnav-actions > *')]
+  const items = [...header.querySelectorAll(
+      '.topnav-brand, .topnav-actions > *, .topbar-brand, .breadcrumb, .topbar-actions > *,'
+      + ' :scope > button, :scope > .menu-root')]
     .filter(visible).map((el) => { const r = el.getBoundingClientRect();
       return {name: (el.getAttribute('aria-label') || el.innerText || el.className).trim().slice(0, 40),
               x: r.x, y: r.y, width: r.width, height: r.height}; });
@@ -893,7 +901,7 @@ def header_checks(runner: Runner, s: Session, who: str):
     def header(r):
         data = s.page.evaluate(HEADER_JS)
         if not data:
-            raise Skip("no .topnav")
+            raise Skip("no .topnav or .topbar")
         r.info["items"] = [i["name"] for i in data["items"]]
         r.expect(
             data["scrollWidth"] <= data["clientWidth"] + 1,
@@ -943,8 +951,9 @@ def header_controls(s: Session):
     page = s.page
     controls = [
         ("theme toggle", page.locator("[data-testid=theme-toggle]").first),
-        ("language", page.locator(".topnav-actions button").nth(1)),
-        ("account", page.locator(".user-menu-btn").first),
+        ("language", page.locator("[data-testid=language-menu]").first),
+        ("search", page.locator(".topnav-search, [data-testid=palette-button]").first),
+        ("account", page.locator(".user-menu-btn, .sidebar-account").first),
         ("sign in", page.locator(".topnav-signin").first),
     ]
     footer = page.locator(".app-footer a")
@@ -1080,18 +1089,19 @@ def settings_links_check(runner: Runner, s: Session):
             """() => ({
               settings: !!document.querySelector('#your-data .settings-notice a[href="/privacy"]'),
               dashboard: !!document.querySelector(
-                '.dashboard-export-reminder a[href="/settings#your-data"]'),
+                '.dashboard-backup-note a[href="/settings#your-data"]'),
             })"""
         )
 
     def visit_both(page) -> dict:
-        s.nav("/settings")
+        # Phones show the section index at /settings; the anchor opens the section there.
+        s.nav("/settings#your-data")
         page.locator("#your-data").wait_for(timeout=15000)
         page.wait_for_timeout(400)
         found = notices_present(page)
         s.nav("/")
         page.locator(
-            ".dashboard-recent, .dashboard-actions, .dashboard-export-reminder"
+            ".dashboard-columns, .dashboard-actions, .dashboard-onboarding"
         ).first.wait_for(timeout=15000)
         page.wait_for_timeout(400)
         found["dashboard"] = notices_present(page)["dashboard"]
@@ -1245,7 +1255,7 @@ def dialog_checks(runner: Runner, s: Session):
             raise Skip("no Demo collection 2")
         s.nav(f"/collections/{cols['demo2']}")
         trigger = (
-            s.page.locator(".cd-toolbar button")
+            s.page.locator(".cd-header .page-header-actions button")
             .filter(has_text=re.compile("Import DOIs|Importa DOI"))
             .first
         )
@@ -1255,7 +1265,7 @@ def dialog_checks(runner: Runner, s: Session):
         if "long" not in cols:
             raise Skip("no long-data collection")
         s.nav(f"/collections/{cols['long']}")
-        trigger = s.page.locator(".cd-toolbar button.btn-primary").first
+        trigger = s.page.locator(".cd-header .page-header-actions button.btn-primary").first
         if not trigger.count():
             raise Skip("no Share button (not the owner?)")
         dialog_flow(s, r, trigger, r".+")
@@ -1305,7 +1315,7 @@ def long_data_checks(runner: Runner, s: Session):
         # The ~200-character unresolved DOI card.
         s.nav(f"/collections/{cols['long']}")
         page.wait_for_timeout(800)
-        card = page.locator(".paper-card--unresolved").first
+        card = page.locator(".unresolved-card").first
         if r.expect(card.count(), "no unresolved card in the long-data collection"):
             r.info["unresolved_card"] = widths = card.evaluate(BOX_FIT_JS)
             r.expect(widths["fits"], f"unresolved long-DOI card overflows {widths}")
@@ -1394,7 +1404,7 @@ def doi_ui_checks(runner: Runner, s: Session):
             if label == "library-long" and "library" in found:
                 continue
             s.nav(path)
-            card = page.locator(".paper-card--unresolved").first
+            card = page.locator(".unresolved-card").first
             if not card.count():
                 continue
             buttons = card.evaluate(
@@ -1436,7 +1446,9 @@ def import_checks(runner: Runner, s: Session):
         if "demo2" not in cols:
             raise Skip("no Demo collection 2")
         s.nav(f"/collections/{cols['demo2']}")
-        page.locator(".cd-toolbar button").filter(has_text=re.compile("Import DOIs")).first.click()
+        page.locator(".cd-header .page-header-actions button").filter(
+            has_text=re.compile("Import DOIs")
+        ).first.click()
         dialog = page.locator("[role=dialog]").last
         area = dialog.locator("textarea")
         area.fill("not-a-doi")
@@ -1566,7 +1578,7 @@ def contrast_checks(runner: Runner, s: Session):
     def check(r):
         cols = runner.collections
         s.nav(f"/collections/{cols['long']}" if "long" in cols else "/library")
-        badge = contrast_probe(s, ".paper-card--unresolved .badge--warning")
+        badge = contrast_probe(s, ".unresolved-card .badge--warning")
         r.info["warning_badge"] = badge
         if r.expect(badge, "no warning badge on the page"):
             r.expect(badge["text"] >= 4.5, f"warning badge text {badge['text']}:1 < 4.5")
@@ -1614,12 +1626,16 @@ def library_text_checks(runner: Runner, s: Session):
 
     def s06_tiles(r):
         s.nav("/")
-        tiles = page.locator(".stat-tile")
+        # The inline figures (In library, Collections, Reading, To read) each name their value.
+        tiles = page.locator(".dashboard-figures .dashboard-figure")
         page.wait_for_timeout(500)
-        hints = [h for h in page.locator(".stat-tile .stat-hint").all() if h.is_visible()]
-        r.info.update(tiles=tiles.count(), visible_hints=len(hints))
-        r.expect(tiles.count() == 4, f"{tiles.count()} stat tiles")
-        r.expect(len(hints) == 4, f"{len(hints)} visible tile hints")
+        labels = [
+            h for h in page.locator(".dashboard-figure .dashboard-figure-label").all()
+            if h.is_visible() and h.inner_text().strip()
+        ]
+        r.info.update(tiles=tiles.count(), visible_hints=len(labels))
+        r.expect(tiles.count() == 4, f"{tiles.count()} dashboard figures")
+        r.expect(len(labels) == 4, f"{len(labels)} visible figure labels")
         s.nav("/search")
         r.expect(page.locator("h1").count() == 1, "Search has no single h1")
 
@@ -1667,13 +1683,15 @@ def library_checks(runner: Runner, s: Session):
         s.nav("/library?q=demo%200007")
         r.info["q"] = library_count(s)
         r.expect(0 < r.info["q"] < total, f"q filter total {r.info['q']}")
-        if s.variant.compact and page.locator(".library-filters-toggle").count():
-            page.locator(".library-filters-toggle").click()
-        state = page.locator(".library-filters-panel select").first
-        options = state.locator("option").evaluate_all("(os) => os.map((o) => o.value)")
-        value = next((o for o in options if o), None)
-        if value:
-            state.select_option(value)
+        toggle = page.locator(".library-filters-bar button[aria-controls]")
+        if s.variant.compact and toggle.count():
+            toggle.first.click()
+        # The first filter chip is Reading state; its listbox starts with "Any state".
+        page.locator(".library-filters-panel button[aria-haspopup=listbox]").first.click()
+        options = page.locator("[role=listbox] [role=option]")
+        options.first.wait_for(timeout=10000)
+        if options.count() > 1:
+            options.nth(1).click()
             page.wait_for_timeout(300)
             s.settle()
             r.info["state_url"] = page.evaluate("() => location.search")
@@ -1850,17 +1868,20 @@ def search_checks(runner: Runner, s: Session):
     def filters(r):
         s.nav(f"/search?q={q}")
         wait_search(s)
-        if page.locator(".search-filters-toggle").count():
-            page.locator(".search-filters-toggle").click()
-        page.locator(".search-filters button[aria-pressed]").first.click()
+        # The first toggle chip of the row is Open access (phones show it in the chip row too).
+        page.locator(".search-filters-row button[aria-pressed]").first.click()
         page.wait_for_timeout(600)
         wait_search(s)
         url = page.evaluate("() => location.search")
         r.info["url"] = url
         r.expect("oa=1" in url, "Open access toggle not in the URL")
-        r.expect(page.locator(".search-filters-reset").count() == 1, "no active-filter reset")
-        page.locator(".search-filters-reset").click()
+        # Wide screens: a Reset text action in the chip row; phones: Reset in the Filters sheet.
+        open_filters_sheet(s)
+        reset = page.locator(f"{FILTERS_RESET}, {SHEET_RESET}")
+        r.expect(reset.count() == 1, f"{reset.count()} active-filter resets, not 1")
+        reset.first.click()
         page.wait_for_timeout(600)
+        s.close_overlays()
         r.expect("oa=1" not in page.evaluate("() => location.search"), "reset kept oa=1")
 
     def versions(r):
@@ -1901,13 +1922,61 @@ def search_checks(runner: Runner, s: Session):
     runner.run("S04", s, possible_version, "possible-version")
 
 
+# The chip row's active chips name the applied filters: "Year: 2019–2021", "Sort Most cited"
+# (wide), or "Filters · 2", "2019–2021", "Most cited" (phones). The personal toggles
+# (signed in only) are left out, so a signed-out copy of the URL shows the same.
+FILTERS_RESET = ".search-filters-row > button.btn-quiet"
+SHEET_RESET = ".search-sheet-header button.btn-quiet"
+FILTERS_SHEET_BUTTON = ".search-filters--compact .search-filters-row button[aria-haspopup=dialog]"
+
+
 def filters_state(s: Session) -> dict:
     return s.page.evaluate(
-        """() => ({url: location.pathname + location.search,
+        r"""() => ({url: location.pathname + location.search,
                    q: document.querySelector('.search-input')?.value ?? null,
-                   from: document.querySelector('.search-filters input[type=number]')?.value ?? null,
-                   sort: document.querySelector('.search-filters select')?.value ?? null})"""
+                   row: [...document.querySelectorAll('.search-filters-row .chip--active')]
+                     .map((c) => c.innerText.replace(/\s+/g, ' ').trim()).join(' | ')})"""
     )
+
+
+def open_filters_sheet(s: Session) -> bool:
+    """Phones: open the Filters sheet (True); wide screens have no sheet (False)."""
+    button = s.page.locator(FILTERS_SHEET_BUTTON)
+    if not button.count():
+        return False
+    button.first.click()
+    s.page.locator(".search-sheet").wait_for(timeout=10000)
+    s.page.wait_for_timeout(250)
+    return True
+
+
+def apply_years_and_sort(s: Session, year_from: str, year_to: str):
+    """Years through the Year popover (wide) or the sheet (phones), then Most cited."""
+    page = s.page
+    cited = re.compile("Most cited|Più citati")
+    if open_filters_sheet(s):
+        sheet = page.locator(".search-sheet")
+        years = sheet.locator("input[type=number]")
+        years.nth(0).fill(year_from)
+        years.nth(1).fill(year_to)
+        sheet.locator("[role=radio]").filter(has_text=cited).first.click()
+        sheet.locator(".search-sheet-submit").click()
+        page.wait_for_timeout(500)
+        wait_search(s)
+        return
+    page.locator(".search-filters-row button[aria-haspopup=dialog]").first.click()
+    popover = page.locator("[data-testid=search-year-popover]")
+    popover.wait_for(timeout=10000)
+    years = popover.locator("input[type=number]")
+    years.nth(0).fill(year_from)
+    years.nth(1).fill(year_to)
+    popover.locator("button[type=submit]").click()
+    page.wait_for_timeout(500)
+    wait_search(s)
+    page.locator(".search-filters-row button[aria-haspopup=listbox]").first.click()
+    page.locator("[role=listbox] [role=option]").filter(has_text=cited).first.click()
+    page.wait_for_timeout(1500)
+    wait_search(s)
 
 
 def search_history_checks(runner: Runner, s: Session):
@@ -1929,19 +1998,11 @@ def search_history_checks(runner: Runner, s: Session):
         h1 = page.evaluate("() => history.length")
         r.info["history"] = [h0, h1]
         r.expect(h1 == h0 + 1, f"submit changed history.length by {h1 - h0}, not 1")
-        if page.locator(".search-filters-toggle").count():
-            page.locator(".search-filters-toggle").click()
-        years = page.locator(".search-filters input[type=number]")
-        years.nth(0).fill("2019")
-        years.nth(1).fill("2021")
-        page.locator(".search-filters-apply").click()
-        page.wait_for_timeout(500)
-        wait_search(s)
-        page.locator(".search-filters select").select_option("citations")
-        page.wait_for_timeout(1500)
-        wait_search(s)
+        apply_years_and_sort(s, "2019", "2021")
         want = filters_state(s)
         r.info["state"] = want
+        for shown in ("2019", "2021", "Most cited"):
+            r.expect(shown in want["row"], f"chip row {want['row']!r} does not show {shown!r}")
         query = parse_qs(urlparse(want["url"]).query)
         expected = {"q": [F07_Q], "year_from": ["2019"], "year_to": ["2021"], "sort": ["citations"]}
         for key, value in expected.items():
@@ -1954,8 +2015,6 @@ def search_history_checks(runner: Runner, s: Session):
         try:
             fresh.goto(want["url"])
             wait_search(fresh)
-            if fresh.page.locator(".search-filters-toggle").count():
-                fresh.page.locator(".search-filters-toggle").click()
             copied = filters_state(fresh)
             r.expect(copied == want, f"copied URL in a new context gives {copied}")
         finally:
@@ -2036,6 +2095,7 @@ def canvas_state(s: Session) -> dict:
 def graph_controls(s: Session) -> list:
     page = s.page
     selectors = [
+        ("home", ".graph-home"),
         ("back", ".graph-back"),
         ("fit/zoom", ".graph-header-actions .graph-view-btn"),
         ("controls trigger", ".graph-controls-trigger"),
@@ -2073,7 +2133,7 @@ def graph_layout_checks(runner: Runner, s: Session):
         r.info.update(name=name, sheet_shot=s.shot("graph-sheet"))
         if v.lang == "en":
             r.expect(name.startswith("Graph controls"), f"sheet named {name!r}")
-        r.expect(dialog.locator("[role=group]").count() >= 2, "no Direction/Order groups")
+        r.expect(dialog.locator("[role=radiogroup]").count() >= 2, "no Direction/Order groups")
         r.expect(dialog.locator("select").count() == 0, "a <select> in the sheet")
         r.expect("Expand entire graph" not in dialog.inner_text(), "'Expand entire graph' shown")
         r.expect(page.evaluate("() => !!document.getElementById('root')?.inert"), "#root not inert")
@@ -2164,7 +2224,9 @@ def graph_layout_checks(runner: Runner, s: Session):
         if not r.expect(seed, "no seed title in the graph header"):
             return
         r.expect(
-            norm_title(GNN_TITLE) in norm_title(data["h1"]),
+            # The h1 starts with "Citation graph · N pinned": compare the whole text, not
+            # norm_title's 60-character prefix.
+            norm_title(GNN_TITLE) in " ".join(data["h1"].split()).lower(),
             f"seed title not in the h1's accessible text: {data['h1'][:80]!r}",
         )
         clipped = seed["scrollWidth"] > seed["clientWidth"] + 1
@@ -2232,7 +2294,11 @@ def wait_range(s: Session, start_index: int, timeout=180) -> dict | None:
 
 
 def list_sections(s: Session) -> dict:
-    """Section heading (without the count) -> row titles, from the Papers list."""
+    """Section heading (without the count) -> row titles, from the Papers list.
+
+    The current range's heading names its bounds ("Current range · 31–60"): the rows go
+    under "Current range" and the bounds under the ``RANGE_BOUNDS`` key.
+    """
     root = open_papers_list(s)
     data = root.evaluate(
         """(root) => [...root.querySelectorAll('.graph-list-section')].map((sec) => ({
@@ -2241,7 +2307,16 @@ def list_sections(s: Session) -> dict:
     )
     if s.variant.compact:
         s.close_overlays()
-    return {d["heading"]: d["rows"] for d in data}
+    out = {}
+    for d in data:
+        name, _, bounds = d["heading"].partition(" · ")
+        out[name] = d["rows"]
+        if bounds:
+            out[RANGE_BOUNDS] = bounds
+    return out
+
+
+RANGE_BOUNDS = "__range_bounds__"
 
 
 def expected_range(data: dict) -> list[str]:
@@ -2262,7 +2337,14 @@ def compare_range(r: Result, s: Session, data: dict, label: str):
         "range": [data.get("range_start"), data.get("range_end")],
         "visible": len(visible),
         "expected": len(expected),
+        "bounds": sections.get(RANGE_BOUNDS),
     }
+    if data.get("range_start") is not None and data.get("range_end") is not None:
+        want = f"{data['range_start'] + 1:,}–{data['range_end']:,}"
+        if s.variant.lang == "en" and sections.get(RANGE_BOUNDS) != want:
+            r.failures.append(
+                f"{label}: Current range heading bounds {sections.get(RANGE_BOUNDS)!r} != {want!r}"
+            )
     if visible != expected:
         diff = [
             (i, a, b) for i, (a, b) in enumerate(zip(visible, expected, strict=False)) if a != b
@@ -2300,8 +2382,9 @@ def toggle_mode(s: Session, group: int, option: int):
 
 
 def node_count_text(s: Session) -> str:
-    loc = s.page.locator(".graph-counts")
-    return loc.inner_text() if loc.count() else ""
+    # Papers and links only: the pin count that follows them changes with every pin.
+    loc = s.page.locator(".graph-counts > span:not(.graph-counts-pins)")
+    return loc.first.inner_text() if loc.count() else ""
 
 
 def exploration_checks(runner: Runner, s: Session):
@@ -2481,8 +2564,9 @@ def exploration_checks(runner: Runner, s: Session):
 
     runner.run("S01-select", s, select, "graph", provider=True)
     runner.run("S01-deep", s, deep, "graph", provider=True)
-    runner.run("S01-deep", s, capped, "capped-10000", provider=True)
+    # Pins works on the GNN graph that deep leaves open: run it before capped navigates away.
     runner.run("S01-pins", s, pins, "graph", provider=True)
+    runner.run("S01-deep", s, capped, "capped-10000", provider=True)
     exploration_more(runner, s, ctx)
 
 
@@ -2511,7 +2595,7 @@ def exploration_more(runner: Runner, s: Session, ctx: dict):
             s.close_overlays()
         s.reload()
         page.locator(CANVAS).wait_for(timeout=60000)
-        pinned = page.locator(".graph-pinned-badge").inner_text()
+        pinned = page.locator(".graph-counts-pins").first.text_content() or ""
         r.info["pinned_after_reload"] = pinned
         r.expect(re.search(r"\b1\b", pinned), f"pins not reset to the seed on reload: {pinned!r}")
 
@@ -2525,9 +2609,9 @@ def exploration_more(runner: Runner, s: Session, ctx: dict):
         if not r.expect(wait_range(s, start), "range did not load"):
             return
         probe = """() => ({sel: document.querySelector('.graph-list-select[aria-current=true]')?.innerText,
-          pinned: document.querySelector('.graph-pinned-badge')?.innerText,
+          pinned: document.querySelector('.graph-counts-pins')?.textContent,
           counts: document.querySelector('.graph-counts')?.innerText,
-          modes: [...document.querySelectorAll('.graph-segmented button[aria-pressed=true]')]
+          modes: [...document.querySelectorAll('.graph-segmented [role=radio][aria-checked=true]')]
                    .map((b) => b.innerText)})"""
         before = page.evaluate(probe)
         mark = s.mark()
@@ -2733,7 +2817,13 @@ def run_signed_in(runner: Runner, v: Variant):
             detail,
             ".paper-actions a, .paper-actions button, .cd-remove",
         )
-        last_action_check(runner, s, "settings-last-button", "/settings", ".app-main button")
+        # Phones open Settings on the section index (links); wide screens list every section.
+        last_action_check(
+            runner, s, "settings-last-button", "/settings", ".app-main button, .app-main a[href]"
+        )
+        last_action_check(
+            runner, s, "settings-delete-button", "/settings#delete-account", ".app-main button"
+        )
         dialog_checks(runner, s)
         long_data_checks(runner, s)
         graph_layout_checks(runner, s)
