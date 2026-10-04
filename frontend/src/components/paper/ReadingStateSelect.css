@@ -1,0 +1,63 @@
+@layer components {
+  /* Reading-state chip (paper/ReadingStateSelect): a .chip with the state's
+     dot, opening a listbox popover. --control-min keeps 44px on touch. */
+  .state-chip {
+    gap: 7px;
+    padding-inline: 10px 8px;
+    font-weight: 400;
+  }
+  .state-chip .chip-caret {
+    color: var(--color-text-muted);
+  }
+  .state-chip-label {
+    white-space: nowrap;
+  }
+  /* Saving: still focusable, so focus is not lost when the popover closes. */
+  .state-chip[aria-disabled="true"] {
+    cursor: progress;
+    opacity: 0.7;
+  }
+  button.state-chip[aria-disabled="true"]:hover {
+    background: var(--color-surface);
+  }
+
+  /* Decorative mark; the label beside it names the state. */
+  .state-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    /* Neutral states: muted ink, not --color-state-none (a 1.6:1 track
+       colour that all but vanishes on the chip and the selected option). */
+    background: var(--color-text-muted);
+  }
+  .state-dot--to_read {
+    background: var(--color-state-toread);
+  }
+  .state-dot--reading {
+    background: var(--color-state-reading);
+  }
+  .state-dot--read {
+    background: var(--color-state-read);
+  }
+  .state-dot--important {
+    background: var(--color-danger);
+  }
+  /* No state yet: an empty ring. */
+  .state-dot--none {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--color-text-muted);
+  }
+
+  .reading-state-popover {
+    min-width: 12rem;
+    padding: 6px;
+  }
+  .state-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+}

@@ -140,7 +140,10 @@ describe("CollectionDetailPage", () => {
   it("exposes a reading-state selector on each paper row", async () => {
     renderPage();
     await screen.findByText("Attention Is All You Need");
-    expect(screen.getByTestId("reading-state-select")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reading state: No state" })).toHaveAttribute(
+      "data-testid",
+      "reading-state-select",
+    );
   });
 });
 
@@ -545,8 +548,10 @@ it("reads each row's reading state and tags from the list response, not per-row 
   await screen.findByText("Row paper 29");
   const selects = screen.getAllByTestId("reading-state-select");
   expect(selects).toHaveLength(30);
-  expect(selects[3]).toHaveValue("reading");
-  expect(selects[0]).toHaveValue("");
+  expect(selects[3]).toHaveAccessibleName("Reading state: Reading");
+  expect(selects[3]).toHaveAttribute("data-state", "reading");
+  expect(selects[0]).toHaveAccessibleName("Reading state: No state");
+  expect(selects[0]).toHaveAttribute("data-state", "none");
   expect(screen.getByText("seminal")).toBeInTheDocument();
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(paperApi.getStates).not.toHaveBeenCalled();
@@ -576,7 +581,7 @@ it("keeps a state saved while a list refetch was in flight, and still takes newe
   vi.mocked(paperApi.getStates).mockClear();
   renderPage();
   const select = await screen.findByTestId("reading-state-select");
-  expect(select).toHaveValue("");
+  expect(select).toHaveAttribute("data-state", "none");
 
   const previous = vi.mocked(api.get).getMockImplementation()!;
   let releaseList: (() => void) | undefined;
@@ -592,13 +597,16 @@ it("keeps a state saved while a list refetch was in flight, and still takes newe
     await waitFor(() => expect(releaseList).toBeDefined());
     await new Promise((resolve) => setTimeout(resolve, 5));
     vi.mocked(paperApi.setState).mockResolvedValue({ paper_canonical_key: key, state: "read" });
-    await userEvent.setup().selectOptions(select, "read");
-    await waitFor(() => expect(select).toHaveValue("read"));
+    const user = userEvent.setup();
+    await user.click(select);
+    await user.click(screen.getByRole("option", { name: "Read" }));
+    await waitFor(() => expect(select).toHaveAttribute("data-state", "read"));
+    await waitFor(() => expect(select).not.toHaveAttribute("aria-disabled"));
 
     // The older list response must not put the pre-save state back.
     await act(async () => { releaseList!(); });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByTestId("reading-state-select")).toHaveValue("read");
+    expect(screen.getByTestId("reading-state-select")).toHaveAccessibleName("Reading state: Read");
   } finally {
     vi.mocked(api.get).mockImplementation(previous);
   }
@@ -608,6 +616,8 @@ it("keeps a state saved while a list refetch was in flight, and still takes newe
   paperRows.current = [row("important")];
   act(() => focusManager.setFocused(false));
   act(() => focusManager.setFocused(true));
-  await waitFor(() => expect(screen.getByTestId("reading-state-select")).toHaveValue("important"));
+  await waitFor(() =>
+    expect(screen.getByTestId("reading-state-select")).toHaveAccessibleName("Reading state: Important"),
+  );
   expect(paperApi.getStates).not.toHaveBeenCalled();
 });

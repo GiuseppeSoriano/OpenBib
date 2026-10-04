@@ -65,7 +65,11 @@ vi.mock("@/lib/api", () => ({
     put: vi.fn(),
     delete: vi.fn(),
   },
-  papers: { getDetail: vi.fn(() => Promise.resolve(detailState.current)) },
+  papers: {
+    getDetail: vi.fn(() => Promise.resolve(detailState.current)),
+    getStates: vi.fn(() => Promise.resolve([])),
+    setState: vi.fn((key: string, state: string) => Promise.resolve({ paper_canonical_key: key, state })),
+  },
   library: {
     listKeys: vi.fn(() => Promise.resolve(libState.keys)),
     getEntry: vi.fn(() => Promise.resolve(libState.entry)),
@@ -186,6 +190,28 @@ describe("PaperDetailsPanel — dialog accessibility", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("sets the reading state from a popover that closes alone on Escape", async () => {
+    testAuth.authenticated = true;
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<PaperDetailsPanel paperKey="doi:10.1/panel" onClose={onClose} />);
+
+    const chip = await screen.findByRole("button", { name: "Reading state: No state" });
+    await user.click(chip);
+    expect(screen.getByRole("listbox", { name: "Reading state" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(chip).toHaveFocus();
+
+    await user.click(chip);
+    await user.click(screen.getByRole("option", { name: "To read" }));
+    expect(papers.setState).toHaveBeenCalledWith("doi:10.1/panel", "to_read");
+    await waitFor(() => expect(chip).toHaveAccessibleName("Reading state: To read"));
+    expect(chip).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not close on Escape while a note draft is being typed", async () => {

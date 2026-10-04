@@ -37,6 +37,9 @@ export interface PopoverProps {
   initialFocusRef?: RefObject<HTMLElement>;
   className?: string;
   testId?: string;
+  /** Scroll the page (or the enclosing panel) so the opened surface is in
+   *  view, above the phone tab bar: for triggers that sit low in a list. */
+  reveal?: boolean;
   /** Content; receives close(), which returns focus to the trigger. */
   children: ReactNode | ((close: () => void) => ReactNode);
 }
@@ -58,6 +61,7 @@ export default function Popover({
   initialFocusRef,
   className,
   testId,
+  reveal = false,
   children,
 }: PopoverProps) {
   const [openState, setOpenState] = useState(false);
@@ -92,7 +96,9 @@ export default function Popover({
     if (!open || !surface) return;
     const target = initialFocusRef?.current ?? tabbableIn(surface)[0] ?? surface;
     target.focus({ preventScroll: true });
-  }, [open, initialFocusRef]);
+    // "nearest" honours the root's scroll-padding (the tab bar clearance).
+    if (reveal) surface.scrollIntoView?.({ block: "nearest" });
+  }, [open, initialFocusRef, reveal]);
 
   // Same edge handling as ui/Menu, through its own custom property.
   useLayoutEffect(() => {

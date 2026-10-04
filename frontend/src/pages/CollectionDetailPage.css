@@ -81,14 +81,6 @@
     margin-left: 8px;
     margin-right: var(--space-xs);
   }
-  /* Compact on wide screens only: phones keep the 16px input size so iOS
-     does not zoom on focus. */
-  @media (min-width: 640px) {
-    .cd-state .input {
-      font-size: var(--text-sm);
-      padding-block: 0.25rem;
-    }
-  }
 
   .cd-remove {
     margin-left: auto;

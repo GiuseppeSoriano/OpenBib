@@ -295,8 +295,4 @@
     resize: vertical;
     font-family: inherit;
   }
-
-  .reading-state-select {
-    max-width: 220px;
-  }
 }
