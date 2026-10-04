@@ -32,6 +32,7 @@
     "settings": "Settings",
     "signIn": "Sign in",
     "logout": "Logout",
+    "signOut": "Sign out",
     "contribute": "Open source · Contribute on GitHub",
     "home": "Home",
     "graph": "Citation graph"
@@ -63,7 +64,7 @@
     "themeToLight": "Switch to the light theme"
   },
   "auth": {
-    "logoutFailed": "Logout could not be completed. Your session is still active; please try again.",
+    "logoutFailed": "Sign-out could not be completed. Your session is still active; please try again.",
     "welcomeBack": "Welcome back",
     "signInSubtitle": "Sign in to your OpenBib account",
     "email": "Email",
@@ -531,17 +532,78 @@
     "canvasLabelSeed": "Citation graph of “{{title}}” with {{nodes, number}} papers and {{edges, number}} links. Use the paper list to explore with a keyboard or screen reader."
   },
   "landing": {
+    "eyebrow": "Open-source reference manager",
     "tagline": "Discover, organize, and explore research papers",
-    "lede": "A reference tool for working with the scholarly literature, built on Semantic Scholar.",
-    "featuresTitle": "What OpenBib does",
+    "lede": "Search the scholarly literature, keep what matters in a personal library, and follow the citations that connect it.",
     "searchPlaceholder": "Search papers by title, author, DOI…",
+    "examplesLabel": "Try",
     "hint": "Free to explore — no account needed. Sign up to build your library.",
-    "featureSearchTitle": "Paper search",
-    "featureSearchDesc": "Query by title, author, DOI or keyword, then filter by year or open access.",
-    "featureGraphTitle": "Citation graph",
-    "featureGraphDesc": "Follow who cites a paper and whom it cites, in ranked ranges you can page through.",
-    "featureLibraryTitle": "Personal library",
-    "featureLibraryDesc": "Save papers, group them into collections, and add notes, tags and a reading state."
+    "haveAccount": "Already have an account?",
+    "featuresTitle": "What OpenBib does",
+    "featuresLede": "From a first search to an organized reading list, in one workspace.",
+    "features": {
+      "search": {
+        "title": "Search the literature",
+        "desc": "Query Semantic Scholar by title, author, DOI or keyword. Filter by year or open access, sort by citations, and copy a formatted reference."
+      },
+      "library": {
+        "title": "Library and reading states",
+        "desc": "Save a paper once, then keep notes, tags and a reading state for it: to read, reading or read."
+      },
+      "collections": {
+        "title": "Collections and sharing",
+        "desc": "Group papers into collections, invite editors, or share a read-only link that opens without an account."
+      },
+      "graph": {
+        "title": "Citation graph",
+        "desc": "See who cites a paper and what it cites, in ranked ranges of 30. Pin the papers worth keeping and explore from any of them."
+      },
+      "import": {
+        "title": "Import by identifier",
+        "desc": "Paste DOIs, DOI links or arXiv IDs, one per line, and OpenBib looks each one up and adds it to a collection."
+      },
+      "zotero": {
+        "title": "Zotero sync and export",
+        "desc": "Push a collection or your whole library to Zotero, and download a copy of your data whenever you like."
+      }
+    },
+    "howTitle": "How it works",
+    "steps": {
+      "search": {
+        "title": "Search",
+        "desc": "Start from a topic, an author or a DOI. Results, details and citation graphs need no account."
+      },
+      "save": {
+        "title": "Save and organize",
+        "desc": "Create a free account to keep papers in your library and sort them into collections."
+      },
+      "explore": {
+        "title": "Explore and share",
+        "desc": "Follow the citation graph, share a collection by link, or send it to Zotero."
+      }
+    },
+    "trustTitle": "Built in the open",
+    "trust": {
+      "source": {
+        "title": "Semantic Scholar data",
+        "desc": "Metadata, references and citations from one scholarly source, deduplicated before display."
+      },
+      "openSource": {
+        "title": "Open source",
+        "desc": "MIT licensed. Read the code, run your own instance, or contribute."
+      },
+      "privacy": {
+        "title": "No tracking",
+        "desc": "No analytics, advertising tags or third-party trackers."
+      },
+      "yourData": {
+        "title": "Your data stays yours",
+        "desc": "Export a full copy or delete your account at any time from Settings."
+      }
+    },
+    "ctaTitle": "Start your reading list",
+    "ctaText": "A free account keeps your library, notes and collections together, on every device.",
+    "ctaSearch": "Search papers"
   },
   "zotero": {
     "title": "Zotero",

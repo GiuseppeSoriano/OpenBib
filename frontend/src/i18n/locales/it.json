@@ -32,6 +32,7 @@
     "settings": "Impostazioni",
     "signIn": "Accedi",
     "logout": "Esci",
+    "signOut": "Esci",
     "contribute": "Open source · Contribuisci su GitHub",
     "home": "Home",
     "graph": "Grafo delle citazioni"
@@ -531,17 +532,78 @@
     "canvasLabelSeed": "Grafo delle citazioni di “{{title}}” con {{nodes, number}} articoli e {{edges, number}} collegamenti. Usa l’elenco degli articoli per esplorarlo con tastiera o lettore di schermo."
   },
   "landing": {
+    "eyebrow": "Gestore di bibliografia open source",
     "tagline": "Scopri, organizza ed esplora articoli scientifici",
-    "lede": "Uno strumento di consultazione per lavorare con la letteratura scientifica, basato su Semantic Scholar.",
-    "featuresTitle": "Cosa fa OpenBib",
+    "lede": "Cerca nella letteratura scientifica, conserva ciò che conta in una libreria personale e segui le citazioni che collegano gli articoli.",
     "searchPlaceholder": "Cerca articoli per titolo, autore, DOI…",
+    "examplesLabel": "Prova",
     "hint": "Esplora liberamente — nessun account richiesto. Registrati per costruire la tua libreria.",
-    "featureSearchTitle": "Ricerca di articoli",
-    "featureSearchDesc": "Cerca per titolo, autore, DOI o parola chiave, poi filtra per anno o accesso aperto.",
-    "featureGraphTitle": "Grafo delle citazioni",
-    "featureGraphDesc": "Segui chi cita un articolo e chi viene citato, in intervalli ordinati da sfogliare.",
-    "featureLibraryTitle": "Libreria personale",
-    "featureLibraryDesc": "Salva articoli, raggruppali in raccolte e aggiungi note, tag e uno stato di lettura."
+    "haveAccount": "Hai già un account?",
+    "featuresTitle": "Cosa fa OpenBib",
+    "featuresLede": "Dalla prima ricerca a un elenco di letture ordinato, in un unico spazio di lavoro.",
+    "features": {
+      "search": {
+        "title": "Cerca nella letteratura",
+        "desc": "Interroga Semantic Scholar per titolo, autore, DOI o parola chiave. Filtra per anno o accesso aperto, ordina per citazioni e copia un riferimento formattato."
+      },
+      "library": {
+        "title": "Libreria e stati di lettura",
+        "desc": "Salva un articolo una volta sola, poi aggiungi note, tag e uno stato di lettura: da leggere, in lettura o letto."
+      },
+      "collections": {
+        "title": "Raccolte e condivisione",
+        "desc": "Raggruppa gli articoli in raccolte, invita altre persone a modificarle o condividi un link di sola lettura che si apre senza account."
+      },
+      "graph": {
+        "title": "Grafo delle citazioni",
+        "desc": "Scopri chi cita un articolo e cosa cita, in intervalli ordinati di 30. Fissa gli articoli da tenere ed esplora a partire da ciascuno."
+      },
+      "import": {
+        "title": "Importa da identificatori",
+        "desc": "Incolla DOI, link DOI o ID arXiv, uno per riga: OpenBib li cerca uno per uno e li aggiunge a una raccolta."
+      },
+      "zotero": {
+        "title": "Sincronizzazione con Zotero ed esportazione",
+        "desc": "Invia a Zotero una raccolta o l’intera libreria e scarica una copia dei tuoi dati quando vuoi."
+      }
+    },
+    "howTitle": "Come funziona",
+    "steps": {
+      "search": {
+        "title": "Cerca",
+        "desc": "Parti da un argomento, un autore o un DOI. Risultati, dettagli e grafi delle citazioni non richiedono un account."
+      },
+      "save": {
+        "title": "Salva e organizza",
+        "desc": "Crea un account gratuito per conservare gli articoli nella tua libreria e ordinarli in raccolte."
+      },
+      "explore": {
+        "title": "Esplora e condividi",
+        "desc": "Segui il grafo delle citazioni, condividi una raccolta tramite link o inviala a Zotero."
+      }
+    },
+    "trustTitle": "Sviluppato in modo aperto",
+    "trust": {
+      "source": {
+        "title": "Dati di Semantic Scholar",
+        "desc": "Metadati, riferimenti e citazioni da un’unica fonte scientifica, deduplicati prima di essere mostrati."
+      },
+      "openSource": {
+        "title": "Open source",
+        "desc": "Licenza MIT. Leggi il codice, avvia una tua istanza o contribuisci."
+      },
+      "privacy": {
+        "title": "Nessun tracciamento",
+        "desc": "Nessuno strumento di analisi, tag pubblicitari o tracker di terze parti."
+      },
+      "yourData": {
+        "title": "I tuoi dati restano tuoi",
+        "desc": "Esporta una copia completa o elimina il tuo account in qualsiasi momento dalle Impostazioni."
+      }
+    },
+    "ctaTitle": "Inizia il tuo elenco di letture",
+    "ctaText": "Un account gratuito tiene insieme libreria, note e raccolte, su ogni dispositivo.",
+    "ctaSearch": "Cerca articoli"
   },
   "zotero": {
     "title": "Zotero",
