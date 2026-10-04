@@ -1,12 +1,12 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, FolderOpen, LayoutDashboard, Search } from "lucide-react";
+import { FolderOpen, LayoutDashboard, LibraryBig, Search } from "lucide-react";
 
 const TABS = [
-  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", end: true },
+  { to: "/", icon: LayoutDashboard, labelKey: "nav.home", end: true },
   { to: "/search", icon: Search, labelKey: "nav.search", end: false },
-  { to: "/collections", icon: FolderOpen, labelKey: "nav.collections", end: true },
-  { to: "/library", icon: BookMarked, labelKey: "nav.library", end: false },
+  { to: "/library", icon: LibraryBig, labelKey: "nav.library", end: false },
+  { to: "/collections", icon: FolderOpen, labelKey: "nav.collections", end: false },
 ] as const;
 
 /** Bottom tab bar — the primary navigation on phones (<640px). */
@@ -25,7 +25,7 @@ export default function MobileTabBar() {
           replace={(to === "/search" && location.pathname === "/search") || undefined}
           className={({ isActive }) => `tabbar-link ${isActive ? "tabbar-link--active" : ""}`}
         >
-          <Icon size={20} />
+          <Icon size={20} aria-hidden="true" />
           <span>{t(labelKey)}</span>
         </NavLink>
       ))}

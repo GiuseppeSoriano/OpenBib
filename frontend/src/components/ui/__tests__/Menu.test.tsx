@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import Menu, { menuShift } from "@/components/ui/Menu";
+import Menu, { menuMaxHeight, menuShift } from "@/components/ui/Menu";
 
 function rect(x: number, width: number): DOMRect {
   return { x, y: 0, left: x, right: x + width, top: 0, bottom: 40, width, height: 40, toJSON: () => ({}) };
@@ -21,6 +21,22 @@ describe("menuShift", () => {
 
   it("prefers the left edge when the popover is as wide as the viewport", () => {
     expect(menuShift(81, 471, 390)).toBe(-81);
+  });
+});
+
+describe("menuMaxHeight", () => {
+  it("caps a menu opening upwards to the room above its trigger", () => {
+    // Sidebar account button on a 390px-tall landscape phone.
+    expect(menuMaxHeight(330, 374, 390, "top")).toBe(308);
+  });
+
+  it("caps a menu opening downwards to the room below its trigger", () => {
+    expect(menuMaxHeight(8, 52, 844, "bottom")).toBe(770);
+  });
+
+  it("keeps a usable minimum when there is hardly any room", () => {
+    expect(menuMaxHeight(20, 64, 844, "top")).toBe(120);
+    expect(menuMaxHeight(20, 64, 100, "top")).toBe(68);
   });
 });
 

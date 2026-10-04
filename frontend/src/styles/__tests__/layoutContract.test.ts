@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import tokensCss from "@/styles/tokens.css?raw";
 import indexCss from "@/styles/index.css?raw";
 import navCss from "@/components/nav/nav.css?raw";
+import shellCss from "@/components/shell/shell.css?raw";
 import graphCss from "@/pages/GraphPage.css?raw";
 import graphHeaderCss from "@/components/graph/graph.css?raw";
 import indexHtml from "../../../index.html?raw";
@@ -38,7 +39,7 @@ function declarations(css: string, selector: string): string {
     .join(" ");
 }
 
-const sources = { tokensCss, indexCss, navCss, graphCss, graphHeaderCss, indexHtml };
+const sources = { tokensCss, indexCss, navCss, shellCss, graphCss, graphHeaderCss, indexHtml };
 
 describe("layout contract", () => {
   it("loads every source as raw text", () => {
@@ -52,7 +53,7 @@ describe("layout contract", () => {
     expect(root).toContain("--safe-area-bottom: env(safe-area-inset-bottom, 0px);");
     expect(root).toContain("--bottomnav-clearance: 0px;");
     expect(root).toContain("--touch-target: 44px;");
-    expect(root).toContain("--control-min: 32px;");
+    expect(root).toContain("--control-min: 34px;");
     expect(root).toMatch(/--nav-height: calc\([\d.]+rem \+ \d+px\);/);
     expect(root).toMatch(/--bottomnav-height: calc\([\d.]+rem \+ \d+px\);/);
 
@@ -89,7 +90,7 @@ describe("layout contract", () => {
     expect(declarations(indexCss, ".toast-container")).toContain(
       "bottom: calc(var(--bottomnav-clearance) + var(--space-md));",
     );
-    for (const [name, css] of Object.entries({ indexCss, navCss, graphCss })) {
+    for (const [name, css] of Object.entries({ indexCss, navCss, shellCss, graphCss })) {
       expect(css, name).not.toContain("var(--bottomnav-height)");
     }
   });
@@ -129,6 +130,7 @@ describe("layout contract", () => {
     const targets: [string, string][] = [
       [navCss, ".topnav-iconbtn"],
       [navCss, ".user-menu-btn"],
+      [shellCss, ".topbar-iconbtn"],
       [indexCss, ".theme-toggle"],
       [indexCss, ".panel-header .btn-ghost"],
       [indexCss, ".modal-close"],
@@ -165,10 +167,14 @@ describe("layout contract", () => {
     expect(declarations(navCss, ".topnav")).toContain("container: topnav / inline-size;");
     const nav = squash(navCss);
     // The container is the content box: the viewport minus 2em of padding
-    // below 640px. At 100% text Sign in goes icon-only below a 360px viewport
-    // (327px box = 20.4375em) and the wordmark stays on a 320px one (288px box).
-    expect(nav).toMatch(/@container topnav \(max-width: 20\.4375em\) \{ \.topnav-signin-label \{/);
-    expect(nav).toMatch(/@container topnav \(max-width: 17\.99em\) \{ \.topnav-wordmark \{/);
+    // below 640px. With the Search link added, labels give way in turn so the
+    // bar fits a 320px screen at 100% text: Search on phones, Sign in below a
+    // 390px viewport (356px box = 22.25em), the wordmark below 332px (18.75em).
+    expect(nav).toMatch(/@container topnav \(max-width: 29\.99em\) \{ \.topnav-search-label \{/);
+    expect(nav).toMatch(/@container topnav \(max-width: 22\.25em\) \{ \.topnav-signin-label \{/);
+    expect(nav).toMatch(/@container topnav \(max-width: 18\.75em\) \{ \.topnav-wordmark \{/);
+    expect(declarations(shellCss, ".topbar--mobile")).toContain("container: topbar / inline-size;");
+    expect(squash(shellCss)).toMatch(/@container topbar \(max-width: [\d.]+em\) \{ \.topbar-wordmark \{/);
     expect(nav).not.toContain("@media (max-width: 359px)");
 
     expect(declarations(graphHeaderCss, ".graph-header")).toContain(
@@ -183,5 +189,105 @@ describe("layout contract", () => {
     const seed = declarations(graphHeaderCss, ".graph-title-seed");
     expect(seed).toContain("min-width: 0;");
     expect(seed).toContain("text-overflow: ellipsis;");
+  });
+
+  it("sizes buttons, chips and inputs from the control token", () => {
+    for (const selector of [".btn", ".chip", ".pill", ".input", ".menu-item"]) {
+      expect(declarations(indexCss, selector), selector).toContain(
+        "min-height: var(--control-min);",
+      );
+    }
+    // The compact controls grow to the full target on touch screens.
+    const touch = squash(indexCss);
+    expect(touch).toContain(
+      `@media ${TOUCH_QUERY} { .btn--sm, .btn-quiet { min-height: var(--touch-target); } }`,
+    );
+    expect(touch).toContain(
+      `@media ${TOUCH_QUERY} { .popover-option { min-height: var(--touch-target); } }`,
+    );
+    const chip = declarations(indexCss, ".chip");
+    expect(chip).toContain("max-width: 100%;");
+    expect(chip).not.toContain("white-space: nowrap");
+    // Shell links outside the button classes follow the token too.
+    for (const selector of [".sidebar-recent-link", ".breadcrumb a"]) {
+      expect(declarations(shellCss, selector), selector).toContain("min-height: var(--control-min);");
+    }
+  });
+
+  it("marks the selected segment with more than its fill (non-text 3:1)", () => {
+    for (const selector of ['.segmented button.active', '.segmented button[aria-pressed="true"]', '.segmented button[aria-checked="true"]']) {
+      expect(declarations(indexCss, selector), selector).toContain("box-shadow: inset 0 0 0 1px var(--color-accent);");
+    }
+    expect(declarations(indexCss, ".segmented button")).toContain("color: var(--color-text);");
+  });
+
+  it("sets caps labels in the UI face, also on serif headings", () => {
+    for (const selector of [".label-caps", ".panel-title"]) {
+      expect(declarations(indexCss, selector), selector).toContain("font-family: var(--font-sans);");
+    }
+  });
+
+  it("bounds menus to the viewport height, as a fixed sidebar cannot scroll them into view", () => {
+    const menu = declarations(indexCss, ".menu-popover");
+    expect(menu).toContain("max-height: var(--menu-max-height, calc(100vh - 2 * var(--space-md)));");
+    expect(menu).toContain("overflow-y: auto;");
+    expect(menu).toContain("overscroll-behavior: contain;");
+  });
+
+  it("keeps popovers inside the viewport like menus", () => {
+    const popover = declarations(indexCss, ".popover");
+    expect(popover).toContain("max-width: min(22rem, calc(100vw - 2 * var(--space-md)));");
+    expect(popover).toContain("translate: var(--popover-shift, 0px) 0;");
+  });
+
+  it("zeroes motion under prefers-reduced-motion", () => {
+    expect(squash(tokensCss)).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{ :root \{ --duration-fast: 0ms; --duration-base: 0ms; --duration-slow: 0ms; \} \}/,
+    );
+    expect(squash(indexCss)).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{ \*, \*::before, \*::after \{ animation-duration: 0\.01ms !important;/,
+    );
+  });
+
+  it("reserves the sidebar's width so it never covers the page", () => {
+    const sidebar = declarations(shellCss, ".sidebar");
+    expect(sidebar).toContain("position: fixed;");
+    expect(sidebar).toContain("width: calc(var(--sidebar-width) + env(safe-area-inset-left, 0px));");
+    expect(declarations(shellCss, ".sidebar--rail")).toContain(
+      "width: calc(var(--sidebar-rail-width) + env(safe-area-inset-left, 0px));",
+    );
+    expect(declarations(shellCss, ".app-shell--sidebar")).toContain(
+      "padding-left: calc(var(--sidebar-width) + env(safe-area-inset-left, 0px));",
+    );
+    expect(declarations(shellCss, ".app-shell--rail")).toContain(
+      "padding-left: calc(var(--sidebar-rail-width) + env(safe-area-inset-left, 0px));",
+    );
+    expect(declarations(tokensCss, ":root")).toContain("--sidebar-rail-width: 64px;");
+  });
+
+  it("keeps the top bars sticky at the nav height and zeroes clearances the shell lacks", () => {
+    for (const [css, selector] of [[shellCss, ".topbar"], [navCss, ".topnav"]] as const) {
+      const decls = declarations(css, selector);
+      expect(decls, selector).toContain("position: sticky;");
+      expect(decls, selector).toContain("top: 0;");
+      expect(decls, selector).toMatch(/(min-)?height: var\(--nav-height\);/);
+    }
+    // Visitors have no tab bar; the full-screen graph has no top bar.
+    expect(declarations(navCss, ".app-shell--anon")).toContain("--bottomnav-clearance: 0px;");
+    expect(declarations(navCss, ".app-shell--bare")).toContain("--nav-height: 0px;");
+    expect(declarations(navCss, ".app-shell--no-topbar")).toContain("--nav-height: 0px;");
+    // On the root too: portaled toasts and the html scroll padding read it there.
+    expect(declarations(navCss, ":root:has(.app-shell--anon)")).toContain("--bottomnav-clearance: 0px;");
+    expect(declarations(navCss, ":root:has(.app-shell--bare)")).toContain("--nav-height: 0px;");
+    expect(declarations(navCss, ":root:has(.app-shell--no-topbar)")).toContain("--nav-height: 0px;");
+    expect(declarations(navCss, ".app-main")).not.toContain("padding-top");
+  });
+
+  it("keeps the command palette inside the viewport", () => {
+    const palette = declarations(shellCss, ".palette");
+    expect(palette).toContain("width: min(40rem, 100%);");
+    expect(palette).toContain("max-height: min(32rem, 76dvh);");
+    expect(declarations(shellCss, ".palette-list")).toContain("overflow-y: auto;");
+    expect(declarations(shellCss, ".palette-option")).toContain("min-height: var(--control-min);");
   });
 });

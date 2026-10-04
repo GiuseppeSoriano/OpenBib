@@ -1,6 +1,6 @@
 import { testAuth, mockRefresh } from "@/test/auth-mock";
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import api from "@/lib/api";
 import Layout from "@/components/Layout";
@@ -59,19 +59,36 @@ describe("UserMenu", () => {
     const trigger = await screen.findByTestId("user-menu");
     fireEvent.click(trigger);
 
-    expect(await screen.findByText("me@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Settings/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Logout/ })).toBeInTheDocument();
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("me@example.com")).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Settings/ })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Logout/ })).toBeInTheDocument();
+    // Theme and language moved here from the signed-in header.
+    expect(within(menu).getByRole("group", { name: "Theme" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitemradio", { name: /System/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: /English/ })).toHaveAttribute("aria-checked", "true");
   });
 
   it("closes on Escape", async () => {
     testAuth.authenticated = true;
     renderWithProviders(<Layout />);
 
-    fireEvent.click(await screen.findByTestId("user-menu"));
-    expect(await screen.findByText("me@example.com")).toBeInTheDocument();
+    const trigger = await screen.findByTestId("user-menu");
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByText("me@example.com")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("switches the theme from the account menu", async () => {
+    testAuth.authenticated = true;
+    renderWithProviders(<Layout />);
+    fireEvent.click(await screen.findByTestId("user-menu"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Dark/ }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("openbib.theme")).toBe("dark");
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });
 

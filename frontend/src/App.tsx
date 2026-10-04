@@ -51,15 +51,9 @@ export default function App() {
       <Route path="/confirm-email" element={<ConfirmEmailPage />} />
       <Route path="/legal-review" element={<RequireBasicAuth><LegalReviewPage /></RequireBasicAuth>} />
       <Route element={<Layout />}>
-        {/* Public: search, paper details, graph exploration, collections with read links */}
+        {/* Public: search, paper details, collections with read links */}
         <Route path="/" element={<HomeRoute />} />
         <Route path="/search" element={<SearchPage />} />
-        <Route path="/graph" element={<GraphPage mode="manual" />} />
-        <Route path="/graph/:paperKey" element={<GraphPage mode="paper" />} />
-        <Route
-          path="/graph/collection/:collectionId"
-          element={<GraphPage mode="collection" />}
-        />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
         <Route path="/terms" element={<LegalPage kind="terms" />} />
@@ -82,19 +76,28 @@ export default function App() {
           }
         />
         <Route
-          path="/graph/library"
-          element={
-            <RequireAuth>
-              <GraphPage mode="library" />
-            </RequireAuth>
-          }
-        />
-        <Route
           path="/settings"
           element={
             <RequireBasicAuth>
               <SettingsPage />
             </RequireBasicAuth>
+          }
+        />
+      </Route>
+      {/* The citation graph is a full-screen page: no sidebar, top bar or footer. */}
+      <Route element={<Layout bare />}>
+        <Route path="/graph" element={<GraphPage mode="manual" />} />
+        <Route path="/graph/:paperKey" element={<GraphPage mode="paper" />} />
+        <Route
+          path="/graph/collection/:collectionId"
+          element={<GraphPage mode="collection" />}
+        />
+        <Route
+          path="/graph/library"
+          element={
+            <RequireAuth>
+              <GraphPage mode="library" />
+            </RequireAuth>
           }
         />
       </Route>

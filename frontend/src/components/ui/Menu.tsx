@@ -7,6 +7,8 @@ interface MenuProps {
   buttonAriaLabel?: string;
   buttonTitle?: string;
   align?: "left" | "right";
+  /** Open below the trigger (default) or above it (a trigger at the bottom of the screen). */
+  side?: "bottom" | "top";
   /** Menu content; receives a close() callback when given as a function. */
   children: ReactNode | ((close: () => void) => ReactNode);
   onOpen?: () => void;
@@ -15,6 +17,8 @@ interface MenuProps {
 
 // Space kept between an open menu and the viewport edges.
 const VIEWPORT_GUTTER = 16;
+// Space between the trigger and the menu (CSS: calc(100% + 6px)).
+const MENU_GAP = 6;
 
 /**
  * Horizontal offset (px) that moves a popover at `left`..`right` inside a
@@ -28,6 +32,20 @@ export function menuShift(left: number, right: number, viewportWidth: number): n
   return Math.round(shift);
 }
 
+// A menu never gets shorter than this; below it, it may run off screen.
+const MIN_MENU_HEIGHT = 120;
+
+/**
+ * Height (px) left for a popover opening on `side` of a trigger spanning
+ * `top`..`bottom`, inside a viewport `viewportHeight` tall, minus the gap and
+ * the gutter. A trigger in a fixed sidebar or sticky bar cannot scroll a
+ * taller menu back into view.
+ */
+export function menuMaxHeight(top: number, bottom: number, viewportHeight: number, side: "bottom" | "top"): number {
+  const room = side === "top" ? top - MENU_GAP - VIEWPORT_GUTTER : viewportHeight - bottom - MENU_GAP - VIEWPORT_GUTTER;
+  return Math.round(Math.max(room, Math.min(MIN_MENU_HEIGHT, viewportHeight - 2 * VIEWPORT_GUTTER)));
+}
+
 /**
  * Minimal popover-menu primitive: click-outside + Escape to close,
  * focus returns to the trigger, ARIA menu semantics. The popover is at most
@@ -39,6 +57,7 @@ export default function Menu({
   buttonAriaLabel,
   buttonTitle,
   align = "right",
+  side = "bottom",
   children,
   onOpen,
   testId,
@@ -49,12 +68,17 @@ export default function Menu({
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Anchored to its trigger, a popover near an edge can run off screen. The
-  // offset goes through a custom property (CSSOM, allowed by the strict CSP)
-  // and is measured again when the content (lazy items) or viewport changes.
+  // offset and the height cap go through custom properties (CSSOM, allowed by
+  // the strict CSP) and are measured again when the content (lazy items),
+  // the viewport or the trigger's position changes.
   useLayoutEffect(() => {
     const el = popoverRef.current;
-    if (!open || !el) return;
+    const trigger = buttonRef.current;
+    if (!open || !el || !trigger) return;
     const fit = () => {
+      const anchor = trigger.getBoundingClientRect();
+      const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+      el.style.setProperty("--menu-max-height", `${menuMaxHeight(anchor.top, anchor.bottom, viewportHeight, side)}px`);
       el.style.removeProperty("--menu-shift");
       const rect = el.getBoundingClientRect();
       const shift = menuShift(rect.left, rect.right, document.documentElement.clientWidth);
@@ -64,11 +88,13 @@ export default function Menu({
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     window.addEventListener("resize", fit);
+    window.addEventListener("scroll", fit, { capture: true, passive: true });
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", fit);
+      window.removeEventListener("scroll", fit, { capture: true });
     };
-  }, [open]);
+  }, [open, side]);
 
   useEffect(() => {
     if (!open) return;
@@ -129,7 +155,7 @@ export default function Menu({
         {button}
       </button>
       {open && (
-        <div ref={popoverRef} className={`menu-popover menu-popover--${align}`} role="menu">
+        <div ref={popoverRef} className={`menu-popover menu-popover--${align}${side === "top" ? " menu-popover--up" : ""}`} role="menu">
           {typeof children === "function" ? children(close) : children}
         </div>
       )}

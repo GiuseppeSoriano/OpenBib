@@ -14,3 +14,12 @@ export const PHONE_MAX = 639;
 
 /** Widest viewport where the details Panel is a bottom sheet. */
 export const SHEET_MAX = 767;
+
+/** Phones: the mobile top app bar and the bottom tab bar replace the sidebar. */
+export const PHONE_QUERY = `(max-width: ${PHONE_MAX}px)`;
+
+/** Widest viewport where the sidebar is an icon rail (tablets). */
+export const RAIL_MAX = 1023;
+
+/** Tablets and phones: the sidebar cannot show its labels. */
+export const RAIL_QUERY = `(max-width: ${RAIL_MAX}px)`;

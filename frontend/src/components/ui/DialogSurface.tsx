@@ -42,7 +42,7 @@ const TABBABLE = [
   "[tabindex]",
 ].join(",");
 
-function tabbableIn(root: HTMLElement): HTMLElement[] {
+export function tabbableIn(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter(
     (el) => el.tabIndex >= 0 && !el.closest("[inert], [hidden]"),
   );
