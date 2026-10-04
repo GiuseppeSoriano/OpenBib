@@ -261,6 +261,29 @@
     display: flex;
   }
 
+  /* The account button with a sign-out button beside it (below it in the rail). */
+  .sidebar-account-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .sidebar-account-row .menu-root {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .sidebar--rail .sidebar-account-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sidebar-signout:hover {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+  }
+  .sidebar-signout[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: progress;
+  }
+
   /* The account button: avatar, name and email; opens the user menu. */
   .sidebar-account {
     display: flex;
@@ -303,6 +326,12 @@
   }
   .sidebar-account-email {
     font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  /* Marks the account button as a menu trigger. */
+  .sidebar-account-caret {
+    flex-shrink: 0;
+    margin-left: auto;
     color: var(--color-text-muted);
   }
 

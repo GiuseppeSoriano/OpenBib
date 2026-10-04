@@ -119,6 +119,11 @@
     font-weight: 600;
   }
 
+  /* The account menu's last item: easy to spot, apart from the preferences. */
+  .menu-item--signout {
+    font-weight: 500;
+  }
+
   /* ── Bottom tab bar (phones) ────────────────────────────── */
 
   /* Height = --bottomnav-clearance: the bar plus its own safe-area padding

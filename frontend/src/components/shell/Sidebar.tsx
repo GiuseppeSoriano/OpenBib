@@ -1,8 +1,9 @@
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Settings } from "lucide-react";
+import { LogOut, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings } from "lucide-react";
 import Logo from "@/components/ui/Logo";
 import UserMenu from "@/components/nav/UserMenu";
+import { useSignOut } from "@/components/nav/useSignOut";
 import { PRIMARY_NAV, useCollectionsList, useLibraryCount } from "@/components/shell/navItems";
 import { shortcutLabel } from "@/components/shell/shortcuts";
 import { useRecentSearches } from "@/lib/recentSearches";
@@ -32,6 +33,7 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
   const { data } = useCollectionsList(!rail);
   const collections = Array.isArray(data) ? data : [];
   const recent = useRecentSearches();
+  const { signOut, pending: signingOut } = useSignOut();
   const onSearch = location.pathname === "/search";
   const listed = rail ? [] : collections.slice(0, SIDEBAR_COLLECTIONS);
   // One current page: an open collection listed below takes over from Collections.
@@ -148,7 +150,23 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
           <Settings size={16} aria-hidden="true" />
           {label(t("nav.settings"))}
         </NavLink>
-        <UserMenu variant="sidebar" rail={rail} />
+        {/* Signing out is one visible click away, not only inside the account menu. */}
+        <div className="sidebar-account-row">
+          <UserMenu variant="sidebar" rail={rail} />
+          <button
+            type="button"
+            className="sidebar-iconbtn sidebar-signout"
+            // aria-disabled, not disabled: focus stays here if sign-out fails.
+            onClick={() => { if (!signingOut) void signOut(); }}
+            aria-disabled={signingOut || undefined}
+            aria-busy={signingOut || undefined}
+            aria-label={t("nav.signOut")}
+            title={t("nav.signOut")}
+            data-testid="sidebar-signout"
+          >
+            <LogOut size={16} aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </aside>
   );

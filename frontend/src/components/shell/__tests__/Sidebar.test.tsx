@@ -116,6 +116,7 @@ describe("Sidebar", () => {
     const account = await within(sidebar).findByTestId("user-menu");
     expect(account).toHaveTextContent("Ada");
     expect(account).toHaveTextContent("ada@example.com");
+    expect(within(sidebar).getByRole("button", { name: "Sign out" })).toHaveAttribute("title", "Sign out");
     fireEvent.click(account);
     expect(screen.getByRole("menu")).toHaveClass("menu-popover--up");
   });

@@ -1,10 +1,10 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Check, LogOut, Settings } from "lucide-react";
+import { Check, ChevronsUpDown, LogOut, Settings } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, type ThemePreference } from "@/contexts/ThemeContext";
-import { useToast } from "@/components/ui/Toast";
 import Menu from "@/components/ui/Menu";
+import { useSignOut } from "@/components/nav/useSignOut";
 
 const THEMES: { value: ThemePreference; labelKey: string }[] = [
   { value: "light", labelKey: "settings.themeLight" },
@@ -24,13 +24,16 @@ interface UserMenuProps {
   rail?: boolean;
 }
 
-/** Account button opening the user menu: settings, theme, language and logout. */
+/**
+ * Account button opening the user menu: theme, language and sign out. On
+ * phones (no sidebar) it also leads to Settings; the sidebar lists Settings
+ * itself, so its account menu does not repeat it.
+ */
 export default function UserMenu({ variant = "avatar", rail = false }: UserMenuProps) {
   const { t, i18n } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { preference, setPreference } = useTheme();
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const { signOut } = useSignOut();
 
   if (!user) return null;
 
@@ -48,6 +51,7 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
           {user.display_name && <span className="sidebar-account-email">{user.email}</span>}
         </span>
       )}
+      {!rail && <ChevronsUpDown size={14} className="sidebar-account-caret" aria-hidden="true" />}
     </>
   ) : (
     <span className="user-avatar">{initial}</span>
@@ -70,11 +74,15 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
             <span className="menu-header-email">{user.email}</span>
           </div>
           <div className="menu-separator" />
-          <Link to="/settings" role="menuitem" className="menu-item" onClick={close}>
-            <Settings size={15} />
-            {t("nav.settings")}
-          </Link>
-          <div className="menu-separator" />
+          {!inSidebar && (
+            <>
+              <Link to="/settings" role="menuitem" className="menu-item" onClick={close}>
+                <Settings size={15} aria-hidden="true" />
+                {t("nav.settings")}
+              </Link>
+              <div className="menu-separator" />
+            </>
+          )}
           <div role="group" aria-label={t("common.theme")}>
             <div className="menu-group-label label-caps" aria-hidden="true">{t("common.theme")}</div>
             {THEMES.map(({ value, labelKey }) => (
@@ -118,14 +126,14 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
           <button
             type="button"
             role="menuitem"
-            className="menu-item menu-item--danger"
-            onClick={async () => {
+            className="menu-item menu-item--danger menu-item--signout"
+            onClick={() => {
               close();
-              try { await logout(); navigate("/"); } catch { toast(t("auth.logoutFailed"), "error"); }
+              void signOut();
             }}
           >
-            <LogOut size={15} />
-            {t("nav.logout")}
+            <LogOut size={15} aria-hidden="true" />
+            {t("nav.signOut")}
           </button>
         </>
       )}
