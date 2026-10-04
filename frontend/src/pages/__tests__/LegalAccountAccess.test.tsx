@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "@/App";
 import api, { zotero } from "@/lib/api";
 import { renderWithProviders } from "@/test/utils";
@@ -23,6 +23,9 @@ describe("account access before legal acceptance", () => {
     renderWithProviders(<App />, { route: "/settings" });
     const password = await screen.findByLabelText("Password to confirm");
     expect(screen.queryByTestId("zotero-section")).toBeNull();
+    const index = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(within(index).queryByRole("link", { name: "Integrations" })).toBeNull();
+    expect(within(index).getByRole("link", { name: "Your data" })).toHaveAttribute("href", "/settings#your-data");
     expect(zotero.getStatus).not.toHaveBeenCalled();
     fireEvent.change(password, { target: { value: "a sufficiently long password" } });
     fireEvent.click(screen.getByRole("button", { name: "Export my data" }));
