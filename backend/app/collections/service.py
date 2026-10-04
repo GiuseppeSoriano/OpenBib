@@ -119,6 +119,8 @@ async def update_collection(
         coll.description = data.description
     db.add(coll)
     await db.flush()
+    # The SQL now() above leaves the attribute expired; load it for the response.
+    await db.refresh(coll, attribute_names=["updated_at"])
     return coll
 
 

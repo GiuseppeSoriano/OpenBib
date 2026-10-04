@@ -28,6 +28,7 @@ class CollectionRead(BaseModel):
     description: str | None
     revision: int
     created_at: datetime
+    updated_at: datetime
     paper_count: int = 0
     is_owner: bool = False
     can_edit: bool = False

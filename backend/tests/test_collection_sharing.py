@@ -161,9 +161,10 @@ async def test_members_contract_lists_imports_and_revision(db, client_app):
         actual_editor.email = "changed@example.com"
         await db.commit()
         assert (await c.get(base, headers=auth["editor"])).json()["can_edit"]
-        assert (
-            await c.patch(base, json={"revision": 1, "name": "New", "description": None})
-        ).status_code == 200
+        patched = await c.patch(base, json={"revision": 1, "name": "New", "description": None})
+        assert patched.status_code == 200 and patched.json()["updated_at"]
+        listed = (await c.get("/api/v1/collections")).json()
+        assert listed and all(row["updated_at"] for row in listed)
         assert (await c.patch(base, json={"revision": 1, "name": "Stale"})).status_code == 409
         assert (
             await c.patch(base, json={"revision": 2, "visibility": "public"})
