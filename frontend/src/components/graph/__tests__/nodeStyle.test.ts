@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { graphDotClass, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
+import { graphDotClass, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
 import type { GraphNode, PaperMetadata } from "@/types";
 
 const colors: NodeStyleColors = {
@@ -61,5 +61,15 @@ describe("nodeStyle", () => {
     expect(graphDotClass(true, true, false)).toBe("graph-dot graph-dot--pinned");
     expect(graphDotClass(false, true, true)).toBe("graph-dot graph-dot--saved graph-dot--selected");
     expect(graphDotClass(false, false, false)).toBe("graph-dot");
+  });
+
+  it("scales the radius by citations within 4–14 graph units", () => {
+    expect(nodeRadius(null)).toBe(4);
+    expect(nodeRadius(0)).toBe(4);
+    expect(nodeRadius(99)).toBeCloseTo(8);
+    expect(nodeRadius(9_999)).toBeCloseTo(12);
+    expect(nodeRadius(99_999)).toBeCloseTo(14);
+    expect(nodeRadius(5_000_000)).toBe(14);
+    expect(nodeRadius(10)).toBeLessThan(nodeRadius(1_000));
   });
 });

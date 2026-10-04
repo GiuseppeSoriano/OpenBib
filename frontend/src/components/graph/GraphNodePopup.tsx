@@ -10,14 +10,17 @@ interface PinToggleProps {
   title: string;
   onToggle: () => void;
   className?: string;
+  /** Glyph size; the quiet row toggle uses a smaller pin. */
+  size?: number;
 }
 
 /**
  * Pin toggle with a constant accessible name ("Pin “T”"): only aria-pressed
  * and the icon change, so screen readers announce one state. Pressed fills
- * the pin in the accent, like the pinned node's filled circle on the canvas.
+ * the pin, and the quiet row variant sits on a solid accent disc, like the
+ * pinned node's filled circle on the canvas.
  */
-export function PinToggle({ pinned, title, onToggle, className = "" }: PinToggleProps) {
+export function PinToggle({ pinned, title, onToggle, className = "", size = 16 }: PinToggleProps) {
   const { t } = useTranslation();
   return (
     <button
@@ -27,7 +30,7 @@ export function PinToggle({ pinned, title, onToggle, className = "" }: PinToggle
       aria-label={t("graph.pinPaper", { title })}
       onClick={onToggle}
     >
-      <Pin size={16} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
+      <Pin size={size} fill={pinned ? "currentColor" : "none"} aria-hidden="true" />
     </button>
   );
 }

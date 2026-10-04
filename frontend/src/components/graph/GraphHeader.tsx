@@ -18,6 +18,8 @@ interface GraphHeaderProps {
   onFit?: () => void;
   papersOpen?: boolean;
   papersListId?: string;
+  /** The Papers button, where focus returns when the panel closes itself. */
+  papersTriggerRef?: Ref<HTMLButtonElement>;
   onTogglePapers?: () => void;
   controlsOpen?: boolean;
   controlsTriggerRef?: Ref<HTMLButtonElement>;
@@ -44,6 +46,7 @@ export default function GraphHeader({
   onFit,
   papersOpen = false,
   papersListId,
+  papersTriggerRef,
   onTogglePapers,
   controlsOpen = false,
   controlsTriggerRef,
@@ -100,6 +103,7 @@ export default function GraphHeader({
             {!compact && (
               <>
                 <button
+                  ref={papersTriggerRef}
                   type="button"
                   className="graph-view-btn graph-papers-btn"
                   aria-expanded={papersOpen}

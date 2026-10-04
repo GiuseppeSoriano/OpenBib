@@ -55,3 +55,17 @@ export function graphDotClass(pinned: boolean, saved: boolean, selected: boolean
   if (selected) className += " graph-dot--selected";
   return className;
 }
+
+/** Node radius bounds, in graph units (screen pixels at zoom 1). */
+export const NODE_RADIUS_MIN = 4;
+export const NODE_RADIUS_MAX = 14;
+
+/**
+ * Node radius by citations, on a log scale held to 4–14 units: an
+ * uncited paper is 4, 100 citations about 8, 100,000 or more the maximum,
+ * so one heavily cited paper never dwarfs a range.
+ */
+export function nodeRadius(citations: number | null | undefined): number {
+  const decades = Math.log10(1 + Math.max(0, citations ?? 0));
+  return NODE_RADIUS_MIN + (NODE_RADIUS_MAX - NODE_RADIUS_MIN) * Math.min(1, decades / 5);
+}

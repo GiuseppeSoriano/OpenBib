@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import CitationGraph, { type CitationGraphHandle } from "@/components/graph/CitationGraph";
 import { truncateLabel } from "@/components/graph/paperText";
 import type { ForceGraphData, ForceNode } from "@/components/graph/mergeGraph";
@@ -15,6 +15,7 @@ const engine = vi.hoisted(() => ({
   reheat: vi.fn(),
   centerAt: vi.fn(),
   zoom: vi.fn((k?: number) => (k === undefined ? 1 : undefined)),
+  zoomToFit: vi.fn(),
 }));
 
 vi.mock("react-force-graph-2d", async () => {
@@ -27,7 +28,7 @@ vi.mock("react-force-graph-2d", async () => {
         d3ReheatSimulation: engine.reheat,
         centerAt: engine.centerAt,
         zoom: engine.zoom,
-        zoomToFit: vi.fn(),
+        zoomToFit: engine.zoomToFit,
       }));
       return <div data-testid="force-graph-stub" />;
     }),
@@ -104,6 +105,7 @@ describe("CitationGraph", () => {
   beforeEach(() => {
     engine.reheat.mockClear();
     engine.centerAt.mockClear();
+    engine.zoomToFit.mockClear();
   });
 
   it("exposes the canvas as one labelled image", () => {
@@ -185,8 +187,9 @@ describe("CitationGraph", () => {
       scale: vi.fn(),
       strokeText: vi.fn(),
       fillText: vi.fn(),
+      measureText: vi.fn(() => ({ width: 40 })),
     };
-    engine.props.nodeCanvasObject(node, ctx, 2);
+    engine.props.onRenderFramePost(ctx, 2);
     expect(ctx.fillText).toHaveBeenCalledWith(label, expect.any(Number), expect.any(Number));
   });
 
@@ -198,7 +201,9 @@ describe("CitationGraph", () => {
     style.setProperty("--color-state-toread-text", "#7a4d11");
     style.setProperty("--color-text", "#1a1e1d");
     try {
-      const data: ForceGraphData = { nodes: [forceNode("a", 0, 0), forceNode("b", 5, 5)], links: [] };
+      // Far apart: an always-labelled node whose label would overlap the
+      // selection's is skipped like a pinned one.
+      const data: ForceGraphData = { nodes: [forceNode("a", 0, 0), forceNode("b", 0, 300)], links: [] };
       render(
         <ThemeProvider>
           <CitationGraph
@@ -228,6 +233,7 @@ describe("CitationGraph", () => {
         strokeText: vi.fn(),
         stroke: vi.fn(() => strokes.push({ style: paint.strokeStyle, alpha: paint.globalAlpha })),
         fillText: vi.fn(() => labels.push(paint.fillStyle)),
+        measureText: vi.fn(() => ({ width: 40 })),
       });
       engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
       expect(strokes[0]).toEqual({ style: "#8f5b14", alpha: 0.18 });
@@ -235,6 +241,9 @@ describe("CitationGraph", () => {
       // Then the canvas-coloured gap between the fill and the ring.
       expect(strokes[2]).toEqual({ style: "#f8faf9", alpha: 1 });
       engine.props.nodeCanvasObject(data.nodes[1], ctx, 1);
+      // Labels come after every node: the selection's first, in its amber.
+      expect(labels).toEqual([]);
+      engine.props.onRenderFramePost(ctx, 1);
       expect(labels).toEqual(["#7a4d11", "#1a1e1d"]);
       // The selected node keeps its own fill inside the ring, like the others.
       expect(fills).toEqual(["#a0a8a4", "#a0a8a4"]);
@@ -279,8 +288,9 @@ describe("CitationGraph", () => {
         scale: vi.fn(),
         strokeText: vi.fn(),
         fillText: vi.fn(() => labels.push(paint.fillStyle)),
+        measureText: vi.fn(() => ({ width: 40 })),
       });
-      engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
+      engine.props.onRenderFramePost(ctx, 1);
 
       // ThemeProvider writes data-theme after its children render: the
       // tokens are only read once the attribute itself has changed.
@@ -289,10 +299,135 @@ describe("CitationGraph", () => {
         root.style.setProperty("--color-text", "#e9efec");
         root.dataset.theme = next;
       });
-      engine.props.nodeCanvasObject(data.nodes[0], ctx, 1);
+      engine.props.onRenderFramePost(ctx, 1);
       expect(labels).toEqual(["#1a1e1d", "#e9efec"]);
     } finally {
       root.style.removeProperty("--color-text");
+    }
+  });
+
+  it("labels pinned, selected and hovered papers always, others only zoomed in and never overlapping", () => {
+    const data: ForceGraphData = {
+      nodes: [forceNode("a", 0, 0), forceNode("b", 2, 1), forceNode("c", 300, 0), forceNode("p", 0, 400), forceNode("s", 0, -400)],
+      links: [],
+    };
+    data.nodes[1]!.node.selected_version.cited_by_count = 50;
+    render(
+      <ThemeProvider>
+        <CitationGraph
+          data={data}
+          selectedId="s"
+          pinnedIds={new Set(["p"])}
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+    const labels: string[] = [];
+    const ctx = {
+      fillStyle: "",
+      strokeStyle: "",
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((label: string) => labels.push(label)),
+      measureText: vi.fn(() => ({ width: 60 })),
+    };
+    // Zoomed out: the selection and the pin only.
+    engine.props.onRenderFramePost(ctx, 1);
+    expect(labels).toEqual(["Title s", "Title p"]);
+
+    // A hovered paper joins them at any zoom.
+    labels.length = 0;
+    act(() => engine.props.onNodeHover(data.nodes[2]));
+    engine.props.onRenderFramePost(ctx, 1);
+    expect(labels).toEqual(["Title s", "Title c", "Title p"]);
+    act(() => engine.props.onNodeHover(null));
+
+    // Zoomed in: the others too, most cited first; "a" would overlap "b".
+    labels.length = 0;
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+  });
+
+  it("skips pinned labels that would overlap one already drawn, so a fully pinned collection stays legible", () => {
+    // A collection graph pins every paper: twelve pins crowded together.
+    const nodes = Array.from({ length: 12 }, (_, i) => forceNode(`p${i}`, (i % 3) * 4, Math.floor(i / 3) * 4));
+    nodes.push(forceNode("s", 6, 6), forceNode("far", 0, 500));
+    nodes.forEach((node, i) => {
+      node.node.selected_version.cited_by_count = 100 - i;
+    });
+    const data: ForceGraphData = { nodes, links: [] };
+    render(
+      <ThemeProvider>
+        <CitationGraph
+          data={data}
+          selectedId="s"
+          pinnedIds={new Set(nodes.map((node) => node.id).filter((id) => id !== "s"))}
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+    const labels: string[] = [];
+    const ctx = {
+      fillStyle: "",
+      strokeStyle: "",
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((label: string) => labels.push(label)),
+      measureText: vi.fn(() => ({ width: 60 })),
+    };
+    engine.props.onRenderFramePost(ctx, 1);
+    // The selection always; then only the pins whose labels find free room.
+    expect(labels[0]).toBe("Title s");
+    expect(labels).toContain("Title far");
+    expect(labels.length).toBeLessThan(5);
+  });
+
+  it("fits the view once after the first range adds papers, unless the user moved it", () => {
+    vi.useFakeTimers();
+    try {
+      const base: ForceGraphData = { nodes: [forceNode("a", 0, 0)], links: [] };
+      const props = { selectedId: null, ariaLabel: "Citation graph", onNodeClick: vi.fn(), onBackgroundClick: vi.fn() };
+      const view = render(<CitationGraph data={base} {...props} />);
+      vi.advanceTimersByTime(2000);
+      expect(engine.zoomToFit).not.toHaveBeenCalled();
+
+      const range: ForceGraphData = { nodes: [...base.nodes, forceNode("b", 5, 5), forceNode("c", 9, 9)], links: [] };
+      view.rerender(<CitationGraph data={range} {...props} />);
+      expect(engine.zoomToFit).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(engine.zoomToFit).toHaveBeenCalledTimes(1);
+
+      // Only once: later ranges leave the view to the user.
+      view.rerender(<CitationGraph data={{ nodes: [...range.nodes, forceNode("d", 1, 1)], links: [] }} {...props} />);
+      vi.advanceTimersByTime(2000);
+      expect(engine.zoomToFit).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips the automatic fit after the user zoomed with the wheel", () => {
+    vi.useFakeTimers();
+    try {
+      const base: ForceGraphData = { nodes: [forceNode("a", 0, 0)], links: [] };
+      const props = { selectedId: null, ariaLabel: "Citation graph", onNodeClick: vi.fn(), onBackgroundClick: vi.fn() };
+      const view = render(<CitationGraph data={base} {...props} />);
+      fireEvent.wheel(screen.getByTestId("citation-graph"));
+      view.rerender(<CitationGraph data={{ nodes: [...base.nodes, forceNode("b", 5, 5)], links: [] }} {...props} />);
+      vi.advanceTimersByTime(2000);
+      expect(engine.zoomToFit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

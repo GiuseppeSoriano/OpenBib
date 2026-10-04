@@ -685,18 +685,53 @@ describe("GraphPage (desktop)", () => {
     expect(within(header()).getByText("1 pinned")).toBeInTheDocument();
   });
 
-  it("opens the paper list beside the canvas on wide screens and toggles it from Papers", async () => {
+  it("keeps the paper list closed on arrival, even on wide screens, until Papers opens it", async () => {
     mockMatchMedia((query) => query.includes("min-width: 1024px"));
     renderGraph();
     await ready();
 
     const toggle = within(header()).getByRole("button", { name: "Papers" });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
+
+    fireEvent.click(toggle);
     const list = screen.getByRole("complementary", { name: "Papers on the graph" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(toggle).toHaveAttribute("aria-controls", list.id);
     fireEvent.click(toggle);
     expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes the paper list from its Close button and Escape, returning focus to Papers", async () => {
+    renderGraph();
+    await ready();
+    const toggle = within(header()).getByRole("button", { name: "Papers" });
+
+    let list = openPapers();
+    fireEvent.click(within(list).getByRole("button", { name: "Close the papers list" }));
+    expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
+    expect(toggle).toHaveFocus();
+
+    list = openPapers();
+    const row = within(list).getByRole("button", { name: /^Other Paper/ });
+    row.focus();
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
+    expect(toggle).toHaveFocus();
+  });
+
+  it("keeps the paper list open across a compact layout and back", async () => {
+    const media = mockMatchMedia(() => false);
+    renderGraph();
+    await ready();
+    openPapers();
+
+    act(() => media.set(() => true));
+    expect(screen.queryByRole("complementary", { name: "Papers on the graph" })).toBeNull();
+    act(() => media.set(() => false));
+    expect(screen.getByRole("complementary", { name: "Papers on the graph" })).toBeInTheDocument();
+    expect(within(header()).getByRole("button", { name: "Papers" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("labels the current range section with its bounds", async () => {
@@ -704,8 +739,10 @@ describe("GraphPage (desktop)", () => {
     await ready();
     const list = selectSeed();
     await loadFirstRange();
-    expect(within(list).getByRole("heading", { level: 3, name: /^Current range · 1–30/ })).toBeInTheDocument();
-    expect(within(list).getByRole("heading", { level: 3, name: /^Pinned/ })).toBeInTheDocument();
+    // Caps labels: the range names its bounds, the other sections their counts.
+    expect(within(list).getByRole("heading", { level: 3, name: "Current range · 1–30" })).toBeInTheDocument();
+    expect(within(list).getByRole("heading", { level: 3, name: "Pinned (1)" })).toBeInTheDocument();
+    expect(within(list).getByRole("heading", { level: 3, name: "Other papers (1)" })).toBeInTheDocument();
   });
 
   it("explores from the selected paper: loads 1–30, and goes back to it from a later range", async () => {

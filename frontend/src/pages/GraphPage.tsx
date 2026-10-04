@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { GitFork } from "lucide-react";
 import api, { graph as graphApi, library } from "@/lib/api";
 import { apiStatus } from "@/lib/apiError";
-import { COMPACT_QUERY, PHONE_MAX, RAIL_MAX } from "@/lib/breakpoints";
+import { COMPACT_QUERY, PHONE_MAX } from "@/lib/breakpoints";
 import { collectionRead, useCollectionAccess } from "@/lib/collection-access";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,9 +43,6 @@ import "./GraphPage.css";
 export type GraphMode = "manual" | "paper" | "collection" | "library";
 type SeededMode = Exclude<GraphMode, "manual">;
 type CollectionAccess = ReturnType<typeof useCollectionAccess>;
-
-/** Wide enough for the paper list to sit open beside the canvas. */
-const WIDE_QUERY = `(min-width: ${RAIL_MAX + 1}px)`;
 
 export default function GraphPage({ mode }: { mode: GraphMode }) {
   const { paperKey, collectionId } = useParams<{ paperKey: string; collectionId: string }>();
@@ -182,9 +179,15 @@ function GraphExplorer({
     nodeCountRef.current = forceData.nodes.length;
   }, [forceData]);
 
-  // Wide screens (the mockup's 1024px and up) show the paper list beside the
-  // canvas from the start; narrower ones open it on demand.
-  const [papersOpen, setPapersOpen] = useState(() => !!window.matchMedia?.(WIDE_QUERY).matches);
+  // The paper list opens beside the canvas only from the header's Papers
+  // button (closed on arrival at every width) and stays as it was left
+  // while the page is open, across desktop and compact layouts.
+  const [papersOpen, setPapersOpen] = useState(false);
+  const papersTriggerRef = useRef<HTMLButtonElement>(null);
+  const closePapers = () => {
+    setPapersOpen(false);
+    papersTriggerRef.current?.focus();
+  };
   // Compact "Graph controls" sheet. Its tab and every choice made in it live
   // here (or in the exploration), so reopening shows them unchanged.
   const [controlsOpen, setControlsOpen] = useState(false);
@@ -213,14 +216,6 @@ function GraphExplorer({
   // The exploration adopts the base in an effect: wait for it so pins and
   // counts never flash empty.
   const hasGraph = baseHasNodes && state.baseIds.size > 0;
-
-  // The selection, plus the pins while there are few, keep their labels at
-  // every zoom level (small screens rarely zoom in far enough otherwise).
-  const alwaysLabelIds = useMemo(() => {
-    const ids = new Set<string>(state.pinned.size <= 5 ? state.pinned : []);
-    if (selectedId) ids.add(selectedId);
-    return ids;
-  }, [state.pinned, selectedId]);
 
   const seedNode = mode === "paper" && base ? base.nodes.find((node) => node.is_seed) ?? base.nodes[0] : undefined;
   const seedTitle = seedHeading(seedNode ? catalog.getNode(seedNode.id) ?? seedNode : undefined);
@@ -351,6 +346,7 @@ function GraphExplorer({
         onFit={() => graphRef.current?.fit()}
         papersOpen={papersOpen}
         papersListId={papersListId}
+        papersTriggerRef={papersTriggerRef}
         onTogglePapers={() => setPapersOpen((open) => !open)}
         controlsOpen={sheetOpen}
         controlsTriggerRef={controlsTriggerRef}
@@ -362,6 +358,7 @@ function GraphExplorer({
           <GraphPaperList
             id={papersListId}
             className="graph-drawer"
+            variant="drawer"
             nodes={visibleNodes}
             pinOrder={state.pinOrder}
             pinned={state.pinned}
@@ -371,6 +368,7 @@ function GraphExplorer({
             selectedId={selectedId}
             onSelect={selectFromList}
             onTogglePin={togglePin}
+            onClose={closePapers}
           />
         )}
         <div className="graph-canvas-wrap">
@@ -381,7 +379,6 @@ function GraphExplorer({
               selectedId={selectedId}
               savedGroupKeys={savedGroupKeys}
               pinnedIds={state.pinned}
-              alwaysLabelIds={alwaysLabelIds}
               ariaLabel={canvasLabel}
               onNodeClick={exploration.select}
               onNodeDoubleClick={exploration.loadFirstRangeFor}
