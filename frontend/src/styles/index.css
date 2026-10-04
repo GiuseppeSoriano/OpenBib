@@ -267,17 +267,18 @@
   }
 
   /* Segmented control (ui/SegmentedControl is the radiogroup version; older
-     callers use aria-pressed or .active). Joined segments: the 1px gaps show
-     the outline colour as dividers, also between wrapped rows. */
+     callers use aria-pressed or .active). A track holding the options: the
+     selected one is a rounded pill with its own accent border, inset from the
+     track's edge, so no border is doubled or clipped at the corners. */
   .segmented {
     display: inline-flex;
     flex-wrap: wrap;
     max-width: 100%;
-    gap: 1px;
+    gap: 2px;
+    padding: 2px;
     border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-sm);
-    background: var(--color-border-strong);
-    overflow: hidden;
+    background: var(--color-surface);
   }
   .segmented button {
     flex: 1 1 auto;
@@ -285,21 +286,23 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: calc(var(--control-min) - 2px);
-    border: none;
-    border-radius: 0;
-    background: var(--color-surface);
+    /* The track's border and padding make the group --control-min tall. */
+    min-height: calc(var(--control-min) - 6px);
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: transparent;
     color: var(--color-text);
     font-size: var(--text-sm);
     font-weight: 500;
     line-height: var(--leading-tight);
-    padding: 0.25rem 0.875rem;
+    padding: 0.2rem 0.75rem;
     overflow-wrap: break-word;
     transition:
       background var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
       color var(--duration-fast) ease;
   }
-  /* Touch: each segment is a full 44px target (the group grows by its border). */
+  /* Touch: each segment is a full 44px target (the group grows by its track). */
   @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
     .segmented button {
       min-height: var(--touch-target);
@@ -314,9 +317,9 @@
   .segmented button[aria-checked="true"] {
     background: var(--color-accent-soft);
     color: var(--color-accent-strong);
-    /* The soft fill alone is under 3:1 against the surface: an accent
-       outline marks the selected segment, as on an active chip. */
-    box-shadow: inset 0 0 0 1px var(--color-accent);
+    /* The soft fill alone is under 3:1 against the surface: the accent
+       border marks the selected segment, as on an active chip. */
+    border-color: var(--color-accent);
   }
   .segmented button:disabled {
     opacity: 0.5;
@@ -324,8 +327,7 @@
   }
   .segmented button:focus-visible {
     outline: none;
-    /* Inset: the outer ring would be clipped by overflow: hidden. */
-    box-shadow: inset 0 0 0 2px var(--color-accent);
+    box-shadow: var(--focus-ring);
   }
   /* Full-width variant for sheets (sort in the mobile Filters dialog). */
   .segmented--block {

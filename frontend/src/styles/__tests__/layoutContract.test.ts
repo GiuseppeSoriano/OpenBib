@@ -216,9 +216,13 @@ describe("layout contract", () => {
 
   it("marks the selected segment with more than its fill (non-text 3:1)", () => {
     for (const selector of ['.segmented button.active', '.segmented button[aria-pressed="true"]', '.segmented button[aria-checked="true"]']) {
-      expect(declarations(indexCss, selector), selector).toContain("box-shadow: inset 0 0 0 1px var(--color-accent);");
+      expect(declarations(indexCss, selector), selector).toContain("border-color: var(--color-accent);");
     }
-    expect(declarations(indexCss, ".segmented button")).toContain("color: var(--color-text);");
+    const segment = declarations(indexCss, ".segmented button");
+    expect(segment).toContain("color: var(--color-text);");
+    // Its own rounded border inside the track: nothing doubled or clipped at the corners.
+    expect(segment).toContain("border: 1px solid transparent;");
+    expect(declarations(indexCss, ".segmented")).not.toContain("overflow: hidden");
   });
 
   it("sets caps labels in the UI face, also on serif headings", () => {
