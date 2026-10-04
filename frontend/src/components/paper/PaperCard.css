@@ -176,7 +176,7 @@
     line-height: var(--leading-snug);
   }
 
-  /* Row badges are quiet text: "In Library", "Saved", "Dismissed". */
+  /* Row badges are quiet text: "In Library", "In 2 collections", "Dismissed". */
   .paper-card--row .paper-title-row .badge {
     padding: 0;
     background: transparent;

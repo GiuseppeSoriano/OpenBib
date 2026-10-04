@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { BookMarked, Check, EyeOff, MoreHorizontal, Quote, Share2, Undo2 } from "lucide-react";
+import { BookMarked, Check, EyeOff, FolderCheck, MoreHorizontal, Quote, Share2, Undo2 } from "lucide-react";
 import api, { library } from "@/lib/api";
 import { copyText, formatCitation } from "@/lib/citation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -242,10 +242,11 @@ export default function SearchResultCard({
       note={note}
       headerBadges={
         <>
+          {/* Collections, not the Library: the "In Library" action already says that. */}
           {isSaved && (
-            <span className="badge" title={t("paper.savedTitle")}>
-              <Check size={13} aria-hidden="true" />
-              {t("paper.saved")}
+            <span className="badge">
+              <FolderCheck size={13} aria-hidden="true" />
+              {t("paper.inCollections", { count: savedInCollections.length })}
             </span>
           )}
           {isDismissed && <span className="badge badge--neutral">{t("paper.dismissed")}</span>}

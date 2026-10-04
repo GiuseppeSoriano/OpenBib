@@ -64,7 +64,7 @@ interface Props {
   params: SearchParamsState;
   onChange: (patch: FilterPatch) => void;
   onReset: () => void;
-  /** Unsaved only and Hide dismissed; omitted for visitors. */
+  /** Not in a collection and Hide dismissed; omitted for visitors. */
   personal?: PersonalFilters | null;
   /** The personal filters differ from their defaults (Reset restores them). */
   personalActive?: boolean;

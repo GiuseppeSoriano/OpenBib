@@ -180,7 +180,7 @@ describe("SearchFilters — year presets, reset and personal filters", () => {
       onHideDismissedChange: vi.fn(),
     };
     renderFilters({ q: "gnn" }, vi.fn(), vi.fn(), { personal, personalActive: true });
-    fireEvent.click(screen.getByRole("button", { name: "Unsaved only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not in a collection" }));
     expect(personal.onUnsavedOnlyChange).toHaveBeenCalledWith(true);
     const hide = screen.getByRole("button", { name: "Hide dismissed" });
     expect(hide).toHaveAttribute("aria-pressed", "false");
@@ -282,7 +282,7 @@ describe("SearchFilters — phones", () => {
       onHideDismissedChange: vi.fn(),
     };
     const { rerender } = renderFilters({ q: "gnn" }, vi.fn(), vi.fn(), { personal });
-    expect(screen.queryByRole("button", { name: /Unsaved only|Hide dismissed|Dismissed shown/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Not in a collection|Hide dismissed|Dismissed shown/ })).toBeNull();
     expect(screen.getByRole("button", { name: /^Filters/ })).toHaveAccessibleName("Filters");
 
     const changed = { ...personal, unsavedOnly: true, hideDismissed: false };
@@ -293,7 +293,7 @@ describe("SearchFilters — phones", () => {
     );
     const toggle = screen.getByRole("button", { name: /^Filters/ });
     expect(toggle).toHaveAccessibleName("Filters 2 filters active");
-    fireEvent.click(screen.getByRole("button", { name: "Remove filter: Unsaved only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter: Not in a collection" }));
     expect(personal.onUnsavedOnlyChange).toHaveBeenCalledWith(false);
     expect(toggle).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Remove filter: Dismissed shown" }));

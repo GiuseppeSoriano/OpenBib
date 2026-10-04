@@ -231,7 +231,7 @@ describe("SearchPage — results", () => {
   it("hides user-scoped pills and actions for anonymous visitors", async () => {
     renderSearch(["/search?q=databases"]);
     await screen.findByText("Solo Paper");
-    expect(screen.queryByText("Unsaved only")).toBeNull();
+    expect(screen.queryByText("Not in a collection")).toBeNull();
     expect(screen.queryByText("Hide dismissed")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Not relevant" })).toBeNull();
@@ -774,14 +774,14 @@ describe("SearchPage — signed-in filters and row actions", () => {
     signIn();
     renderSearch(["/search?q=databases"]);
     await screen.findByText("Solo Paper");
-    const unsaved = await screen.findByRole("button", { name: "Unsaved only" });
+    const unsaved = await screen.findByRole("button", { name: "Not in a collection" });
     expect(screen.getByRole("button", { name: "Hide dismissed" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(api.get).toHaveBeenCalledWith("/collections/paper-memberships"));
-    await screen.findByText("Saved");
+    await screen.findByText(/^In \d+ collections?$/);
 
     fireEvent.click(unsaved);
     await waitFor(() => expect(screen.queryByText("Solo Paper")).toBeNull());
-    expect(screen.getByTestId("search-status")).toHaveTextContent("1 of about 1,234 results · unsaved only");
+    expect(screen.getByTestId("search-status")).toHaveTextContent("1 of about 1,234 results · not in a collection");
     // A local filter: no new search and no history entry.
     expect(location()).toBe("/search?q=databases");
     expect(search).toHaveBeenCalledTimes(1);
