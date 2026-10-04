@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -138,7 +147,40 @@ export default function SearchPage() {
     return () => window.clearTimeout(timer);
   }, [highlight]);
 
+  // A new search (or arriving from a scrolled page) starts at the top, with the
+  // status line clear of the sticky field. Before the restore below, so Back
+  // still returns to the position recorded for a search.
+  useLayoutEffect(() => {
+    if (window.scrollY > 0) window.scrollTo(0, 0);
+  }, [serialized]);
+
   useScrollRestore(`search?${serialized}`, !!items);
+
+  // The sticky field (on phones with its chip row) covers the top of the
+  // viewport: the root's scroll padding clears its measured height at any
+  // text size, so focus and scrolled-to targets land below it.
+  const topRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLFormElement>(null);
+  useLayoutEffect(() => {
+    const top = topRef.current;
+    const bar = barRef.current;
+    if (!top || !bar) return;
+    const root = document.documentElement;
+    const height = (el: HTMLElement) => `${Math.ceil(el.getBoundingClientRect().height)}px`;
+    const update = () => {
+      root.style.setProperty("--search-top-height", height(top));
+      root.style.setProperty("--search-bar-height", height(bar));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(top, { box: "border-box" });
+    observer.observe(bar, { box: "border-box" });
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--search-top-height");
+      root.style.removeProperty("--search-bar-height");
+    };
+  }, []);
 
   // User-scoped overlays: never fired anonymously (no 401 noise).
   const { data: memberships } = useQuery({
@@ -264,8 +306,8 @@ export default function SearchPage() {
       </header>
 
       {/* Phones: the field and the chip row stay at the top together. */}
-      <div className="search-top">
-        <form onSubmit={handleSearch} className="search-bar" role="search">
+      <div ref={topRef} className="search-top">
+        <form ref={barRef} onSubmit={handleSearch} className="search-bar" role="search">
           <div className="search-field">
             <label htmlFor={inputId} className="sr-only">
               {t("search.queryLabel")}

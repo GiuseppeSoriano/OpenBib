@@ -172,7 +172,7 @@ These are never skips:
 - Any other 5xx, such as a 500 from an OpenBib bug or an nginx 502/504 from a stopped `api` container: a `G-stack-error` failure.
 - A bare 429 from OpenBib's own limiter: a `G-ratelimit` failure.
 
-Check ids: `G-overflow`, `G-h1`, `G-console`, `F03-footer`, `F03-actions`, `F10-targets`, `F10-edges`, `F04-header`, `F04-sheet`, `F04-desktop`, `F05-dialog`, `S01-select`, `S01-deep`, `S01-pins`, `S01-resize`, `S01-fail`, `F06`, `F07`, `F08`, `F09` (with `tools/responsive_fixtures/legal.json`), `S02-search`, `S02-library`, `S02-perf`, `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `DOI-UI`, `LONG`, `contrast`, `G-ratelimit` (OpenBib's own limiter answered 429; listed in `app_rate_limit_events`), `G-provider-config` (missing or rejected key) and `G-stack-error` (listed in `stack_error_events`).
+Check ids: `G-overflow`, `G-h1`, `G-console`, `F03-footer`, `F03-actions`, `F10-targets`, `F10-edges`, `F04-header`, `F04-sheet`, `F04-desktop`, `F05-dialog`, `S01-select`, `S01-deep`, `S01-pins`, `S01-resize`, `S01-fail`, `F06`, `F07`, `F08`, `F09` (with `tools/responsive_fixtures/legal.json`), `S02-search`, `S02-library`, `S02-perf`, `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `DOI-UI`, `LONG`, `contrast`, `G-ratelimit` (OpenBib's own limiter answered 429; listed in `app_rate_limit_events`), `G-provider-config` (missing or rejected key), `G-stack-error` (listed in `stack_error_events`) and `G-sticky` (search opens at the top with the status line clear of the sticky field; `scrollIntoView`, focus and Tab targets land just below it, also at 62.5% and 75% text).
 
 ### Verified variants
 

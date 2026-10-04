@@ -12,6 +12,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ToastProvider } from "@/components/ui/Toast";
 import { clearLastSearch, getLastSearch, setLastSearch } from "@/lib/lastSearch";
+import { clearScrollPositions } from "@/hooks/useScrollRestore";
 import { resultElementId } from "@/lib/search-pages";
 import { mockMatchMedia, renderWithProviders, restoreMatchMedia } from "@/test/utils";
 import { COMPACT_QUERY } from "@/lib/breakpoints";
@@ -345,6 +346,63 @@ describe("SearchPage — URL and history", () => {
     expect(searchBox()).toHaveFocus();
     expect(location()).toBe("/search?q=databases");
     expect(screen.getByText("Solo Paper")).toBeInTheDocument();
+  });
+});
+
+describe("SearchPage — sticky field", () => {
+  let scrollY = 0;
+  let originalScrollY: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    scrollY = 0;
+    // jsdom defines scrollY as an own data property: keep it to put it back afterwards.
+    originalScrollY = Object.getOwnPropertyDescriptor(window, "scrollY");
+    Object.defineProperty(window, "scrollY", { configurable: true, get: () => scrollY });
+    vi.spyOn(window, "scrollTo").mockImplementation(((_x: number, y: number) => {
+      scrollY = y;
+    }) as typeof window.scrollTo);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalScrollY) Object.defineProperty(window, "scrollY", originalScrollY);
+    else Reflect.deleteProperty(window, "scrollY");
+    clearScrollPositions();
+  });
+
+  it("starts a search at the top, and Back returns to its recorded position", async () => {
+    // Arriving from a page scrolled down (the landing page, say).
+    scrollY = 600;
+    renderSearch(["/", "/search?q=first"]);
+    expect(scrollY).toBe(0);
+    await screen.findByText("Solo Paper");
+
+    scrollY = 900;
+    fireEvent.scroll(window);
+    fireEvent.change(searchBox(), { target: { value: "second" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(location()).toBe("/search?q=second"));
+    expect(scrollY).toBe(0);
+    await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+
+    act(() => navigateTo(-1));
+    await waitFor(() => expect(scrollY).toBe(900));
+    expect(location()).toBe("/search?q=first");
+  });
+
+  it("measures the sticky field for the root's scroll padding", () => {
+    const heights: Record<string, number> = { "search-top": 127.4, "search-bar": 46 };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const height = heights[this.classList[0] ?? ""] ?? 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height } as DOMRect;
+    });
+    const root = document.documentElement.style;
+    const view = renderSearch(["/search?q=gnn"]);
+    expect(root.getPropertyValue("--search-top-height")).toBe("128px");
+    expect(root.getPropertyValue("--search-bar-height")).toBe("46px");
+    view.unmount();
+    expect(root.getPropertyValue("--search-top-height")).toBe("");
+    expect(root.getPropertyValue("--search-bar-height")).toBe("");
   });
 });
 

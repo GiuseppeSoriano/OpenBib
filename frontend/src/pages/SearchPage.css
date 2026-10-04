@@ -51,9 +51,12 @@
   }
 
   /* The sticky field covers the top of the viewport: what is scrolled into
-     view (focus, links) lands below it. */
+     view (focus, links) lands below it. SearchPage measures the field into
+     --search-bar-height; the rem estimate only covers the first frame. */
   :root:has(.search-page) {
-    scroll-padding-top: calc(var(--nav-height) + 4.5rem);
+    scroll-padding-top: calc(
+      var(--nav-height) + var(--search-bar-height, 4.25rem) + var(--space-xs)
+    );
   }
 
   .search-field {
@@ -268,9 +271,12 @@
       z-index: 20;
     }
 
-    /* Field plus chip row: about 8rem, more at large text sizes. */
+    /* Field plus chip row, measured into --search-top-height (it does not
+       scale with the text size alone); the rem estimate covers the first frame. */
     :root:has(.search-page) {
-      scroll-padding-top: calc(var(--nav-height) + 8.5rem);
+      scroll-padding-top: calc(
+        var(--nav-height) + var(--search-top-height, 8.25rem) + var(--space-xs)
+      );
     }
   }
 }

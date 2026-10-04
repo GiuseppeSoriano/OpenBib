@@ -101,7 +101,7 @@ CHECK_IDS = (
     "S01-deep", "S01-pins", "S01-resize", "S01-fail", "F06", "F07", "F08",
     "F09", "S02-search", "S02-library", "S02-perf", "S03", "S04", "S05", "S06", "S07",
     "S08", "DOI-UI", "LONG", "contrast", "G-ratelimit", "G-provider-config",
-    "G-stack-error",
+    "G-stack-error", "G-sticky",
 )  # fmt: skip
 
 
@@ -1023,6 +1023,144 @@ def last_action_check(runner: Runner, s: Session, label: str, path: str, selecto
         r.expect(hit["ok"], f"last action covered by {hit['got']}")
 
     runner.run("F03-actions", s, check, label)
+
+
+# The top edge of what the sticky headers cover (top nav or bar, search field and chips) and
+# the bottom edge of the free area (above the phone tab bar).
+STICKY_JS = """() => {
+  let top = 0;
+  for (const el of document.querySelectorAll('.topnav, .topbar, .search-top, .search-bar')) {
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+    if ((cs.position === 'sticky' || cs.position === 'fixed') && r.height > 0
+        && cs.visibility !== 'hidden' && r.top < innerHeight / 2) top = Math.max(top, r.bottom);
+  }
+  const tabbar = document.querySelector('.tabbar');
+  const tr = tabbar && tabbar.getBoundingClientRect();
+  const bottom = tr && tr.height > 0 && getComputedStyle(tabbar).display !== 'none'
+    ? Math.min(innerHeight, tr.top) : innerHeight;
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+    return {top: Math.round(r.top * 10) / 10, bottom: Math.round(r.bottom * 10) / 10}; };
+  const active = document.activeElement;
+  return {top: Math.round(top * 10) / 10, bottom: Math.round(bottom * 10) / 10, y: scrollY,
+          status: box(document.querySelector('[data-testid=search-status]')),
+          active: active && active.closest('.search-results') ? box(active) : null,
+          activeName: active ? active.tagName.toLowerCase() + '.' + active.className : null};
+}"""
+
+
+# The third result's box, and the gap SearchPage.css leaves between the sticky field and a
+# row scrolled into view: --space-xs past the field plus the row's scroll-margin-top.
+ROW_BOX_JS = """() => {
+  const row = document.querySelectorAll('.search-result')[2];
+  const r = row.getBoundingClientRect();
+  const root = document.documentElement;
+  const xs = getComputedStyle(root).getPropertyValue('--space-xs').trim();
+  const rem = parseFloat(getComputedStyle(root).fontSize);
+  const space = xs.endsWith('rem') ? parseFloat(xs) * rem : parseFloat(xs) || 0;
+  const gap = space + (parseFloat(getComputedStyle(row).scrollMarginTop) || 0);
+  return {top: Math.round(r.top * 10) / 10, bottom: Math.round(r.bottom * 10) / 10,
+          gap: Math.round(gap * 10) / 10};
+}"""
+
+
+def sticky_search_check(runner: Runner, s: Session, label: str):
+    """G-sticky: a search opens with the status line clear of the sticky field, and a
+    result brought into view (scrollIntoView, focus, Tab) never lands under it. A
+    scrollIntoView target also lands snugly below it (the scroll padding follows the
+    measured field), at the variant's text size and at 62.5% and 75%."""
+    page = s.page
+
+    def clear(r, what, box, state):
+        if not r.expect(box, f"{what}: nothing to measure"):
+            return
+        r.expect(
+            box["top"] >= state["top"] - 0.5,
+            f"{what} top {box['top']} under the sticky header (ends at {state['top']})",
+        )
+        r.expect(box["top"] < state["bottom"], f"{what} top {box['top']} below the viewport")
+
+    def snug(r, what, box, state):
+        # scrollIntoView aligns the row's top to the scroll padding: just under the
+        # header (gap: --space-xs past the field plus the row's scroll-margin-top). A
+        # padding that overestimates the header lands it far lower. Skipped when the page
+        # is clamped at the top and cannot scroll that far.
+        if not box or state["y"] <= 1:
+            return
+        limit = state["top"] + box["gap"] + 4
+        r.expect(
+            box["top"] <= limit,
+            f"result after {what} at {box['top']}, more than {box['gap']}px gap below the "
+            f"sticky header (ends at {state['top']}): scroll padding overestimates it",
+        )
+
+    def check(r):
+        # A fresh load (no remembered search positions) of a page scrolled down, as the
+        # landing page is once its autofocused field scrolls into view at large text.
+        s.goto("/")
+        page.evaluate("() => window.scrollTo(0, 600)")
+        page.wait_for_timeout(200)
+        r.info["from_y"] = page.evaluate("() => scrollY")
+        s.nav(f"/search?q={quote(SEARCH_Q)}")
+        wait_search(s)
+        page.wait_for_timeout(300)
+        state = page.evaluate(STICKY_JS)
+        r.info.update(arrive=state, screenshot=s.shot(f"sticky-{label}"))
+        r.expect(state["y"] <= 1, f"search opened scrolled to y={state['y']}")
+        clear(r, "status line", state["status"], state)
+        if state["status"]:
+            r.expect(
+                state["status"]["bottom"] <= state["bottom"] + 0.5,
+                f"status line bottom {state['status']['bottom']} past {state['bottom']}",
+            )
+        count = page.locator(".search-result").count()
+        if count < 3:
+            raise Skip(f"{count} results: too few to scroll back to one")
+        rows = ".search-result"
+        steps = {
+            "scrollIntoView": f"() => document.querySelectorAll('{rows}')[2].scrollIntoView()",
+            "focus": f"() => document.querySelectorAll('{rows}')[2].focus()",
+            # Keyboard: focus the first control of row 2 off screen, then Tab to the next.
+            "Tab": f"""() => document.querySelectorAll('{rows}')[1]
+                       .querySelector('a[href], button').focus({{preventScroll: true}})""",
+        }
+        for how, script in steps.items():
+            scroll_to_end(s)
+            page.evaluate(script)
+            if how == "Tab":
+                scroll_to_end(s)
+                page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            state = page.evaluate(STICKY_JS)
+            if how == "Tab":
+                r.info["tab_focus"] = state["activeName"]
+                box = state["active"]
+            else:
+                box = page.evaluate(ROW_BOX_JS)
+            r.info[how] = {"target": box, "header": state["top"], "y": state["y"]}
+            clear(r, f"result after {how}", box, state)
+            if how == "scrollIntoView":
+                snug(r, how, box, state)
+        r.info["screenshot_tab"] = s.shot(f"sticky-{label}-tab")
+        # Small text: the field is mostly fixed-pixel controls, so a rem-based padding
+        # estimate falls short and hides the target under the header.
+        size = page.evaluate("() => document.documentElement.style.fontSize")
+        try:
+            for small in ("62.5%", "75%"):
+                page.evaluate(f"() => {{ document.documentElement.style.fontSize = '{small}'; }}")
+                page.wait_for_timeout(300)
+                scroll_to_end(s)
+                page.evaluate(steps["scrollIntoView"])
+                page.wait_for_timeout(300)
+                state = page.evaluate(STICKY_JS)
+                box = page.evaluate(ROW_BOX_JS)
+                what = f"scrollIntoView at {small} text"
+                r.info[what] = {"target": box, "header": state["top"], "y": state["y"]}
+                clear(r, f"result after {what}", box, state)
+                snug(r, what, box, state)
+        finally:
+            page.evaluate(f"() => {{ document.documentElement.style.fontSize = '{size}'; }}")
+
+    runner.run("G-sticky", s, check, label, provider=True)
 
 
 def legal_fixture_check(runner: Runner, variant: Variant):
@@ -2772,6 +2910,7 @@ def run_anonymous(runner: Runner, v: Variant):
                 ("register", "/register"),
             ],
         )
+        sticky_search_check(runner, s, "search")
         header_checks(runner, s, "anon")
         footer_check(runner, s, "short-search", f"/search?q={NO_MATCH_Q}", provider=True)
         footer_check(runner, s, "privacy", "/privacy")
@@ -2804,6 +2943,7 @@ def run_signed_in(runner: Runner, v: Variant):
                 ("terms-auth", "/terms"),
             ],
         )
+        sticky_search_check(runner, s, "search-auth")
         header_checks(runner, s, "auth")
         footer_check(runner, s, "library", "/library")
         last_action_check(runner, s, "library-show-more", "/library", ".load-more button")
