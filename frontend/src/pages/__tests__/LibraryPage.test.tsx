@@ -2,7 +2,7 @@ import { mockRefresh, testAuth } from "@/test/auth-mock";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigationType } from "react-router-dom";
 import LibraryPage from "@/pages/LibraryPage";
 import { library, papers } from "@/lib/api";
 import { COMPACT_QUERY } from "@/lib/breakpoints";
@@ -116,7 +116,12 @@ vi.mock("@/lib/api", () => ({
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{location.search}</output>;
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="location" data-navigation={navigationType}>
+      {location.search}
+    </output>
+  );
 }
 
 function renderLibrary(route = "/library") {
@@ -278,6 +283,22 @@ describe("LibraryPage filters", () => {
     await waitFor(() => expect(lastListParams()).toMatchObject({ q: "graph nets", page: 1 }));
     // Debounced: one request for the whole phrase, none per keystroke.
     expect(vi.mocked(library.listEntries).mock.calls).toHaveLength(2);
+  });
+
+  it("clears the search with its Clear button, replacing the history entry", async () => {
+    const user = userEvent.setup();
+    renderLibrary("/library?q=graph&sort=title");
+    await screen.findByText("First Library Paper");
+    const field = screen.getByRole("searchbox", { name: "Search your Library" });
+    expect(field).toHaveValue("graph");
+
+    await user.click(screen.getByRole("button", { name: "Clear search text" }));
+
+    expect(field).toHaveValue("");
+    expect(field).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\?sort=title$/));
+    expect(screen.getByTestId("location")).toHaveAttribute("data-navigation", "REPLACE");
+    expect(screen.queryByRole("button", { name: "Clear search text" })).toBeNull();
   });
 
   it("applies state, tag, collection and sort from the filter chips", async () => {

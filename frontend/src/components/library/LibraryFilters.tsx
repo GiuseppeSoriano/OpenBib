@@ -1,18 +1,7 @@
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Search, SlidersHorizontal } from "lucide-react";
 import api, { library } from "@/lib/api";
-import { COMPACT_QUERY } from "@/lib/breakpoints";
 import {
   activeFilterCount,
   DEFAULT_LIBRARY_SORT,
@@ -20,13 +9,9 @@ import {
   LIBRARY_SORTS,
   type LibraryFilterParams,
 } from "@/lib/libraryParams";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
-import Popover, { PopoverListbox, type ListboxOption } from "@/components/ui/Popover";
-import { MenuChip } from "@/components/ui/Chip";
+import type { ListboxOption } from "@/components/ui/Popover";
+import FilterToolbar, { FilterMenu } from "@/components/filters/FilterToolbar";
 import { READING_STATES, type Collection, type LibrarySort, type ReadingState } from "@/types";
-import "./LibraryFilters.css";
-
-const SEARCH_DEBOUNCE_MS = 300;
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   added: "library.sortAdded",
@@ -49,9 +34,6 @@ interface Props {
  */
 export default function LibraryFilters({ params, onChange, onReset }: Props) {
   const { t } = useTranslation();
-  const id = useId();
-  const compact = useMediaQuery(COMPACT_QUERY);
-  const [open, setOpen] = useState(false);
   const activeCount = activeFilterCount(params);
 
   const { data: facets } = useQuery({
@@ -63,29 +45,10 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
     queryFn: async () => (await api.get<Collection[]>("/collections")).data,
   });
 
-  // The search box types ahead of the URL; follow URL changes made elsewhere
-  // (reset, back/forward) without clobbering what is being typed.
-  const committedQ = params.q ?? "";
-  const [draft, setDraft] = useState(committedQ);
-  const [syncedQ, setSyncedQ] = useState(committedQ);
-  if (committedQ !== syncedQ) {
-    setSyncedQ(committedQ);
-    if (committedQ !== draft.trim()) setDraft(committedQ);
-  }
-
-  useEffect(() => {
-    if (draft.trim() === committedQ) return;
-    const timer = window.setTimeout(
-      () => onChange({ ...params, q: draft }, { replace: true }),
-      SEARCH_DEBOUNCE_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [draft, committedQ, params, onChange]);
-
-  const submitSearch = (event: FormEvent) => {
-    event.preventDefault();
-    if (draft.trim() !== committedQ) onChange({ ...params, q: draft }, { replace: true });
-  };
+  const onQueryChange = useCallback(
+    (q: string) => onChange({ ...params, q }, { replace: true }),
+    [params, onChange],
+  );
 
   const setFilter = (patch: LibraryFilterParams) => onChange({ ...params, ...patch });
 
@@ -131,90 +94,52 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
   }));
   const sort = params.sort ?? DEFAULT_LIBRARY_SORT;
 
-  const panelId = `${id}-panel`;
-  const activeSummary = activeCount > 0 && (
-    <span className="library-filters-active">
-      <span>{t("common.filtersActive", { count: activeCount })}</span>
-      <button type="button" className="btn-quiet" onClick={onReset}>
-        {t("common.resetFilters")}
-      </button>
-    </span>
-  );
-
   return (
-    <section className="library-filters" aria-label={t("common.filters")}>
-      <div className="library-filters-bar">
-        <form role="search" className="library-filters-search" onSubmit={submitSearch}>
-          <label htmlFor={`${id}-q`} className="sr-only">
-            {t("library.searchLabel")}
-          </label>
-          <Search size={16} className="library-filters-search-icon" aria-hidden="true" />
-          <input
-            id={`${id}-q`}
-            type="search"
-            className="input"
-            value={draft}
-            maxLength={LIBRARY_QUERY_MAX}
-            placeholder={t("library.searchPlaceholder")}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-        </form>
-        {compact && (
-          <button
-            type="button"
-            className={activeCount > 0 ? "chip chip--active" : "chip"}
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((value) => !value)}
-          >
-            <SlidersHorizontal size={14} aria-hidden="true" />
-            {t("common.filters")}
-            {activeCount > 0 && (
-              <>
-                <span className="chip-count" aria-hidden="true">
-                  · {activeCount}
-                </span>
-                <span className="sr-only">{t("common.filtersActive", { count: activeCount })}</span>
-              </>
-            )}
-          </button>
-        )}
-      </div>
-
-      <div id={panelId} className="chip-row library-filters-panel" hidden={compact && !open}>
-        {stateValues.length > 0 && (
-          <FilterMenu
-            label={t("library.filterState")}
-            options={stateOptions}
-            value={params.state ?? ""}
-            valueLabel={params.state ? t(`paper.states.${params.state}`) : undefined}
-            onSelect={(value) => setFilter({ state: (value || undefined) as ReadingState | undefined })}
-          />
-        )}
-        {(tagFacets.length > 0 || params.tag) && (
-          <FilterMenu
-            label={t("library.filterTag")}
-            options={tagOptions}
-            value={params.tag ?? ""}
-            valueLabel={params.tag}
-            onSelect={(value) => setFilter({ tag: value || undefined })}
-          />
-        )}
-        {(collectionList.length > 0 || params.collection_id) && (
-          <FilterMenu
-            label={t("library.filterCollection")}
-            options={collectionOptions}
-            value={params.collection_id ?? ""}
-            valueLabel={
-              params.collection_id
-                ? (collectionList.find((c) => c.id === params.collection_id)?.name ??
-                  t("library.otherCollection"))
-                : undefined
-            }
-            onSelect={(value) => setFilter({ collection_id: value || undefined })}
-          />
-        )}
-        <span className="chip-row-spacer" aria-hidden="true" />
+    <FilterToolbar
+      searchLabel={t("library.searchLabel")}
+      searchPlaceholder={t("library.searchPlaceholder")}
+      query={params.q ?? ""}
+      maxLength={LIBRARY_QUERY_MAX}
+      onQueryChange={onQueryChange}
+      activeCount={activeCount}
+      onReset={onReset}
+      filters={
+        <>
+          {stateValues.length > 0 && (
+            <FilterMenu
+              label={t("library.filterState")}
+              options={stateOptions}
+              value={params.state ?? ""}
+              valueLabel={params.state ? t(`paper.states.${params.state}`) : undefined}
+              onSelect={(value) => setFilter({ state: (value || undefined) as ReadingState | undefined })}
+            />
+          )}
+          {(tagFacets.length > 0 || params.tag) && (
+            <FilterMenu
+              label={t("library.filterTag")}
+              options={tagOptions}
+              value={params.tag ?? ""}
+              valueLabel={params.tag}
+              onSelect={(value) => setFilter({ tag: value || undefined })}
+            />
+          )}
+          {(collectionList.length > 0 || params.collection_id) && (
+            <FilterMenu
+              label={t("library.filterCollection")}
+              options={collectionOptions}
+              value={params.collection_id ?? ""}
+              valueLabel={
+                params.collection_id
+                  ? (collectionList.find((c) => c.id === params.collection_id)?.name ??
+                    t("library.otherCollection"))
+                  : undefined
+              }
+              onSelect={(value) => setFilter({ collection_id: value || undefined })}
+            />
+          )}
+        </>
+      }
+      sort={
         <FilterMenu
           label={t("common.sortBy")}
           options={sortOptions}
@@ -223,99 +148,7 @@ export default function LibraryFilters({ params, onChange, onReset }: Props) {
           sort={sort !== DEFAULT_LIBRARY_SORT ? "changed" : "default"}
           onSelect={(value) => setFilter({ sort: value as LibrarySort })}
         />
-        {!compact && activeSummary}
-      </div>
-      {/* On compact screens the summary and Reset stay visible with the panel closed. */}
-      {compact && activeSummary}
-    </section>
-  );
-}
-
-/**
- * One filter chip and its listbox popover. A filter chip names its value
- * once set ("Tag: ml"); the sort chip always shows "Sort by  <order>".
- */
-function FilterMenu({
-  label,
-  options,
-  value,
-  valueLabel,
-  sort,
-  onSelect,
-}: {
-  label: string;
-  options: ListboxOption<string>[];
-  value: string;
-  valueLabel?: string;
-  /** A sort chip; "changed" when the order is not the default. */
-  sort?: "default" | "changed";
-  onSelect: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  const active = sort ? sort === "changed" : !!value;
-  let text = label;
-  if (sort) text = valueLabel ?? label;
-  else if (valueLabel) text = t("library.filterValue", { label, value: valueLabel });
-  return (
-    <Popover
-      haspopup="listbox"
-      align={sort ? "end" : "start"}
-      className="library-filters-popover"
-      trigger={(props) => (
-        // The trailing space keeps the prefix and value apart in the accessible name.
-        <MenuChip {...props} active={active} prefix={sort ? `${label} ` : undefined}>
-          {text}
-        </MenuChip>
-      )}
-    >
-      {(close) => (
-        <FilterListbox>
-          <PopoverListbox
-            label={label}
-            options={options}
-            value={value}
-            onSelect={(next) => {
-              close();
-              if (next !== value) onSelect(next);
-            }}
-          />
-        </FilterListbox>
-      )}
-    </Popover>
-  );
-}
-
-/**
- * Long tag and collection lists scroll inside the popover: on open the
- * selected option is scrolled into view (the popover focuses it without
- * scrolling), and a typed letter jumps to the next option starting with it,
- * as the native selects did.
- */
-function FilterListbox({ children }: { children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const selected = ref.current?.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
-  }, []);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const key = event.key.toLocaleLowerCase();
-    if (key.length !== 1 || key === " " || event.ctrlKey || event.metaKey || event.altKey) return;
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
-    const current = items.indexOf(document.activeElement as HTMLElement);
-    for (let step = 1; step <= items.length; step++) {
-      const item = items[(current + step) % items.length]!;
-      if ((item.textContent ?? "").trim().toLocaleLowerCase().startsWith(key)) {
-        event.preventDefault();
-        item.focus();
-        return;
       }
-    }
-  };
-
-  return (
-    <div ref={ref} onKeyDown={onKeyDown}>
-      {children}
-    </div>
+    />
   );
 }

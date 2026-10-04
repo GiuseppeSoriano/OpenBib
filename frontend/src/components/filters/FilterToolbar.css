@@ -24,6 +24,24 @@
     box-shadow: var(--shadow-sm);
   }
 
+  /* The clear button replaces the browser's own, which not every engine draws. */
+  .library-filters-search .input:has(+ .library-filters-clear) {
+    padding-right: calc(var(--control-min) + var(--space-xs));
+  }
+  .library-filters-search .input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  .library-filters-clear {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    padding: 0;
+  }
+
   .library-filters-search-icon {
     position: absolute;
     left: var(--space-md);

@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import api, { library, papers as paperApi } from "@/lib/api";
 import { apiErrorText, apiStatus } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Collection, CollectionPaper, LibraryResolveResult, Note } from "@/types";
+import type { Collection, CollectionPaper, LibraryResolveResult, Note, PaperState, PaperTag } from "@/types";
 import ConfirmModal from "@/components/ConfirmModal";
 import PaperCard from "@/components/paper/PaperCard";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import UnresolvedPaperCard from "@/components/paper/UnresolvedPaperCard";
-import AddPaperForm from "@/components/collections/AddPaperForm";
 import ImportIdentifiersModal from "@/components/collections/ImportIdentifiersModal";
+import CollectionFilters from "@/components/collections/CollectionFilters";
 import ZoteroSyncButton from "@/components/zotero/ZoteroSyncButton";
 import RowSkeletons from "@/components/paper/RowSkeletons";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeading from "@/components/ui/SectionHeading";
+import Menu from "@/components/ui/Menu";
 import { useTopBarTitle } from "@/components/shell/ShellContext";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -30,10 +31,22 @@ import {
   Upload,
   FileText,
   FolderOpen,
+  MoreHorizontal,
+  Plus,
+  SearchX,
 } from "lucide-react";
 import "./CollectionDetailPage.css";
 import CollectionSharing from "@/components/collections/CollectionSharing";
 import { useCollectionAccess, collectionRead } from "@/lib/collection-access";
+import {
+  collectionFilterCount,
+  filterCollectionRows,
+  parseCollectionParams,
+  serializeCollectionParams,
+  type CollectionFilterParams,
+  type IdentifierLabels,
+  type RowAnnotations,
+} from "@/lib/collectionParams";
 
 /** A row with no cached details: a pending DOI or a legacy key. */
 function isUnresolved(item: CollectionPaper): boolean {
@@ -60,6 +73,29 @@ export default function CollectionDetailPage() {
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Keyed by the serialized filters so unrelated URL changes keep the same params object.
+  const filterKey = serializeCollectionParams(parseCollectionParams(new URLSearchParams(location.search))).toString();
+  const urlParams = useMemo(() => parseCollectionParams(new URLSearchParams(filterKey)), [filterKey]);
+  // An anonymous viewer has no states or tags: text and sort only.
+  const signedIn = !!user;
+  const params = useMemo<CollectionFilterParams>(
+    () => (signedIn ? urlParams : { q: urlParams.q, sort: urlParams.sort }),
+    [signedIn, urlParams],
+  );
+  // The fragment carries a read link's capability: every filter change keeps it.
+  const setParams = useCallback(
+    (next: CollectionFilterParams, options: { replace?: boolean } = {}) => {
+      const search = serializeCollectionParams(next, new URLSearchParams(location.search)).toString();
+      navigate({ search: search ? `?${search}` : "", hash: location.hash }, options);
+    },
+    [location.search, location.hash, navigate],
+  );
+  const resetFilters = useCallback(() => setParams({}), [setParams]);
+  useAnnotationUpdates(signedIn);
 
   const { data: collection, isLoading, isError: collectionError } = useQuery({
     queryKey: collectionKey,
@@ -198,6 +234,55 @@ export default function CollectionDetailPage() {
     }
   };
 
+  // The reader's own state and tags: the list seeds the per-paper queries,
+  // which then follow edits made on the rows.
+  const annotationsOf = (row: CollectionPaper): RowAnnotations => {
+    const key = row.paper_canonical_key;
+    const states = queryClient.getQueryData<PaperState[]>(["paper-states", key]) ?? row.my_states ?? [];
+    const tags = queryClient.getQueryData<PaperTag[]>(["paper-tags", key]) ?? row.my_tags ?? [];
+    return { state: states.find((s) => s.paper_canonical_key === key)?.state, tags: tags.map(({ tag }) => tag) };
+  };
+  const rows = papers ?? [];
+  // An unresolved row matches on what its card shows (see UnresolvedPaperCard).
+  const identifierLabels: IdentifierLabels = {
+    doi: t("paper.identifierDoi"),
+    arxiv: t("paper.identifierArxiv"),
+    pmid: t("paper.identifierPubmed"),
+    pmcid: t("paper.identifierPmc"),
+    s2: t("paper.semanticScholarRecord"),
+    hash: t("paper.internalReferenceUndated"),
+  };
+  const visibleRows = filterCollectionRows(
+    rows,
+    params,
+    annotationsOf,
+    i18n.resolvedLanguage ?? i18n.language,
+    identifierLabels,
+  );
+  const filtered = collectionFilterCount(params) > 0;
+
+  // A row can leave a filtered list while it holds focus (its state or a tag
+  // changed). Focus would fall to the page body, so it moves to the status
+  // line, or to Reset when nothing matches any more.
+  const listFocused = useRef(false);
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  const resetRef = useRef<HTMLButtonElement>(null);
+  const visibleKeys = visibleRows.map((row) => row.paper_canonical_key).join("\n");
+  useEffect(() => {
+    if (!listFocused.current || !filtered) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    listFocused.current = false;
+    (resetRef.current ?? statusRef.current)?.focus();
+  }, [visibleKeys, filtered]);
+
+  // A More menu item closes the menu; focus goes back to its trigger, where the dialog returns it.
+  const fromMenu = (close: () => void, action: () => void) => () => {
+    close();
+    moreRef.current?.querySelector<HTMLElement>("button[aria-haspopup]")?.focus();
+    action();
+  };
+
   if (isLoading || authLoading) {
     return (
       <div className="collection-detail">
@@ -297,8 +382,14 @@ export default function CollectionDetailPage() {
                 </p>
               </div>
               <div className="page-header-actions">
+                {/* Papers are added from Search, where every result offers "Add to collection". */}
+                {user && collection.can_edit && (
+                  <Link to="/search" className="btn btn-primary">
+                    <Plus size={14} aria-hidden="true" /> {t("collections.addPapers")}
+                  </Link>
+                )}
                 {collection.can_manage_access && (
-                  <button type="button" className="btn btn-primary" onClick={() => setShowSharing(true)}>
+                  <button type="button" className="btn btn-secondary cd-share" onClick={() => setShowSharing(true)}>
                     <Share2 size={14} aria-hidden="true" /> {t("sharing.title")}
                   </button>
                 )}
@@ -307,17 +398,33 @@ export default function CollectionDetailPage() {
                   <GitFork size={14} aria-hidden="true" /> {t("collections.viewGraph")}
                 </Link>
                 {user && collection.can_edit && (
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowImport(true)}>
-                    <Upload size={14} aria-hidden="true" /> {t("collections.importDois")}
-                  </button>
+                  <div ref={moreRef} className="cd-more">
+                    <Menu
+                      align="right"
+                      button={<MoreHorizontal size={16} aria-hidden="true" />}
+                      buttonClassName="btn btn-secondary cd-more-button"
+                      buttonAriaLabel={t("collections.moreActions")}
+                      buttonTitle={t("collections.moreActions")}
+                    >
+                      {(close) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="menu-item"
+                          onClick={fromMenu(close, () => setShowImport(true))}
+                        >
+                          <Upload size={15} aria-hidden="true" />
+                          {t("collections.importDois")}
+                        </button>
+                      )}
+                    </Menu>
+                  </div>
                 )}
                 <ZoteroSyncButton collectionId={id} headers={access.headers} />
               </div>
             </div>
           )}
         </header>
-
-        {collection.can_edit && <AddPaperForm collectionId={id!} onAccessError={refreshAccessAfterError} />}
 
         {/* Paper list */}
         <section className="cd-papers" aria-labelledby="cd-papers-title">
@@ -337,9 +444,45 @@ export default function CollectionDetailPage() {
               description={t(collection.can_edit ? "collections.emptyPapersDescription" : "collections.emptyPapersReadOnly")}
             />
           )}
-          {papers && papers.length > 0 && (
-            <ul className="list-rows cd-paper-list">
-              {papers.map((cp) => (
+          {rows.length > 0 && (
+            <div className="cd-filters">
+              <CollectionFilters
+                params={params}
+                onChange={setParams}
+                onReset={resetFilters}
+                annotations={signedIn ? rows.map(annotationsOf) : null}
+              />
+              <p ref={statusRef} tabIndex={-1} className="cd-filter-status tabular" role="status">
+                {filtered ? t("collections.showingOf", { shown: visibleRows.length, count: rows.length }) : ""}
+              </p>
+            </div>
+          )}
+          {rows.length > 0 && visibleRows.length === 0 && (
+            <EmptyState
+              icon={SearchX}
+              title={t("library.noMatches")}
+              description={t("collections.noMatchesDescription")}
+              action={
+                <button ref={resetRef} type="button" className="btn btn-secondary" onClick={resetFilters}>
+                  {t("common.resetFilters")}
+                </button>
+              }
+            />
+          )}
+          {visibleRows.length > 0 && (
+            <ul
+              className="list-rows cd-paper-list"
+              onFocus={() => {
+                listFocused.current = true;
+              }}
+              onBlur={(event) => {
+                // A removed row blurs with no next target; anything else is a move away.
+                if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+                  listFocused.current = false;
+                }
+              }}
+            >
+              {visibleRows.map((cp) => (
                 <CollectionPaperItem
                   key={cp.paper_canonical_key}
                   item={cp}
@@ -463,6 +606,23 @@ function seedPaperAnnotations(queryClient: QueryClient, rows: CollectionPaper[],
     if (row.my_states) seed(["paper-states", row.paper_canonical_key], row.my_states);
     if (row.my_tags) seed(["paper-tags", row.paper_canonical_key], row.my_tags);
   }
+}
+
+/**
+ * Re-renders when a reading state or tag set changes in the query cache (a
+ * state picked on a row, a tag edit), so the filters see it at once.
+ */
+function useAnnotationUpdates(enabled: boolean) {
+  const queryClient = useQueryClient();
+  const [, setVersion] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.action.type !== "success") return;
+      const head = event.query.queryKey[0];
+      if (head === "paper-states" || head === "paper-tags") setVersion((version) => version + 1);
+    });
+  }, [enabled, queryClient]);
 }
 
 /** Never surface a raw canonical key — degrade to a generic label. */

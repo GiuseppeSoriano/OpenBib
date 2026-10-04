@@ -1299,10 +1299,39 @@ def open_dialog(s: Session, trigger):
     return dialog
 
 
-def dialog_flow(s: Session, r: Result, trigger, name_pattern: str, tabs=15):
-    """F05: name, focus inside, Tab/Shift+Tab containment, #root inert, Escape returns focus."""
+def more_actions_button(s: Session):
+    """The collection header's More actions menu button (editors only)."""
+    return s.page.locator(".cd-header .page-header-actions button[aria-haspopup=menu]").first
+
+
+def open_import_dialog(s: Session):
+    """Open Import DOIs from the collection's More actions menu; returns the dialog."""
+    more = more_actions_button(s)
+    more.wait_for(state="visible", timeout=10000)
+    more.scroll_into_view_if_needed()
+    more.focus()
+    s.page.keyboard.press("Enter")
+    item = (
+        s.page.locator("[role=menu] [role=menuitem]")
+        .filter(has_text=re.compile("Import DOIs|Importa DOI"))
+        .first
+    )
+    item.wait_for(state="visible", timeout=10000)
+    item.click()
+    dialog = s.page.locator("[role=dialog]").last
+    dialog.wait_for(state="visible", timeout=10000)
+    s.page.wait_for_timeout(250)
+    return dialog
+
+
+def dialog_flow(s: Session, r: Result, trigger, name_pattern: str, tabs=15, opener=None):
+    """F05: name, focus inside, Tab/Shift+Tab containment, #root inert, Escape returns focus.
+
+    `opener` opens the dialog some other way (from a menu item) and returns it;
+    focus must still come back to `trigger`.
+    """
     page = s.page
-    dialog = open_dialog(s, trigger)
+    dialog = opener() if opener else open_dialog(s, trigger)
     name = dialog.evaluate(DIALOG_NAME_JS)
     r.info["name"] = name
     r.expect(re.search(name_pattern, name, re.I), f"dialog name {name!r} !~ {name_pattern!r}")
@@ -1396,18 +1425,15 @@ def dialog_checks(runner: Runner, s: Session):
         if "demo2" not in cols:
             raise Skip("no Demo collection 2")
         s.nav(f"/collections/{cols['demo2']}")
-        trigger = (
-            s.page.locator(".cd-header .page-header-actions button")
-            .filter(has_text=re.compile("Import DOIs|Importa DOI"))
-            .first
-        )
-        dialog_flow(s, r, trigger, r".+")
+        if not more_actions_button(s).count():
+            raise Skip("no More actions menu (not an editor?)")
+        dialog_flow(s, r, more_actions_button(s), r".+", opener=lambda: open_import_dialog(s))
 
     def sharing(r):
         if "long" not in cols:
             raise Skip("no long-data collection")
         s.nav(f"/collections/{cols['long']}")
-        trigger = s.page.locator(".cd-header .page-header-actions button.btn-primary").first
+        trigger = s.page.locator(".cd-header .page-header-actions button.cd-share").first
         if not trigger.count():
             raise Skip("no Share button (not the owner?)")
         dialog_flow(s, r, trigger, r".+")
@@ -1501,40 +1527,87 @@ def doi_ui_checks(runner: Runner, s: Session):
     cols = runner.collections
     page = s.page
 
-    def add_form(r):
+    def import_add(r):
+        """The single-DOI field is gone: editors add by DOI through Import DOIs."""
         if "demo3" not in cols:
             raise Skip("no Demo collection 3")
         s.nav(f"/collections/{cols['demo3']}")
+        r.expect(page.locator(".cd-add-form").count() == 0, "the single-DOI add form is back")
+        add = page.locator('.cd-header .page-header-actions a[href="/search"]')
+        r.expect(add.count() == 1, "no Add papers link to /search in the header")
         rows = page.locator(".paper-card").filter(has_text=GNN_TITLE)
         if rows.count():  # a previous run added it: remove it first (rerunnable)
             rows.first.locator(".cd-remove").first.click()
             page.locator("[role=dialog] .btn-danger").click()
             page.wait_for_timeout(1500)
             s.settle()
-        field = page.locator(".cd-add-form input")
-        submit = page.locator(".cd-add-form button[type=submit]")
-        field.fill(GNN_DOI)
-        submit.click()
-        page.locator(".toast").first.wait_for(timeout=30000)
-        s.settle()
-        r.info["toast"] = page.locator(".toast").first.inner_text()
-        r.expect(re.search(r"Added|Aggiunt", r.info["toast"]), f"toast {r.info['toast']!r}")
+
+        def run_import(text: str) -> list[str]:
+            dialog = open_import_dialog(s)
+            dialog.locator("textarea").fill(text)
+            page.wait_for_timeout(300)
+            dialog.locator("button[type=submit]").click()
+            dialog.locator(".cd-import-results-heading").wait_for(timeout=90000)
+            texts = dialog.locator(".cd-import-results li").all_inner_texts()
+            lines = [re.sub(r"\s+", " ", x) for x in texts]
+            dialog.locator("button").filter(has_text=re.compile("^(Done|Fatto)$")).click()
+            page.wait_for_timeout(400)
+            s.settle()
+            return lines
+
+        r.info["added"] = run_import(GNN_DOI)
+        r.expect(
+            any(re.search(r"Added|Aggiunt", x) for x in r.info["added"]),
+            f"lines {r.info['added']!r}",
+        )
         count = page.locator(".paper-card").filter(has_text=GNN_TITLE).count()
         r.expect(count == 1, f"{count} rows for the added paper")
-        field.fill(f"doi:{GNN_DOI}")
-        submit.click()
-        page.locator(".cd-add-error").wait_for(timeout=20000)
-        r.info["duplicate_error"] = page.locator(".cd-add-error").inner_text()
-        r.expect(field.get_attribute("aria-invalid") == "true", "duplicate: no aria-invalid")
+        r.info["duplicate"] = run_import(f"doi:{GNN_DOI}")
+        r.expect(
+            any("Already in the collection" in x for x in r.info["duplicate"]),
+            f"duplicate lines {r.info['duplicate']!r}",
+        )
         mark = s.mark()
-        field.fill("not-a-doi")
-        submit.click()
-        page.wait_for_timeout(800)
-        r.info["invalid_error"] = page.locator(".cd-add-error").inner_text()
-        r.expect(field.get_attribute("aria-invalid") == "true", "not-a-doi: no aria-invalid")
-        sent = s.requests_since(mark, r"/collections/.+/papers", "POST")
+        dialog = open_import_dialog(s)
+        dialog.locator("textarea").fill("not-a-doi")
+        page.wait_for_timeout(300)
+        r.expect(dialog.locator("button[type=submit]").is_disabled(), "not-a-doi: import enabled")
+        r.info["screenshot"] = s.shot("doi-import-add")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+        sent = s.requests_since(mark, r"/collections/.+/import/dois", "POST")
         r.expect(not sent, f"not-a-doi sent {len(sent)} request(s)")
-        r.info["screenshot"] = s.shot("doi-add-form")
+
+    def filter_bar(r):
+        """Client-side text filter, status line, URL sync and Reset on a collection."""
+        target = cols.get("long") or cols.get("demo3")
+        if not target:
+            raise Skip("no collection with papers")
+        s.nav(f"/collections/{target}")
+        field = page.locator(".cd-filters input[type=search]")
+        if not field.count():
+            raise Skip("the collection has no papers")
+        total = page.locator(".cd-paper-list > li").count()
+        title = page.locator(".cd-paper-list .paper-title").first.inner_text().strip()
+        word = max(re.findall(r"\w{4,}", title) or [title], key=len)
+        field.fill(word)
+        page.wait_for_timeout(800)
+        status = page.locator(".cd-filter-status").inner_text().strip()
+        shown = page.locator(".cd-paper-list > li").count()
+        r.info.update(total=total, word=word, status=status, shown=shown)
+        r.expect(1 <= shown <= total, f"{shown} of {total} rows for {word!r}")
+        r.expect(re.search(r"\d", status), f"status line {status!r}")
+        r.expect("q=" in page.url, f"the text is not in the URL: {page.url}")
+        field.fill("zzqx-no-such-paper")
+        page.wait_for_timeout(800)
+        empty = page.locator(".cd-papers .empty-state")
+        r.expect(empty.count() == 1, "no empty-filter state")
+        r.info["screenshot"] = s.shot("collection-filters")
+        empty.locator("button").first.click()
+        page.wait_for_timeout(600)
+        after = page.locator(".cd-paper-list > li").count()
+        r.expect(after == total, f"Reset shows {after} of {total} rows")
+        r.expect("q=" not in page.url, f"Reset left the text in the URL: {page.url}")
 
     def unresolved(r):
         found = {}
@@ -1575,7 +1648,8 @@ def doi_ui_checks(runner: Runner, s: Session):
                 r.expect(any(word in b for b in col["actions"]), f"collection row lacks {word!r}")
             r.expect(col["explore_graph"] == 0, "unresolved collection row offers Explore graph")
 
-    runner.run("DOI-UI", s, add_form, "add-form", provider=True)
+    runner.run("DOI-UI", s, import_add, "import-add", provider=True)
+    runner.run("DOI-UI", s, filter_bar, "filter-bar")
     runner.run("DOI-UI", s, unresolved, "unresolved")
 
 
@@ -1588,10 +1662,7 @@ def import_checks(runner: Runner, s: Session):
         if "demo2" not in cols:
             raise Skip("no Demo collection 2")
         s.nav(f"/collections/{cols['demo2']}")
-        page.locator(".cd-header .page-header-actions button").filter(
-            has_text=re.compile("Import DOIs")
-        ).first.click()
-        dialog = page.locator("[role=dialog]").last
+        dialog = open_import_dialog(s)
         area = dialog.locator("textarea")
         area.fill("not-a-doi")
         page.wait_for_timeout(300)

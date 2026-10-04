@@ -157,7 +157,7 @@ Functional checks (S01, S02, S05, DOI-UI, F06, F07, F08, S07, S08) run once per 
 ### What it changes
 
 Most checks only read. These write to the seeded `audit@example.com` data, and stay rerunnable:
-- **DOI-UI** adds `10.1109/tnn.2008.2005605` to *Demo collection 3*. If it is already there, the check removes it first.
+- **DOI-UI** imports `10.1109/tnn.2008.2005605` into *Demo collection 3* through the header's More actions → Import DOIs (collections have no single-DOI field), then imports it again to see "Already in the collection". If it is already there, the check removes it first. Its filter-bar check only reads: it types into the collection's filter bar and resets it.
 - **S05** imports the GNN DOI and a demo DOI into *Demo collection 2*. A second run reports them as already present.
 - **F07** signs out at the end of the signed-in phase.
 

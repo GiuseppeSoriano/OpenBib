@@ -29,6 +29,12 @@
     min-width: var(--control-min);
   }
 
+  /* The More menu's trigger: an icon button as tall as its neighbours. */
+  .cd-more-button {
+    min-width: var(--control-min);
+    padding-inline: 0;
+  }
+
   .cd-description {
     overflow-wrap: anywhere;
   }
@@ -70,6 +76,23 @@
   }
   .cd-papers-count {
     color: var(--color-text-secondary);
+  }
+
+  /* The Library's toolbar, then the status line. */
+  .cd-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+  }
+  .cd-filter-status {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+  /* The status region stays rendered (and announced) while empty: cancel
+     the gap it would add instead of hiding it. */
+  .cd-filter-status:empty {
+    margin-top: calc(-1 * var(--space-sm));
   }
 
   .cd-row {

@@ -1,47 +1,22 @@
 @layer components {
-  /* ── Add one paper ──────────────────────────────────────── */
+  /* ── Import ─────────────────────────────────────────────── */
 
-  .cd-add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-width: 44rem;
-  }
-
-  .cd-add-label,
   .cd-import-label {
     font-size: var(--text-sm);
     font-weight: 500;
   }
 
-  .cd-add-row {
-    display: flex;
-    gap: var(--space-sm);
-  }
-  .cd-add-row .input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .cd-add-hint,
   .cd-import-hint,
   .cd-import-summary {
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
 
-  .cd-add-error,
   .cd-import-error {
     font-size: var(--text-sm);
     color: var(--color-danger);
     overflow-wrap: anywhere;
   }
-
-  .cd-add-form .input[aria-invalid="true"] {
-    border-color: var(--color-danger);
-  }
-
-  /* ── Import ─────────────────────────────────────────────── */
 
   .cd-import {
     display: flex;
@@ -130,11 +105,5 @@
     flex-basis: 100%;
     color: var(--color-text-secondary);
     overflow-wrap: anywhere;
-  }
-
-  @media (max-width: 639px) {
-    .cd-add-row {
-      flex-direction: column;
-    }
   }
 }
