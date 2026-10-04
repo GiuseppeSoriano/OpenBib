@@ -36,6 +36,14 @@ async function profileFields() {
 }
 
 describe("mailbox-first registration", () => {
+  it("sets the step above the serif title, under a home link", async () => {
+    show();
+    expect(await screen.findByRole("heading", { level: 1, name: "Create your account" })).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toContainElement(screen.getByLabelText("Email"));
+    expect(screen.getByRole("link", { name: "OpenBib home" })).toHaveAttribute("href", "/");
+  });
+
   it("requires matching confirmation and accepts an eight-character password", async () => {
     flow = { ...otp, stage: "profile" }; show();
     await profileFields();

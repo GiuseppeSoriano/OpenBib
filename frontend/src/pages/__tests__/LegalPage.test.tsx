@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import LegalPage from "@/pages/LegalPage";
@@ -8,9 +8,10 @@ import localLegal from "../../../public/legal.json";
 
 let config: LegalConfig | undefined;
 let loading = false;
+const refetch = vi.fn();
 vi.mock("@/lib/legal", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/legal")>()),
-  useLegalConfig: () => ({ data: config, isLoading: loading, error: null }),
+  useLegalConfig: () => ({ data: config, isLoading: loading, error: null, refetch, isFetching: false }),
 }));
 
 const legal = () => config as LegalConfig;
@@ -18,6 +19,7 @@ const legal = () => config as LegalConfig;
 beforeEach(() => {
   config = structuredClone(localLegal) as LegalConfig;
   loading = false;
+  refetch.mockClear();
 });
 
 async function show(kind: "privacy" | "terms" = "privacy", language = "en") {
@@ -206,11 +208,19 @@ describe("page states", () => {
     loading = true;
     config = undefined;
     const { unmount } = await show("privacy", "it");
-    expect(screen.getByText("Caricamento…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Caricamento…");
     unmount();
     loading = false;
     await show("terms", "it");
     expect(screen.getByText("Le informazioni legali non sono disponibili.")).toBeInTheDocument();
+  });
+
+  it("reports an unavailable configuration as an alert with a retry", async () => {
+    config = undefined;
+    await show("privacy", "en");
+    expect(screen.getByRole("alert")).toHaveTextContent("Legal information is unavailable.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -225,5 +235,19 @@ describe.each(["en", "it"])("sharing and registration disclosures (%s)", (locale
   it("describes read-only links and collaborators in the terms", async () => {
     await show("terms", locale);
     expect(screen.getByText(locale === "it" ? /link di sola lettura e collaboratori autorizzati/ : /read-only links and authorized collaborators/)).toBeInTheDocument();
+  });
+});
+
+describe.each(["privacy", "terms"] as const)("title block (%s)", (kind) => {
+  it("sets the eyebrow, the only h1 and the version line before the first section", async () => {
+    await show(kind, "en");
+    const title = screen.getByRole("heading", { level: 1 });
+    const block = title.closest("header")!;
+    expect(block).toHaveTextContent(/^Legal/);
+    const version = kind === "terms" ? legal().terms_version : legal().privacy_version;
+    expect(block).toHaveTextContent(`Version ${version}, effective ${legal().effective_date}.`);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    const firstSection = screen.getAllByRole("heading", { level: 2 })[0]!;
+    expect(block.compareDocumentPosition(firstSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

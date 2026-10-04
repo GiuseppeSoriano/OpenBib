@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Search, GitFork, BookMarked } from "lucide-react";
-import Logo from "@/components/ui/Logo";
+import { Search } from "lucide-react";
+import SectionHeading from "@/components/ui/SectionHeading";
 import "./LandingPage.css";
+
+const FEATURES = ["Search", "Graph", "Library"] as const;
 
 export default function LandingPage() {
   const { t } = useTranslation();
@@ -19,63 +21,65 @@ export default function LandingPage() {
 
   return (
     <div className="landing">
-      <div className="landing-hero">
-        <Logo size={52} className="landing-logo" />
-        <h1 className="landing-title">OpenBib</h1>
-        <p className="landing-tagline">{t("landing.tagline")}</p>
+      <section className="landing-hero" aria-labelledby="landing-title">
+        <p className="landing-eyebrow">OpenBib</p>
+        <h1 id="landing-title" className="landing-title">
+          {t("landing.tagline")}
+        </h1>
+        <p className="landing-lede">{t("landing.lede")}</p>
 
         <form onSubmit={handleSearch} className="landing-search" role="search">
-          <div className="landing-search-wrap">
-            <Search size={18} className="landing-search-icon" />
+          <label htmlFor="landing-query" className="sr-only">
+            {t("search.queryLabel")}
+          </label>
+          <div className="landing-field">
+            <Search size={18} className="landing-field-icon" aria-hidden="true" />
             <input
-              className="input landing-search-input"
-              type="text"
+              id="landing-query"
+              className="landing-field-input"
+              type="search"
               placeholder={t("landing.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-keyshortcuts="/"
               autoFocus
             />
+            <kbd className="landing-field-kbd" aria-hidden="true">
+              /
+            </kbd>
           </div>
           <button type="submit" className="btn btn-primary landing-search-btn">
             {t("search.submit")}
           </button>
         </form>
 
-        <p className="landing-hint">{t("landing.hint")}</p>
+        <div className="landing-account">
+          <p className="landing-hint">{t("landing.hint")}</p>
+          <div className="landing-ctas">
+            <Link to="/register" className="btn btn-secondary">
+              {t("auth.createAccount")}
+            </Link>
+            <Link to="/login" className="btn btn-secondary">
+              {t("auth.signIn")}
+            </Link>
+          </div>
+        </div>
+      </section>
 
-        <div className="landing-ctas">
-          <Link to="/register" className="btn btn-primary">
-            {t("auth.createAccount")}
-          </Link>
-          <Link to="/login" className="btn btn-secondary">
-            {t("auth.signIn")}
-          </Link>
-        </div>
-      </div>
-
-      <div className="landing-features">
-        <div className="landing-feature">
-          <span className="landing-feature-icon">
-            <Search size={18} />
-          </span>
-          <h3>{t("landing.featureSearchTitle")}</h3>
-          <p>{t("landing.featureSearchDesc")}</p>
-        </div>
-        <div className="landing-feature">
-          <span className="landing-feature-icon">
-            <GitFork size={18} />
-          </span>
-          <h3>{t("landing.featureGraphTitle")}</h3>
-          <p>{t("landing.featureGraphDesc")}</p>
-        </div>
-        <div className="landing-feature">
-          <span className="landing-feature-icon">
-            <BookMarked size={18} />
-          </span>
-          <h3>{t("landing.featureLibraryTitle")}</h3>
-          <p>{t("landing.featureLibraryDesc")}</p>
-        </div>
-      </div>
+      <section className="landing-features" aria-labelledby="landing-features-title">
+        <SectionHeading id="landing-features-title" title={t("landing.featuresTitle")} />
+        <ol className="list-rows landing-feature-list">
+          {FEATURES.map((feature, index) => (
+            <li key={feature} className="list-row landing-feature">
+              <span className="landing-feature-num tabular" aria-hidden="true">
+                {index + 1}
+              </span>
+              <h3 className="landing-feature-title">{t(`landing.feature${feature}Title`)}</h3>
+              <p className="landing-feature-desc">{t(`landing.feature${feature}Desc`)}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
     </div>
   );
 }
