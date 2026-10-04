@@ -6,6 +6,8 @@ type: software
 authors:
   - family-names: "Soriano"
     given-names: "Giuseppe"
+  - family-names: "Ligato"
+    given-names: "Giovanni"
 repository-code: "https://github.com/GiuseppeSoriano/OpenBib"
 url: "https://github.com/GiuseppeSoriano/OpenBib"
 license: MIT
