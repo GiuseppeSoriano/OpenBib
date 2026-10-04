@@ -39,22 +39,25 @@ const TRUST: ReadonlyArray<{ key: string; icon: LucideIcon }> = [
   { key: "yourData", icon: Download },
 ];
 
-/* The hero motif: a small citation network in the graph page's colours
-   (plain, saved, pinned, and the selected paper with its amber ring). */
-type NodeKind = "plain" | "saved" | "pinned";
-const NET_NODES: ReadonlyArray<[number, number, number, NodeKind]> = [
-  [62, 58, 6, "plain"],
-  [128, 30, 5, "saved"],
-  [236, 44, 7, "pinned"],
-  [290, 128, 5, "plain"],
-  [252, 214, 6, "saved"],
-  [150, 236, 5, "plain"],
-  [52, 186, 7, "pinned"],
-  [210, 128, 4, "plain"],
-  [98, 128, 4, "plain"],
-  [24, 112, 4, "plain"],
-  [300, 228, 4, "plain"],
+/* The hero motif: a small citation network drawn like the graph page (plain
+   and pinned papers, the Library's centre mark, the selected paper's amber ring). */
+type NodeKind = "plain" | "pinned";
+// x, y, radius, kind, in the Library
+const NET_NODES: ReadonlyArray<[number, number, number, NodeKind, boolean]> = [
+  [62, 58, 6, "plain", false],
+  [128, 30, 6, "plain", true],
+  [236, 44, 7, "pinned", true],
+  [290, 128, 5, "plain", false],
+  [252, 214, 7, "plain", true],
+  [150, 236, 5, "plain", false],
+  [52, 186, 7, "pinned", false],
+  [210, 128, 4, "plain", false],
+  [98, 128, 4, "plain", false],
+  [24, 112, 4, "plain", false],
+  [300, 228, 4, "plain", false],
 ];
+// The mark's share of the node radius, as on the graph canvas.
+const MARK_SHARE = 0.4;
 const NET_CENTER: [number, number] = [160, 130];
 const NET_EDGES: ReadonlyArray<[number, number]> = [
   [0, 1],
@@ -85,8 +88,11 @@ function CitationMotif() {
           <line key={`c-${index}`} className="landing-motif-spoke" x1={cx} y1={cy} x2={x} y2={y} />
         ))}
       </g>
-      {NET_NODES.map(([x, y, r, kind], index) => (
-        <circle key={index} className={`landing-motif-node landing-motif-node--${kind}`} cx={x} cy={y} r={r} />
+      {NET_NODES.map(([x, y, r, kind, library], index) => (
+        <g key={index}>
+          <circle className={`landing-motif-node landing-motif-node--${kind}`} cx={x} cy={y} r={r} />
+          {library && <circle className="landing-motif-mark" cx={x} cy={y} r={r * MARK_SHARE} />}
+        </g>
       ))}
       <circle className="landing-motif-halo" cx={cx} cy={cy} r={20} />
       <circle className="landing-motif-ring" cx={cx} cy={cy} r={13} />

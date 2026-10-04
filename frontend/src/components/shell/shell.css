@@ -266,7 +266,7 @@
     width: 100%;
     border: 0;
     background: transparent;
-    font: inherit;
+    font-family: inherit; /* not the font shorthand: the size and weight come from .sidebar-link */
     text-align: left;
     cursor: pointer;
   }

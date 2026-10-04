@@ -247,8 +247,9 @@
   .landing-motif-node--plain {
     fill: var(--graph-node);
   }
-  .landing-motif-node--saved {
-    fill: var(--graph-node-saved);
+  /* A Library paper: the centre punched through in the motif's ground colour. */
+  .landing-motif-mark {
+    fill: var(--color-surface);
   }
   .landing-motif-node--pinned {
     fill: var(--graph-node-pinned);
