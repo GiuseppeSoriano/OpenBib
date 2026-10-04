@@ -75,7 +75,6 @@ const NON_TEXT: [string, string][] = [
   ["--color-state-reading", "--color-bg"],
   ["--color-state-read", "--color-bg"],
   ["--graph-node-pinned", "--color-bg"],
-  ["--graph-node-saved", "--color-bg"],
   ["--graph-node-selected", "--color-bg"],
   ["--graph-node", "--color-bg"],
   // The Library mark, punched through either node fill.
@@ -113,5 +112,10 @@ describe("shell tokens", () => {
     expect(dark["--color-sidebar"]).toBe("#0d1110");
     expect(dark["--color-hairline"]).toBe("#222c29");
     expect(dark["--color-rule"]).toBe("#5a6863");
+  });
+
+  it("keeps the graph legend pill opaque, so canvas labels never show through it", () => {
+    expect(light["--graph-legend-bg"]).toBe(light["--color-surface"]);
+    expect(dark["--graph-legend-bg"]).toBe(dark["--color-surface"]);
   });
 });

@@ -107,9 +107,7 @@ export default function GraphPaperList({
       typeof paper.cited_by_count === "number" ? t("common.citedBy", { count: paper.cited_by_count }) : null,
       // The dot's Library mark, in words.
       saved.has(node.id) ? t("graph.listInLibrary") : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+    ].filter((part): part is string => !!part);
   };
 
   // A paper selected on the canvas (or anywhere else) is brought into view.
@@ -218,7 +216,7 @@ export default function GraphPaperList({
             <ul className="graph-list">
               {section.nodes.map((node) => {
                 const title = paperTitle(node.selected_version, t);
-                const line = meta(node);
+                const parts = meta(node);
                 return (
                   <li key={node.id} className="graph-list-row">
                     <button
@@ -234,7 +232,17 @@ export default function GraphPaperList({
                         <span className="graph-list-name" title={title}>
                           {title}
                         </span>
-                        {line && <span className="graph-list-meta tabular">{line}</span>}
+                        {parts.length > 0 && (
+                          <span className="graph-list-meta tabular">
+                            {parts.map((part, index) => (
+                              <span key={index}>
+                                {/* A no-break space before the dot: a wrapped line never opens with "·". */}
+                                {index > 0 && " · "}
+                                <span className="graph-list-meta-part">{part}</span>
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </span>
                     </button>
                     <PinToggle

@@ -688,6 +688,10 @@
     line-height: 1.35;
     color: var(--color-text-muted);
   }
+  /* The line breaks between its parts, never inside "In Library". */
+  .graph-list-meta-part {
+    white-space: nowrap;
+  }
 
   /* Node dots (list rows, summary, legend): the canvas's marks in HTML.
      Two fills only, the accent for pins and the grey for every other
@@ -736,20 +740,68 @@
     align-items: center;
     gap: 6px;
   }
-  /* Wide screens: a pill at the canvas's bottom left. */
-  .graph-legend--overlay {
+  /* Wide screens: a pill at the canvas's bottom left, opaque so no edge or
+     label shows through. Collapsed it is only the "Legend" chip; open, the
+     toggle shrinks to its caret before the entries. */
+  .graph-legend-pill {
     position: absolute;
     left: var(--space-md);
     bottom: var(--space-md);
     z-index: 10;
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs) 14px;
+    align-items: center;
     max-width: calc(100% - 2 * var(--space-md));
-    padding: 6px 12px;
     border: 1px solid var(--color-hairline);
     border-radius: var(--radius-full);
     background: var(--graph-legend-bg);
+  }
+  .graph-legend-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: none;
+    align-self: stretch;
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    padding: 0 10px 0 14px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  .graph-legend-pill--open .graph-legend-toggle {
+    padding: 0;
+  }
+  .graph-legend-toggle:hover {
+    background: var(--color-hover-quiet);
+    color: var(--color-text);
+  }
+  .graph-legend-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .graph-legend-caret {
+    flex: none;
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .graph-legend-pill--open .graph-legend-caret {
+    transform: rotate(180deg);
+  }
+  .graph-legend--overlay {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) 14px;
+    min-width: 0;
+    padding: 6px 14px 6px 2px;
+  }
+  .graph-legend--overlay[hidden] {
+    display: none;
   }
   .graph-legend--inline {
     display: flex;

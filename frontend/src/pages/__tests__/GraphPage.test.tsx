@@ -265,17 +265,21 @@ describe("GraphPage (desktop)", () => {
     const order = within(bar()).getByRole("radiogroup", { name: "Order" });
     expect(within(order).getByRole("radio", { name: "Most cited" })).toHaveAttribute("aria-checked", "true");
     expect(within(order).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "false");
-    // A pill legend floats on the canvas, edge direction included.
+    // A pill legend floats on the canvas, edge direction included, open by
+    // default behind its "Legend" disclosure.
     const legend = screen.getByRole("list", { name: "Legend" });
+    const legendToggle = screen.getByRole("button", { name: "Legend" });
+    expect(legendToggle).toHaveAttribute("aria-expanded", "true");
+    expect(legendToggle).toHaveAttribute("aria-controls", legend.id);
     expect(within(legend).getAllByRole("listitem").map((item) => item.textContent?.trim())).toEqual([
       "Pinned",
       "Paper (size = citations)",
-      "In Library (dot inside)",
+      "In Library",
       "Selected",
       "A → B: A cites B",
     ]);
     // Library membership is the grey dot's centre mark, not a third fill.
-    const librarySwatch = within(legend).getByText("In Library (dot inside)").querySelector(".legend-dot");
+    const librarySwatch = within(legend).getByText("In Library").querySelector(".legend-dot");
     expect(librarySwatch).toHaveClass("legend-dot--saved");
     expect(librarySwatch).not.toHaveClass("legend-dot--pinned");
 
@@ -936,7 +940,7 @@ describe("GraphPage (compact)", () => {
     expect(within(dialog).getByText("Legend")).toBeInTheDocument();
     expect(within(dialog).getByText("Pinned")).toBeInTheDocument();
     expect(within(dialog).getByText("Selected")).toBeInTheDocument();
-    expect(within(dialog).getByText("In Library (dot inside)").querySelector(".legend-dot")).toHaveClass("legend-dot--saved");
+    expect(within(dialog).getByText("In Library").querySelector(".legend-dot")).toHaveClass("legend-dot--saved");
     expect(within(dialog).getByText("A → B: A cites B")).toBeInTheDocument();
 
     fireEvent.keyDown(dialog, { key: "Escape" });

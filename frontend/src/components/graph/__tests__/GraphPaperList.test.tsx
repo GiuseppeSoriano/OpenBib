@@ -185,6 +185,11 @@ describe("GraphPaperList", () => {
     expect(plain.querySelector(".graph-dot")).not.toHaveClass("graph-dot--saved");
     expect(pinnedSaved.querySelector(".graph-list-meta")).toHaveTextContent("2017 · Cited by 120,000 · In Library");
     expect(plain.querySelector(".graph-list-meta")).toHaveTextContent(/^2016 · Cited by 0$/);
+    // The line may break between its parts, never inside "In Library".
+    const parts = Array.from(pinnedSaved.querySelectorAll(".graph-list-meta-part")).map((part) => part.textContent);
+    expect(parts).toEqual(["2017", "Cited by 120,000", "In Library"]);
+    // ...and never before a separator, so no line opens with "·".
+    expect(pinnedSaved.querySelector(".graph-list-meta")?.textContent).toBe("2017 · Cited by 120,000 · In Library");
   });
 
   it("keeps the sheet variant's heading for assistive tech only, without Close", () => {

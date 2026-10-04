@@ -85,18 +85,16 @@
     --graph-node: #858f8a;
     --graph-node-pinned: var(--color-accent);
     /* Library membership is a mark, not a fill: a centre dot punched
-       through the node in the canvas colour (3:1+ on both node fills).
-       --graph-node-saved no longer fills graph nodes. */
+       through the node in the canvas colour (3:1+ on both node fills). */
     --graph-node-mark: var(--graph-canvas);
-    --graph-node-saved: var(--color-success);
     --graph-node-selected: var(--color-warning);
     /* Soft halo outside the selected node's amber ring */
     --graph-node-halo: color-mix(in srgb, var(--graph-node-selected) 18%, transparent);
     /* Gap between a selected node and its amber selection ring */
     --graph-node-gap: var(--graph-canvas);
     --graph-edge: #d6dcd8;
-    /* Floating legend pill over the canvas */
-    --graph-legend-bg: color-mix(in srgb, var(--color-surface) 90%, transparent);
+    /* Floating legend pill over the canvas: opaque, so nothing shows through */
+    --graph-legend-bg: var(--color-surface);
 
     /* Typography — Fontsource registers the variable family under the
        "<Name> Variable" alias, so it must come first in the stack. */
