@@ -13,7 +13,8 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ToastProvider } from "@/components/ui/Toast";
 import { clearLastSearch, getLastSearch, setLastSearch } from "@/lib/lastSearch";
 import { resultElementId } from "@/lib/search-pages";
-import { renderWithProviders } from "@/test/utils";
+import { mockMatchMedia, renderWithProviders, restoreMatchMedia } from "@/test/utils";
+import { COMPACT_QUERY } from "@/lib/breakpoints";
 import type { PaperMetadata, SearchParams, SearchResult, SearchResultItem } from "@/types";
 
 vi.mock("@/lib/api", () => ({
@@ -197,7 +198,7 @@ afterEach(() => {
 describe("SearchPage — results", () => {
   it("has a page heading before and after a search", async () => {
     renderSearch(["/search"]);
-    expect(screen.getByRole("heading", { level: 1, name: "Search papers" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Search the literature" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
 
     fireEvent.change(searchBox(), { target: { value: "databases" } });
@@ -212,9 +213,7 @@ describe("SearchPage — results", () => {
     expect(await screen.findByText("Solo Paper")).toBeInTheDocument();
     expect(screen.getByText("Grouped Paper")).toBeInTheDocument();
     expect(searchBox()).toHaveValue("databases");
-    expect(screen.getByTestId("search-status")).toHaveTextContent(
-      "Results from Semantic Scholar · showing 2 of about 1,234",
-    );
+    expect(screen.getByTestId("search-status")).toHaveTextContent("Semantic Scholar · 2 of about 1,234 results");
     expect(searchCalls()).toEqual([{ q: "databases", size: 20, page: 1 }]);
     // The anonymous startup (a failed cookie refresh) keeps it as the last search.
     expect(getLastSearch()).toBe("q=databases");
@@ -233,7 +232,14 @@ describe("SearchPage — results", () => {
     await screen.findByText("Solo Paper");
     expect(screen.queryByText("Unsaved only")).toBeNull();
     expect(screen.queryByText("Hide dismissed")).toBeNull();
-    expect(screen.queryByText("Save to Library")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Not relevant" })).toBeNull();
+    // Cite and the citation graph need no account.
+    expect(screen.getAllByRole("button", { name: "Cite" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Citation graph" })[0]).toHaveAttribute(
+      "href",
+      "/graph/doi%3A10.1%2Fsolo",
+    );
   });
 
   it("says when Semantic Scholar has no matches", async () => {
@@ -342,34 +348,45 @@ describe("SearchPage — URL and history", () => {
   });
 });
 
+const yearChip = () => screen.getByRole("button", { name: /^Year/ });
+const sortChip = () => screen.getByRole("button", { name: /^Sort/ });
+
 describe("SearchPage — filters", () => {
-  it("keeps filters in the URL with an active count and a reset", async () => {
+  it("keeps filters in the URL, names them in the status line and resets them", async () => {
     renderSearch(["/search?q=gnn"]);
     await screen.findByText("Solo Paper");
 
-    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "date" } });
+    fireEvent.click(sortChip());
+    fireEvent.click(screen.getByRole("option", { name: "Newest first" }));
     await waitFor(() => expect(location()).toBe("/search?q=gnn&sort=date"));
     expect(screen.getByText(/lists only papers that match all of your words/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open access only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open access" }));
     await waitFor(() => expect(location()).toBe("/search?q=gnn&oa=1&sort=date"));
-    expect(screen.getByRole("button", { name: "Open access only" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Open access" })).toHaveAttribute("aria-pressed", "true");
 
+    fireEvent.click(yearChip());
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "2019" } });
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "2021" } });
     expect(location()).toBe("/search?q=gnn&oa=1&sort=date");
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(location()).toBe("/search?q=gnn&year_from=2019&year_to=2021&oa=1&sort=date"));
-    expect(screen.getByText("2 filters active")).toBeInTheDocument();
+    expect(yearChip()).toHaveAccessibleName("Year: 2019–2021");
     await waitFor(() =>
       expect(searchCalls().pop()).toEqual({
         q: "gnn", size: 20, year_from: 2019, year_to: 2021, open_access_only: true, sort: "date", page: 1,
       }),
     );
+    await waitFor(() =>
+      expect(screen.getByTestId("search-status")).toHaveTextContent(
+        "Semantic Scholar · 2 of about 1,234 results · 2019–2021 · open access only · newest first",
+      ),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
     await waitFor(() => expect(location()).toBe("/search?q=gnn&sort=date"));
-    expect(screen.queryByText(/filters? active/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset filters" })).toBeNull();
+    fireEvent.click(yearChip());
     expect(screen.getByLabelText("From")).toHaveValue(null);
 
     // Each applied change was one deliberate history entry.
@@ -381,6 +398,7 @@ describe("SearchPage — filters", () => {
   it("rejects a reversed year range without searching", async () => {
     renderSearch(["/search?q=gnn"]);
     await screen.findByText("Solo Paper");
+    fireEvent.click(yearChip());
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "2022" } });
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "2020" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
@@ -394,12 +412,14 @@ describe("SearchPage — filters", () => {
     renderSearch(["/search?q=gnn&year_from=1500&sort=popular&oa=maybe"]);
     await screen.findByText("Solo Paper");
     expect(searchCalls()).toEqual([{ q: "gnn", size: 20, page: 1 }]);
-    expect(screen.queryByText(/filters? active/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset filters" })).toBeNull();
+    expect(yearChip()).toHaveAccessibleName("Year");
   });
 
   it("applies typed years with the next search, and stops on invalid ones", async () => {
     renderSearch(["/search?q=gnn"]);
     await screen.findByText("Solo Paper");
+    fireEvent.click(yearChip());
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "1700" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Enter a year between 1800");
@@ -410,20 +430,23 @@ describe("SearchPage — filters", () => {
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(location()).toBe("/search?q=graphs&year_from=2019"));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("1 filter active")).toBeInTheDocument();
+    expect(yearChip()).toHaveAccessibleName("Year: Since 2019");
     await waitFor(() => expect(searchCalls().pop()).toEqual({ q: "graphs", size: 20, year_from: 2019, page: 1 }));
   });
 
-  it("applies a sort once the choice settles, as one history entry", async () => {
+  it("applies a sort chosen from the listbox as one history entry", async () => {
     renderSearch(["/", "/search?q=gnn"]);
     await screen.findByText("Solo Paper");
-    const select = screen.getByLabelText("Sort by");
-    // Arrow keys on a closed select fire one change per option.
-    fireEvent.change(select, { target: { value: "date" } });
-    fireEvent.change(select, { target: { value: "citations" } });
+    fireEvent.click(sortChip());
+    const listbox = screen.getByRole("listbox", { name: "Sort by" });
+    // Moving through the options searches nothing; Enter chooses.
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
     expect(location()).toBe("/search?q=gnn");
-    expect(screen.getByText(/lists only papers that match all of your words/)).toBeInTheDocument();
+    fireEvent.keyDown(listbox, { key: "Enter" });
     await waitFor(() => expect(location()).toBe("/search?q=gnn&sort=citations"));
+    expect(sortChip()).toHaveFocus();
+    expect(screen.getByText(/lists only papers that match all of your words/)).toBeInTheDocument();
     await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
     expect(searchCalls().map((call) => call.sort)).toEqual([undefined, "citations"]);
     act(() => navigateTo(-1));
@@ -448,7 +471,7 @@ describe("SearchPage — Show more", () => {
     expect(screen.getAllByText("Solo Paper")).toHaveLength(1);
     expect(searchCalls()[1]).toEqual({ q: "databases", size: 20, page: 2 });
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
-    expect(screen.getByTestId("search-status")).toHaveTextContent("showing 3 of about 1,234");
+    expect(screen.getByTestId("search-status")).toHaveTextContent("3 of about 1,234 results");
   });
 
   it("follows the cursor for the citation sort", async () => {
@@ -605,7 +628,14 @@ describe("SearchPage — possible other versions", () => {
     renderSearch(["/search?q=databases"]);
     await screen.findByText("Solo Paper");
     const meta = screen.getAllByText((_, element) => element?.classList.contains("paper-meta") ?? false);
-    expect(meta[0]).toHaveTextContent("VLDB · 2024 · Cited by 5 · Semantic Scholar");
+    // Rows leave the visible provider to the status line; assistive tech and
+    // the tooltip still name it with the count.
+    expect(meta[0]).toHaveTextContent("VLDB · 2024 · Cited by 5, Citation count from Semantic Scholar");
+    expect(meta[0]!.querySelector(".paper-citations")).toHaveAttribute(
+      "title",
+      "Citation count from Semantic Scholar",
+    );
+    expect(screen.getByTestId("search-status")).toHaveTextContent(/^Semantic Scholar ·/);
   });
 });
 
@@ -669,5 +699,77 @@ describe("SearchPage — Search link", () => {
     expect(searchBox()).toHaveValue("foo");
     act(() => navigateTo(-1));
     expect(location()).toBe("/");
+  });
+});
+
+describe("SearchPage — signed-in filters and row actions", () => {
+  function signIn() {
+    testAuth.authenticated = true;
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      if (url === "/users/me") return { data: { id: "u1", email: "a@example.com", display_name: "Ada" } };
+      if (url === "/collections/paper-memberships") return { data: { "doi:10.1/solo": ["c1"] } };
+      return { data: [] };
+    });
+  }
+
+  it("filters the loaded results with the personal chips, named in the status line", async () => {
+    signIn();
+    renderSearch(["/search?q=databases"]);
+    await screen.findByText("Solo Paper");
+    const unsaved = await screen.findByRole("button", { name: "Unsaved only" });
+    expect(screen.getByRole("button", { name: "Hide dismissed" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/collections/paper-memberships"));
+    await screen.findByText("Saved");
+
+    fireEvent.click(unsaved);
+    await waitFor(() => expect(screen.queryByText("Solo Paper")).toBeNull());
+    expect(screen.getByTestId("search-status")).toHaveTextContent("1 of about 1,234 results · unsaved only");
+    // A local filter: no new search and no history entry.
+    expect(location()).toBe("/search?q=databases");
+    expect(search).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(await screen.findByText("Solo Paper")).toBeInTheDocument();
+    expect(unsaved).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("offers quiet Save, Cite and Not relevant actions on each row", async () => {
+    signIn();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderSearch(["/search?q=databases"]);
+    const title = await screen.findByRole("button", { name: "Solo Paper" });
+    const row = title.closest("li")!;
+    expect(within(row).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Not relevant" })).toBeInTheDocument();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Cite" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Smith, A. (2024). Solo Paper. VLDB."));
+    expect(await screen.findByText("Reference copied to the clipboard")).toBeInTheDocument();
+  });
+
+  it("folds Cite, Citation graph and Not relevant into a More menu on phones", async () => {
+    signIn();
+    mockMatchMedia((query) => query === COMPACT_QUERY);
+    try {
+      renderSearch(["/search?q=databases"]);
+      const title = await screen.findByRole("button", { name: "Solo Paper" });
+      const row = title.closest("li")!;
+      expect(within(row).queryByRole("button", { name: "Cite" })).toBeNull();
+      const more = within(row).getByRole("button", { name: "More actions" });
+      fireEvent.click(more);
+      const menu = within(row).getByRole("menu");
+      expect(within(menu).getByRole("menuitem", { name: "Cite" })).toBeInTheDocument();
+      expect(within(menu).getByRole("menuitem", { name: "Citation graph" })).toHaveAttribute(
+        "href",
+        "/graph/doi%3A10.1%2Fsolo",
+      );
+      fireEvent.click(within(menu).getByRole("menuitem", { name: "Not relevant" }));
+      expect(within(row).queryByRole("menu")).toBeNull();
+      expect(more).toHaveFocus();
+      await waitFor(() => expect(api.post).toHaveBeenCalledWith("/papers/doi%3A10.1%2Fsolo/dismiss"));
+    } finally {
+      restoreMatchMedia();
+    }
   });
 });

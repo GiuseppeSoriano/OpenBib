@@ -64,6 +64,11 @@ describe("PaperCard", () => {
     expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("Cited by 12");
   });
 
+  it("formats large citation counts with the locale's grouping", () => {
+    renderCard({ paper: { ...paper, cited_by_count: 10565 } });
+    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("Cited by 10,565");
+  });
+
   it("lists the sources when they add to the citation provenance", () => {
     renderCard({ providerSources: ["openalex", "crossref"] });
     expect(screen.getByText(/— OpenAlex, Crossref/)).toBeInTheDocument();
@@ -123,5 +128,21 @@ describe("PaperCard", () => {
   it("renders the actions slot", () => {
     renderCard({ actions: <button>Custom action</button> });
     expect(screen.getByRole("button", { name: "Custom action" })).toBeInTheDocument();
+  });
+
+  it("renders as a hairline row with an italic venue and open access in the meta line", () => {
+    renderCard({ variant: "row" });
+    const article = document.querySelector("article");
+    expect(article).toHaveClass("paper-card--row");
+    expect(article).not.toHaveClass("card");
+    expect(screen.getByText("Journal of Tests")).toHaveClass("paper-venue");
+    expect(document.querySelector(".paper-meta")).toHaveTextContent(
+      "Journal of Tests · 2024 · Cited by 12, Citation count from OpenAlex · Open Access",
+    );
+    // The provider is named for assistive tech and in the tooltip, not in every row.
+    expect(document.querySelector(".paper-citations-source")).toBeNull();
+    expect(document.querySelector(".paper-citations")).toHaveAttribute("title", "Citation count from OpenAlex");
+    // Open access moves from a title badge to the meta line.
+    expect(document.querySelector(".paper-title-row .badge")).toBeNull();
   });
 });

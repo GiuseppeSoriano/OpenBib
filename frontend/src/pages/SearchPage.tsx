@@ -7,7 +7,7 @@ import { apiErrorCode } from "@/lib/apiError";
 import { useAuth } from "@/contexts/AuthContext";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { PaperMemberships, PaperMetadata, SearchResultItem } from "@/types";
-import { EyeOff, FolderCheck, Search, SearchX, X } from "lucide-react";
+import { Search, SearchX, X } from "lucide-react";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import QueryError from "@/components/ui/QueryError";
@@ -16,6 +16,11 @@ import { providerLabel } from "@/components/paper/versionLabel";
 import SearchResultCard from "@/components/search/SearchResultCard";
 import VersionPicker from "@/components/search/VersionPicker";
 import SearchFilters, { type SearchFiltersHandle } from "@/components/search/SearchFilters";
+import { yearRangeText } from "@/components/search/yearRange";
+import { useShellChrome } from "@/components/shell/ShellContext";
+import { shortcutLabel } from "@/components/shell/shortcuts";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { COMPACT_QUERY } from "@/lib/breakpoints";
 import SearchStatus, { type SearchStatusKind } from "@/components/search/SearchStatus";
 import {
   retryHelps,
@@ -64,6 +69,9 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const filtersRef = useRef<SearchFiltersHandle>(null);
+  const compact = useMediaQuery(COMPACT_QUERY);
+  // The page's own header and field lead: no breadcrumb bar, no phone app bar.
+  useShellChrome({ topBar: false, mobileTopBar: false });
 
   // The URL is the source of truth. Keyed by the normalized search so
   // equivalent URLs share one query and cache entry.
@@ -197,7 +205,12 @@ export default function SearchPage() {
   // A filter change also submits words typed but not yet searched.
   const changeFilters = (patch: Partial<SearchParamsState>) =>
     commit({ ...state, q: query.trim() || state.q, ...patch });
-  const resetFilters = () => commit({ q: query.trim() || state.q, sort: state.sort });
+  const personalActive = !!user && (unsavedOnly || !hideDismissed);
+  const resetFilters = () => {
+    setUnsavedOnly(false);
+    setHideDismissed(true);
+    commit({ q: query.trim() || state.q, sort: state.sort });
+  };
 
   const clearQuery = () => {
     setQuery("");
@@ -226,6 +239,22 @@ export default function SearchPage() {
       ? searchQuery.fetchNextPage()
       : searchQuery.refetch());
 
+  // The phone sheet's "Show N results": the provider's estimate, once known.
+  const resultCount =
+    statusKind === "results" || statusKind === "empty" ? (totalEstimate ?? filteredItems?.length ?? 0) : null;
+
+  // The status line names the filters in force: "2019–2023 · most cited first".
+  const filterSummary = [
+    yearRangeText(state, t),
+    state.oa ? t("search.statusOpenAccess") : null,
+    user && unsavedOnly ? t("search.statusUnsaved") : null,
+    user && !hideDismissed ? t("search.statusDismissedShown") : null,
+    state.sort === "date" ? t("search.statusSortDate") : null,
+    state.sort === "citations" ? t("search.statusSortCitations") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div className="search-page">
       <header className="search-header">
@@ -234,40 +263,66 @@ export default function SearchPage() {
         </h1>
       </header>
 
-      <form onSubmit={handleSearch} className="search-bar" role="search">
-        <div className="search-input-wrap">
-          <label htmlFor={inputId} className="sr-only">
-            {t("search.queryLabel")}
-          </label>
-          <Search size={17} className="search-icon" aria-hidden="true" />
-          <input
-            id={inputId}
-            ref={inputRef}
-            className="input search-input"
-            type="text"
-            maxLength={SEARCH_QUERY_MAX}
-            placeholder={t("search.placeholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus={!state.q}
-          />
-          {query && (
-            <button
-              type="button"
-              className="btn-ghost search-clear"
-              aria-label={t("search.clear")}
-              onClick={clearQuery}
-            >
-              <X size={15} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        <button type="submit" className="btn btn-primary">
-          {t("search.submit")}
-        </button>
-      </form>
+      {/* Phones: the field and the chip row stay at the top together. */}
+      <div className="search-top">
+        <form onSubmit={handleSearch} className="search-bar" role="search">
+          <div className="search-field">
+            <label htmlFor={inputId} className="sr-only">
+              {t("search.queryLabel")}
+            </label>
+            <Search size={18} className="search-icon" aria-hidden="true" />
+            <input
+              id={inputId}
+              ref={inputRef}
+              className="search-input"
+              type="text"
+              enterKeyHint="search"
+              aria-keyshortcuts="/"
+              maxLength={SEARCH_QUERY_MAX}
+              placeholder={t("search.placeholder")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus={!state.q}
+            />
+            <span className="search-kbd" aria-hidden="true">
+              <kbd>/</kbd>
+              <kbd>{shortcutLabel()}</kbd>
+            </span>
+            {query && (
+              <button
+                type="button"
+                className="btn-ghost search-clear"
+                aria-label={t("search.clear")}
+                onClick={clearQuery}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <button type="submit" className="btn btn-primary search-submit">
+            {t("search.submit")}
+          </button>
+        </form>
 
-      <SearchFilters ref={filtersRef} params={state} onChange={changeFilters} onReset={resetFilters} />
+        <SearchFilters
+          ref={filtersRef}
+          params={state}
+          onChange={changeFilters}
+          onReset={resetFilters}
+          personal={
+            user
+              ? {
+                  unsavedOnly,
+                  hideDismissed,
+                  onUnsavedOnlyChange: setUnsavedOnly,
+                  onHideDismissedChange: setHideDismissed,
+                }
+              : null
+          }
+          personalActive={personalActive}
+          resultCount={resultCount}
+        />
+      </div>
 
       <SearchStatus
         kind={statusKind}
@@ -275,6 +330,7 @@ export default function SearchPage() {
         shown={filteredItems?.length ?? 0}
         total={totalEstimate}
         windowCapped={windowCapped}
+        filters={filterSummary || null}
         error={statusKind === "error" ? error : undefined}
         retryAt={retryAt}
         retrying={isFetching}
@@ -283,35 +339,12 @@ export default function SearchPage() {
 
       {statusKind === "loading" && <SkeletonCard count={4} />}
 
-      {filteredItems && (
+      {filteredItems && filteredItems.length > 0 && (
         <section className="search-results" aria-labelledby={`${inputId}-results`}>
           <h2 id={`${inputId}-results`} className="sr-only">
             {t("search.resultsHeading")}
           </h2>
-          {user && (
-            <div className="search-pills">
-              <button
-                type="button"
-                className={`pill ${unsavedOnly ? "active" : ""}`}
-                aria-pressed={unsavedOnly}
-                onClick={() => setUnsavedOnly((v) => !v)}
-              >
-                <FolderCheck size={13} aria-hidden="true" />
-                {t("search.unsavedOnly")}
-              </button>
-              <button
-                type="button"
-                className={`pill ${hideDismissed ? "active" : ""}`}
-                aria-pressed={hideDismissed}
-                onClick={() => setHideDismissed((v) => !v)}
-              >
-                <EyeOff size={13} aria-hidden="true" />
-                {t("search.hideDismissed")}
-              </button>
-            </div>
-          )}
-
-          <div className="search-list">
+          <ol className="list-rows list-rows--ruled search-list">
             {filteredItems.map((item) => {
               const groupKey = itemGroupKey(item);
               const selected = getSelectedPaper(item, selectedVersions);
@@ -320,14 +353,15 @@ export default function SearchPage() {
               );
               const highlighted = highlight?.key === groupKey;
               return (
-                <div
+                <li
                   key={groupKey}
                   id={resultElementId(groupKey)}
                   tabIndex={-1}
-                  className={`search-result${highlighted ? " search-result--highlight" : ""}`}
+                  className={`list-row search-result${highlighted ? " search-result--highlight" : ""}`}
                 >
                   <SearchResultCard
                     paper={selected}
+                    compact={compact}
                     providerSources={
                       item.kind === "paper_group"
                         ? (item.provider_sources ?? selected.provider_sources ?? [])
@@ -360,10 +394,10 @@ export default function SearchPage() {
                       />
                     )}
                   </SearchResultCard>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ol>
         </section>
       )}
 
@@ -373,7 +407,7 @@ export default function SearchPage() {
           title={t("search.emptyTitle")}
           description={t("search.emptyDescription")}
           action={
-            activeFilterCount(state) > 0 ? (
+            activeFilterCount(state) > 0 || personalActive ? (
               <button type="button" className="btn btn-secondary" onClick={resetFilters}>
                 {t("common.resetFilters")}
               </button>

@@ -25,14 +25,19 @@ afterEach(() => {
 describe("SearchStatus", () => {
   it("names the provider and how much of its result set is shown", () => {
     renderStatus({ shown: 20, total: 3768 });
+    expect(screen.getByRole("status")).toHaveTextContent("Semantic Scholar · 20 of about 3,768 results");
+  });
+
+  it("names the active filters after the counts", () => {
+    renderStatus({ shown: 20, total: 48210, filters: "2019–2023 · most cited first" });
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Results from Semantic Scholar · showing 20 of about 3,768",
+      "Semantic Scholar · 20 of about 48,210 results · 2019–2023 · most cited first",
     );
   });
 
   it("drops the estimate when there is none", () => {
     renderStatus({ shown: 3, total: null });
-    expect(screen.getByRole("status")).toHaveTextContent("Results from Semantic Scholar · showing 3");
+    expect(screen.getByRole("status")).toHaveTextContent("Semantic Scholar · 3 results");
     expect(screen.getByRole("status")).not.toHaveTextContent("about");
   });
 

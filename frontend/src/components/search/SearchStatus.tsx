@@ -15,6 +15,8 @@ interface SearchStatusProps {
   total?: number | null;
   /** Paging stopped at the provider's result window. */
   windowCapped?: boolean;
+  /** The active filters and sort, e.g. "2019–2023 · most cited first". */
+  filters?: string | null;
   error?: unknown;
   /** Epoch ms until which Retry waits (a Retry-After). */
   retryAt?: number | null;
@@ -24,10 +26,10 @@ interface SearchStatusProps {
 }
 
 /**
- * One live status line for Search (S03): which provider answered and how
- * much of its result set is on screen, no matches, or why the provider is
- * unavailable. A Retry-After wait is counted down on Retry, outside the
- * live region, so it is not announced every second.
+ * One live status line for Search (S03): which provider answered, how much
+ * of its result set is on screen and with which filters, no matches, or why
+ * the provider is unavailable. A Retry-After wait is counted down on Retry,
+ * outside the live region, so it is not announced every second.
  */
 export default function SearchStatus({
   kind,
@@ -35,6 +37,7 @@ export default function SearchStatus({
   shown = 0,
   total = null,
   windowCapped = false,
+  filters = null,
   error,
   retryAt = null,
   retrying = false,
@@ -51,7 +54,8 @@ export default function SearchStatus({
     text =
       total !== null && total >= shown
         ? t("search.statusShowing", { provider, shown, total })
-        : t("search.statusShown", { provider, shown });
+        : t("search.statusShown", { provider, shown, count: shown });
+    if (filters) text += ` · ${filters}`;
   }
 
   return (
