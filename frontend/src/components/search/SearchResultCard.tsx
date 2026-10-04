@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Check, MoreHorizontal } from "lucide-react";
+import { BookMarked, Check, EyeOff, MoreHorizontal, Quote, Share2, Undo2 } from "lucide-react";
 import api, { library } from "@/lib/api";
 import { copyText, formatCitation } from "@/lib/citation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -122,6 +122,7 @@ export default function SearchResultCard({
   const graphPath = `/graph/${encodeURIComponent(paper.canonical_key)}`;
   const dismissing = isDismissed ? undismissMutation : dismissMutation;
   const dismissLabel = isDismissed ? t("paper.undoDismiss") : t("paper.notRelevant");
+  const DismissIcon = isDismissed ? Undo2 : EyeOff;
   const toggleDismissed = () => {
     if (!dismissing.isPending) dismissing.mutate();
   };
@@ -147,6 +148,7 @@ export default function SearchResultCard({
         if (!saveToLibraryMutation.isPending) saveToLibraryMutation.mutate();
       }}
     >
+      <BookMarked size={14} aria-hidden="true" />
       {t("search.save")}
     </button>
   );
@@ -178,12 +180,15 @@ export default function SearchResultCard({
             {(close) => (
               <>
                 <button type="button" role="menuitem" className="menu-item" onClick={fromMenu(close, () => void cite())}>
+                  <Quote size={15} aria-hidden="true" />
                   {t("paper.cite.action")}
                 </button>
                 <Link to={graphPath} role="menuitem" className="menu-item" onClick={close}>
+                  <Share2 size={15} aria-hidden="true" />
                   {t("search.citationGraph")}
                 </Link>
                 <button type="button" role="menuitem" className="menu-item" onClick={fromMenu(close, toggleDismissed)}>
+                  <DismissIcon size={15} aria-hidden="true" />
                   {dismissLabel}
                 </button>
               </>
@@ -204,9 +209,12 @@ export default function SearchResultCard({
           </>
         )}
         <button type="button" className="btn-quiet" title={t("paper.cite.title")} onClick={() => void cite()}>
+          <Quote size={14} aria-hidden="true" />
           {t("paper.cite.action")}
         </button>
+        {/* Share2: the same icon as the sidebar's Citation graph item. */}
         <Link to={graphPath} className="btn-quiet">
+          <Share2 size={14} aria-hidden="true" />
           {t("search.citationGraph")}
         </Link>
         {user && (
@@ -217,6 +225,7 @@ export default function SearchResultCard({
             title={isDismissed ? t("paper.undoDismiss") : t("paper.notRelevantTitle")}
             onClick={toggleDismissed}
           >
+            <DismissIcon size={14} aria-hidden="true" />
             {dismissLabel}
           </button>
         )}

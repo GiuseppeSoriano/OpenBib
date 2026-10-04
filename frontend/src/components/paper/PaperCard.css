@@ -224,6 +224,11 @@
     margin: var(--space-sm) 0 0 -8px;
   }
 
+  /* Row action and menu icons never shrink when a label wraps. */
+  .paper-card--row .paper-actions svg {
+    flex-shrink: 0;
+  }
+
   /* Not relevant sits at the far end of the actions. */
   .paper-actions-end {
     margin-left: auto;
