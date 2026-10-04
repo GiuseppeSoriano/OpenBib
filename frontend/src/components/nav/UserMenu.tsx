@@ -25,9 +25,9 @@ interface UserMenuProps {
 }
 
 /**
- * Account button opening the user menu: theme, language and sign out. On
- * phones (no sidebar) it also leads to Settings; the sidebar lists Settings
- * itself, so its account menu does not repeat it.
+ * Account button opening the user menu: theme and language. On phones (no
+ * sidebar) it also leads to Settings and signs out; the sidebar lists Settings
+ * and Sign out itself, so its account menu does not repeat them.
  */
 export default function UserMenu({ variant = "avatar", rail = false }: UserMenuProps) {
   const { t, i18n } = useTranslation();
@@ -122,19 +122,23 @@ export default function UserMenu({ variant = "avatar", rail = false }: UserMenuP
               </button>
             ))}
           </div>
-          <div className="menu-separator" />
-          <button
-            type="button"
-            role="menuitem"
-            className="menu-item menu-item--danger menu-item--signout"
-            onClick={() => {
-              close();
-              void signOut();
-            }}
-          >
-            <LogOut size={15} aria-hidden="true" />
-            {t("nav.signOut")}
-          </button>
+          {!inSidebar && (
+            <>
+              <div className="menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item menu-item--danger menu-item--signout"
+                onClick={() => {
+                  close();
+                  void signOut();
+                }}
+              >
+                <LogOut size={15} aria-hidden="true" />
+                {t("nav.signOut")}
+              </button>
+            </>
+          )}
         </>
       )}
     </Menu>

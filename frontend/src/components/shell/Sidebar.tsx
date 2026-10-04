@@ -150,23 +150,21 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
           <Settings size={16} aria-hidden="true" />
           {label(t("nav.settings"))}
         </NavLink>
-        {/* Signing out is one visible click away, not only inside the account menu. */}
-        <div className="sidebar-account-row">
-          <UserMenu variant="sidebar" rail={rail} />
-          <button
-            type="button"
-            className="sidebar-iconbtn sidebar-signout"
-            // aria-disabled, not disabled: focus stays here if sign-out fails.
-            onClick={() => { if (!signingOut) void signOut(); }}
-            aria-disabled={signingOut || undefined}
-            aria-busy={signingOut || undefined}
-            aria-label={t("nav.signOut")}
-            title={t("nav.signOut")}
-            data-testid="sidebar-signout"
-          >
-            <LogOut size={16} aria-hidden="true" />
-          </button>
-        </div>
+        {/* The one place to sign out on desktop and tablet: the account menu does not repeat it. */}
+        <button
+          type="button"
+          className="sidebar-link sidebar-signout"
+          // aria-disabled, not disabled: focus stays here if sign-out fails.
+          onClick={() => { if (!signingOut) void signOut(); }}
+          aria-disabled={signingOut || undefined}
+          aria-busy={signingOut || undefined}
+          title={rail ? t("nav.signOut") : undefined}
+          data-testid="sidebar-signout"
+        >
+          <LogOut size={16} aria-hidden="true" />
+          {label(t("nav.signOut"))}
+        </button>
+        <UserMenu variant="sidebar" rail={rail} />
       </div>
     </aside>
   );

@@ -37,6 +37,7 @@ afterEach(() => restoreMatchMedia());
 describe("UserMenu", () => {
   it("waits for server logout and reports failures without pretending revocation succeeded", async () => {
     testAuth.authenticated = true;
+    mockMatchMedia((query) => query === PHONE_QUERY || query === RAIL_QUERY);
     vi.mocked(api.post).mockRejectedValueOnce(new Error("offline"));
     renderWithProviders(<Layout />);
     fireEvent.click(await screen.findByTestId("user-menu"));
@@ -47,6 +48,7 @@ describe("UserMenu", () => {
 
   it("removes the account menu only after successful server revocation", async () => {
     testAuth.authenticated = true;
+    mockMatchMedia((query) => query === PHONE_QUERY || query === RAIL_QUERY);
     vi.mocked(api.post).mockResolvedValueOnce({ data: undefined });
     renderWithProviders(<Layout />);
     fireEvent.click(await screen.findByTestId("user-menu"));
@@ -55,19 +57,20 @@ describe("UserMenu", () => {
     expect(screen.queryByTestId("user-menu")).toBeNull();
   });
 
-  it("leaves Settings to the sidebar and ends the account menu with Sign out", async () => {
+  it("leaves Settings and Sign out to the sidebar, each in one place", async () => {
     testAuth.authenticated = true;
     renderWithProviders(<Layout />);
 
     const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
     expect(within(sidebar).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+    expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1);
     fireEvent.click(await within(sidebar).findByTestId("user-menu"));
 
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("me@example.com")).toBeInTheDocument();
     expect(within(menu).queryByRole("menuitem", { name: /Settings/ })).toBeNull();
-    const items = menu.querySelectorAll('[role^="menuitem"]');
-    expect(items[items.length - 1]).toHaveAccessibleName("Sign out");
+    expect(within(menu).queryByRole("menuitem", { name: "Sign out" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1);
     // Theme and language moved here from the signed-in header.
     expect(within(menu).getByRole("group", { name: "Theme" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitemradio", { name: /System/ })).toHaveAttribute("aria-checked", "true");
@@ -86,13 +89,13 @@ describe("UserMenu", () => {
     expect(screen.queryByTestId("sidebar-signout")).toBeNull();
   });
 
-  it("signs out from the button beside the sidebar account", async () => {
+  it("signs out from the labelled sidebar row", async () => {
     testAuth.authenticated = true;
     vi.mocked(api.post).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ data: undefined });
     renderWithProviders(<Layout />);
 
     const signOut = await screen.findByRole("button", { name: "Sign out" });
-    expect(signOut).toHaveAttribute("title", "Sign out");
+    expect(signOut).toHaveTextContent("Sign out");
     fireEvent.click(signOut);
     expect(await screen.findByText(/session is still active/i)).toBeInTheDocument();
     expect(screen.getByTestId("user-menu")).toBeInTheDocument();

@@ -572,13 +572,17 @@ class Session:
 
     def logout(self):
         page = self.page
-        # The account menu: the sidebar's account button, or the avatar in the phone app bar
+        # Desktop and tablet: the sidebar's Sign out row. Phones: the avatar menu in the app bar
         # (pages with their own phone header, like Search and Settings, have no app bar).
+        sidebar = page.locator("[data-testid=sidebar-signout]:visible")
         menu = page.locator("[data-testid=user-menu]:visible")
-        if not menu.count():
+        if not sidebar.count() and not menu.count():
             self.nav("/")
-        menu.first.click()
-        page.locator(".menu-item--danger").click()
+        if sidebar.count():
+            sidebar.first.click()
+        else:
+            menu.first.click()
+            page.locator(".menu-item--signout").click()
         page.wait_for_function("() => !document.querySelector('.user-avatar')", timeout=15000)
         self.signed_in = False
         self.settle()
