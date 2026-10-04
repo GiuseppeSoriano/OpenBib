@@ -6,8 +6,8 @@ export interface NodeStyleColors {
   node: string;
   /** --graph-node-pinned */
   pinned: string;
-  /** --graph-node-saved */
-  saved: string;
+  /** --graph-node-mark: the punched centre of a paper in the Library. */
+  mark: string;
   /** --graph-node-selected */
   selected: string;
   /** --graph-node-gap: the gap between a node and its selection ring. */
@@ -23,6 +23,8 @@ export interface NodeStyleState {
 export interface NodeStyle {
   /** The node's own colour, kept when it is selected. */
   fill: string;
+  /** Centre dot of a paper in the Library, in the canvas colour. */
+  mark?: string;
   /** External ring, clear of the node by a background-coloured gap, for the selected node. */
   selectedRing?: { color: string; gapColor: string };
   /** Dashed ring marking a multi-version group. */
@@ -30,28 +32,29 @@ export interface NodeStyle {
 }
 
 /**
- * Canvas style of one node. Fill precedence is pinned, then saved, then
- * default; `is_seed` no longer drives color (seeds start pinned instead).
- * A pin is a plain filled circle with no extra stroke: size already encodes
- * citations, so it is not enlarged either. Pins stay identifiable without
- * colour in the papers panel's Pinned section, through the pressed Pin
- * toggles, and by their labels. Selection only adds an external ring, so the
- * node keeps its fill and reads on pinned and unpinned nodes alike.
+ * Canvas style of one node. Only two fills: pinned papers take the accent,
+ * every other paper the neutral grey (`is_seed` no longer drives color:
+ * seeds start pinned instead). Library membership is a mark, not a colour:
+ * a small centre dot in the canvas colour, "punched" through either fill,
+ * so pinned and unpinned Library papers stay apart without a third hue.
+ * Size already encodes citations, so a pin is not enlarged. Selection only
+ * adds an external ring, so the node keeps its fill and mark.
  */
 export function nodeStyle(node: GraphNode, state: NodeStyleState, colors: NodeStyleColors): NodeStyle {
   const style: NodeStyle = {
-    fill: state.pinned ? colors.pinned : state.saved ? colors.saved : colors.node,
+    fill: state.pinned ? colors.pinned : colors.node,
     versionRing: node.version_count > 1,
   };
+  if (state.saved) style.mark = colors.mark;
   if (state.selected) style.selectedRing = { color: colors.selected, gapColor: colors.background };
   return style;
 }
 
-/** Class of the HTML dot that mirrors a node's canvas style (lists, summary). */
+/** Class of the HTML dot that mirrors a node's canvas style (lists, summary, legend). */
 export function graphDotClass(pinned: boolean, saved: boolean, selected: boolean): string {
   let className = "graph-dot";
   if (pinned) className += " graph-dot--pinned";
-  else if (saved) className += " graph-dot--saved";
+  if (saved) className += " graph-dot--saved";
   if (selected) className += " graph-dot--selected";
   return className;
 }
@@ -59,6 +62,22 @@ export function graphDotClass(pinned: boolean, saved: boolean, selected: boolean
 /** Node radius bounds, in graph units (screen pixels at zoom 1). */
 export const NODE_RADIUS_MIN = 4;
 export const NODE_RADIUS_MAX = 14;
+
+/** The Library mark's radius, as a share of the node's. */
+export const MARK_RATIO = 0.4;
+/** Smallest mark radius on screen (px), so it never vanishes zoomed out. */
+export const MARK_MIN_PX = 1.5;
+/** Largest share of the node the mark may take, so a ring of fill always shows. */
+export const MARK_MAX_RATIO = 0.6;
+
+/**
+ * Radius of the Library mark, in graph units: 40% of the node's radius,
+ * held to at least 1.5 screen pixels at any zoom but never more than 60%
+ * of the node, so a band of the fill always surrounds it.
+ */
+export function markRadius(radius: number, globalScale: number): number {
+  return Math.min(radius * MARK_MAX_RATIO, Math.max(radius * MARK_RATIO, MARK_MIN_PX / globalScale));
+}
 
 /**
  * Node radius by citations, on a log scale held to 4–14 units: an

@@ -14,7 +14,7 @@ const engine = vi.hoisted(() => ({
   props: {} as Record<string, any>,
   reheat: vi.fn(),
   centerAt: vi.fn(),
-  zoom: vi.fn((k?: number) => (k === undefined ? 1 : undefined)),
+  zoom: vi.fn((k?: number): number | undefined => (k === undefined ? 1 : undefined)),
   zoomToFit: vi.fn(),
 }));
 
@@ -81,6 +81,11 @@ function forceNode(id: string, x: number, y: number): ForceNode {
   return { id, node, x, y };
 }
 
+/** Lets a requestAnimationFrame callback (focusNode measures on one) run. */
+function nextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function setup(pinnedIds: ReadonlySet<string> = new Set(), onNodeDragPin = vi.fn()) {
   const data: ForceGraphData = { nodes: [forceNode("a", 10, 20), forceNode("b", -5, 7)], links: [] };
   const ref = createRef<CitationGraphHandle>();
@@ -106,6 +111,7 @@ describe("CitationGraph", () => {
     engine.reheat.mockClear();
     engine.centerAt.mockClear();
     engine.zoomToFit.mockClear();
+    engine.zoom.mockClear();
   });
 
   it("exposes the canvas as one labelled image", () => {
@@ -150,10 +156,123 @@ describe("CitationGraph", () => {
     expect(a.fx).toBeUndefined();
   });
 
-  it("centers the view on a focused node", () => {
+  it("centers the view on a focused node, raising a low zoom to a moderate 1.5 only", async () => {
     const { ref } = setup();
-    act(() => ref.current!.focusNode("a"));
+    await act(async () => {
+      ref.current!.focusNode("a");
+      await nextFrame();
+    });
     expect(engine.centerAt).toHaveBeenCalledWith(10, 20, 400);
+    expect(engine.zoom).toHaveBeenCalledWith(1.5, 400);
+  });
+
+  it("keeps a focused node clear of the selected-paper card and never zooms further in", async () => {
+    const card = document.createElement("div");
+    card.getBoundingClientRect = () => ({ left: 684, top: 16, right: 984, bottom: 336 }) as DOMRect;
+    const ref = createRef<CitationGraphHandle>();
+    const data: ForceGraphData = { nodes: [forceNode("a", 10, 20)], links: [] };
+    render(
+      <CitationGraph
+        ref={ref}
+        data={data}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+        getOverlays={() => [card]}
+      />,
+    );
+    const container = screen.getByTestId("citation-graph");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 1000 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 600 });
+    container.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 600 }) as DOMRect;
+    engine.zoom.mockImplementation((k?: number) => (k === undefined ? 2.5 : undefined));
+    try {
+      await act(async () => {
+        ref.current!.focusNode("a");
+        await nextFrame();
+      });
+      // The free area is the 684px left of the card: its middle is 158px
+      // left of the canvas's, so the view centre moves 158 / 2.5 right.
+      expect(engine.centerAt).toHaveBeenCalledWith(10 + 158 / 2.5, 20, 400);
+      expect(engine.zoom).not.toHaveBeenCalledWith(expect.any(Number), 400);
+    } finally {
+      engine.zoom.mockImplementation((k?: number) => (k === undefined ? 1 : undefined));
+    }
+  });
+
+  it("holds the engine's opening zoom on a lone seed to the fit cap, once", () => {
+    setup();
+    const container = screen.getByTestId("citation-graph");
+    // force-graph opens a single node at 4x.
+    act(() => engine.props.onZoomEnd({ k: 4, x: 0, y: 0 }));
+    expect(engine.zoom).toHaveBeenCalledWith(2);
+    act(() => engine.props.onZoomEnd({ k: 2, x: 0, y: 0 }));
+    expect(container.dataset.zoom).toBe("2.00");
+
+    // Later views (a zoom button, a resize) are left alone.
+    engine.zoom.mockClear();
+    act(() => engine.props.onZoomEnd({ k: 3.2, x: 0, y: 0 }));
+    expect(engine.zoom).not.toHaveBeenCalled();
+    expect(container.dataset.zoom).toBe("3.20");
+  });
+
+  it("leaves the opening zoom alone once the user moved the view", () => {
+    setup();
+    fireEvent.wheel(screen.getByTestId("citation-graph"));
+    act(() => engine.props.onZoomEnd({ k: 4, x: 0, y: 0 }));
+    expect(engine.zoom).not.toHaveBeenCalled();
+  });
+
+  it("punches a canvas-coloured centre mark into papers in the Library, pinned or not", () => {
+    const style = document.documentElement.style;
+    style.setProperty("--graph-canvas", "#f8faf9");
+    style.setProperty("--graph-node-mark", "#f8faf9");
+    style.setProperty("--graph-node", "#858f8a");
+    style.setProperty("--graph-node-pinned", "#33695f");
+    try {
+      const data: ForceGraphData = {
+        nodes: [forceNode("both", 0, 0), forceNode("pin", 50, 0), forceNode("lib", 100, 0), forceNode("none", 150, 0)],
+        links: [],
+      };
+      render(
+        <CitationGraph
+          data={data}
+          selectedId={null}
+          savedGroupKeys={new Set(["both", "lib"])}
+          pinnedIds={new Set(["both", "pin"])}
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />,
+      );
+      const paint = { fillStyle: "", strokeStyle: "", globalAlpha: 1 };
+      const draws: { fill: string; r: number }[][] = [];
+      let current: { fill: string; r: number }[] = [];
+      let radius = 0;
+      const ctx = Object.assign(paint, {
+        beginPath: vi.fn(),
+        arc: vi.fn((_x: number, _y: number, r: number) => (radius = r)),
+        fill: vi.fn(() => current.push({ fill: paint.fillStyle, r: radius })),
+        stroke: vi.fn(),
+        setLineDash: vi.fn(),
+      });
+      for (const node of data.nodes) {
+        current = [];
+        engine.props.nodeCanvasObject(node, ctx, 1);
+        draws.push(current);
+      }
+      const r = 4 + 10 * (Math.log10(4) / 5);
+      expect(draws[0]!.map((d) => d.fill)).toEqual(["#33695f", "#f8faf9"]);
+      expect(draws[0]![1]!.r).toBeCloseTo(r * 0.4);
+      expect(draws[1]!.map((d) => d.fill)).toEqual(["#33695f"]);
+      expect(draws[2]!.map((d) => d.fill)).toEqual(["#858f8a", "#f8faf9"]);
+      expect(draws[3]!.map((d) => d.fill)).toEqual(["#858f8a"]);
+    } finally {
+      for (const name of ["--graph-canvas", "--graph-node-mark", "--graph-node", "--graph-node-pinned"]) {
+        style.removeProperty(name);
+      }
+    }
   });
 
   it("records the rounded view on the container after a zoom", () => {
@@ -351,6 +470,96 @@ describe("CitationGraph", () => {
     labels.length = 0;
     engine.props.onRenderFramePost(ctx, 2);
     expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+  });
+
+  it("keeps labels off neighbouring nodes: others are skipped, a pin's moves aside or is skipped", () => {
+    // "n" sits just above "below": its title would cross that circle.
+    const data: ForceGraphData = { nodes: [forceNode("n", 0, 0), forceNode("below", 0, 20)], links: [] };
+    data.nodes[0]!.node.selected_version.cited_by_count = 50;
+    const props = { data, selectedId: null, ariaLabel: "Citation graph", onNodeClick: vi.fn(), onBackgroundClick: vi.fn() };
+    const view = render(<CitationGraph {...props} />);
+    const labels: string[] = [];
+    const ctx = {
+      fillStyle: "",
+      strokeStyle: "",
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((label: string) => labels.push(label)),
+      measureText: vi.fn(() => ({ width: 60 })),
+    };
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toEqual(["Title below"]);
+
+    // Pinned, it is labelled anyway, over its halo, and above its paper,
+    // clear of the circle below.
+    labels.length = 0;
+    ctx.translate.mockClear();
+    view.rerender(<CitationGraph {...props} pinnedIds={new Set(["n"])} />);
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toEqual(["Title n", "Title below"]);
+    expect(ctx.strokeText).toHaveBeenCalledWith("Title n", 0, 0);
+    expect(ctx.translate.mock.calls[0]![1]).toBeLessThan(0);
+
+    // With a paper above as well, it goes to the right of its paper.
+    labels.length = 0;
+    ctx.translate.mockClear();
+    const walled: ForceGraphData = { nodes: [...data.nodes, forceNode("above", 0, -20)], links: [] };
+    view.rerender(<CitationGraph {...props} data={walled} pinnedIds={new Set(["n"])} />);
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels[0]).toBe("Title n");
+    expect(ctx.translate.mock.calls[0]![0]).toBeGreaterThan(0);
+
+    // Hemmed in on every side, the pin's title is left out rather than
+    // drawn across a circle...
+    labels.length = 0;
+    ctx.translate.mockClear();
+    const boxed: ForceGraphData = {
+      nodes: [...walled.nodes, forceNode("left", -40, 0), forceNode("right", 40, 0)],
+      links: [],
+    };
+    view.rerender(<CitationGraph {...props} data={boxed} pinnedIds={new Set(["n"])} />);
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).not.toContain("Title n");
+
+    // ...but the selection is always labelled, below it.
+    labels.length = 0;
+    ctx.translate.mockClear();
+    view.rerender(<CitationGraph {...props} data={boxed} selectedId="n" />);
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels[0]).toBe("Title n");
+    expect(ctx.translate.mock.calls[0]![1]).toBeGreaterThan(0);
+  });
+
+  it("moves a crossing selection label to a free side that stays on the canvas", () => {
+    // Papers above and below "n", near the canvas's right edge: the right
+    // side is free but runs off the canvas, so the title goes left.
+    const data: ForceGraphData = {
+      nodes: [forceNode("n", 100, 50), forceNode("up", 100, 30), forceNode("down", 100, 70)],
+      links: [],
+    };
+    render(
+      <CitationGraph data={data} selectedId="n" ariaLabel="Citation graph" onNodeClick={vi.fn()} onBackgroundClick={vi.fn()} />,
+    );
+    const labels: string[] = [];
+    const ctx = {
+      fillStyle: "",
+      strokeStyle: "",
+      canvas: { width: 130, height: 200 },
+      getTransform: () => ({ a: 1, d: 1, e: 0, f: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((label: string) => labels.push(label)),
+      measureText: vi.fn(() => ({ width: 60 })),
+    };
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels[0]).toBe("Title n");
+    expect(ctx.translate.mock.calls[0]![0]).toBeLessThan(100);
   });
 
   it("skips pinned labels that would overlap one already drawn, so a fully pinned collection stays legible", () => {

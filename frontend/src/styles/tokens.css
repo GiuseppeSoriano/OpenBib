@@ -81,8 +81,13 @@
 
     /* Citation graph */
     --graph-canvas: var(--color-bg);
-    --graph-node: #a0a8a4;
+    /* Plain paper: 3.2:1 on the canvas, so the Library mark reads on it */
+    --graph-node: #858f8a;
     --graph-node-pinned: var(--color-accent);
+    /* Library membership is a mark, not a fill: a centre dot punched
+       through the node in the canvas colour (3:1+ on both node fills).
+       --graph-node-saved no longer fills graph nodes. */
+    --graph-node-mark: var(--graph-canvas);
     --graph-node-saved: var(--color-success);
     --graph-node-selected: var(--color-warning);
     /* Soft halo outside the selected node's amber ring */

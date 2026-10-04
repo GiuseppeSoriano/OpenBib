@@ -689,19 +689,30 @@
     color: var(--color-text-muted);
   }
 
-  /* Node-colour dots (list rows, summary). */
-  .graph-dot {
+  /* Node dots (list rows, summary, legend): the canvas's marks in HTML.
+     Two fills only, the accent for pins and the grey for every other
+     paper; a paper in the Library adds a centre dot in the canvas colour
+     (40% of the radius, as on the canvas), whatever its fill. */
+  .graph-dot,
+  .legend-dot {
+    --graph-dot-fill: var(--graph-node);
     flex: none;
-    width: 9px;
-    height: 9px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: var(--graph-node);
+    background: var(--graph-dot-fill);
   }
-  .graph-dot--pinned {
-    background: var(--graph-node-pinned);
+  .graph-dot--pinned,
+  .legend-dot--pinned {
+    --graph-dot-fill: var(--graph-node-pinned);
   }
-  .graph-dot--saved {
-    background: var(--graph-node-saved);
+  .graph-dot--saved,
+  .legend-dot--saved {
+    background: radial-gradient(
+      circle closest-side,
+      var(--graph-node-mark) 40%,
+      var(--graph-dot-fill) calc(40% + 0.5px)
+    );
   }
   /* Selected: the state fill stays; an amber ring sits outside a gap that
      shows whatever ground is behind it (an offset outline follows the radius). */
@@ -746,19 +757,11 @@
     gap: var(--space-xs);
   }
 
+  /* The swatches draw exactly what the canvas does (the shared dot rules
+     above): plain filled circles, the Library's centre mark, and the
+     selection as an amber ring outside a gap around a node. */
   .legend-dot {
     display: inline-block;
-    flex-shrink: 0;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--graph-node);
-  }
-  /* The swatches draw exactly what the canvas does: plain filled circles,
-     and the selection (.legend-dot--selected, with the dots above) as an
-     amber ring outside a gap around a node. */
-  .legend-dot--pinned {
-    background: var(--graph-node-pinned);
   }
   /* Clear room for the ring (the rows above have it in their padding). */
   .legend-dot--selected {
@@ -766,10 +769,7 @@
   }
   /* The sheet's column: every swatch in a box as wide as the arrow. */
   .graph-legend--inline .legend-dot {
-    margin: 0 6.5px;
-  }
-  .legend-dot--saved {
-    background: var(--graph-node-saved);
+    margin: 0 6px;
   }
   /* Edge direction: a line with the canvas's arrowhead at the cited end. A
      shade stronger than --graph-edge, which is too faint for a small swatch. */

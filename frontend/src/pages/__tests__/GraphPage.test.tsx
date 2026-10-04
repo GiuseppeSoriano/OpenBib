@@ -13,13 +13,17 @@ const engine = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   props: {} as Record<string, any>,
   mounts: 0,
+  /** The engine's imperative API, for tests that follow the view; none by default. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handle: null as Record<string, any> | null,
 }));
 
 vi.mock("react-force-graph-2d", async () => {
-  const { forwardRef, useEffect } = await import("react");
+  const { forwardRef, useEffect, useImperativeHandle } = await import("react");
   return {
-    default: forwardRef(function GraphStub(props: Record<string, unknown>) {
+    default: forwardRef(function GraphStub(props: Record<string, unknown>, ref) {
       engine.props = props;
+      useImperativeHandle(ref, () => engine.handle, []);
       useEffect(() => {
         engine.mounts += 1;
       }, []);
@@ -263,9 +267,17 @@ describe("GraphPage (desktop)", () => {
     expect(within(order).getByRole("radio", { name: "Most recent" })).toHaveAttribute("aria-checked", "false");
     // A pill legend floats on the canvas, edge direction included.
     const legend = screen.getByRole("list", { name: "Legend" });
-    expect(within(legend).getByText("Pinned")).toBeInTheDocument();
-    expect(within(legend).getByText("In library")).toBeInTheDocument();
-    expect(within(legend).getByText("A → B: A cites B")).toBeInTheDocument();
+    expect(within(legend).getAllByRole("listitem").map((item) => item.textContent?.trim())).toEqual([
+      "Pinned",
+      "Paper (size = citations)",
+      "In Library (dot inside)",
+      "Selected",
+      "A → B: A cites B",
+    ]);
+    // Library membership is the grey dot's centre mark, not a third fill.
+    const librarySwatch = within(legend).getByText("In Library (dot inside)").querySelector(".legend-dot");
+    expect(librarySwatch).toHaveClass("legend-dot--saved");
+    expect(librarySwatch).not.toHaveClass("legend-dot--pinned");
 
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText(/Expand entire graph/)).toBeNull();
@@ -924,6 +936,7 @@ describe("GraphPage (compact)", () => {
     expect(within(dialog).getByText("Legend")).toBeInTheDocument();
     expect(within(dialog).getByText("Pinned")).toBeInTheDocument();
     expect(within(dialog).getByText("Selected")).toBeInTheDocument();
+    expect(within(dialog).getByText("In Library (dot inside)").querySelector(".legend-dot")).toHaveClass("legend-dot--saved");
     expect(within(dialog).getByText("A → B: A cites B")).toBeInTheDocument();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -1015,6 +1028,39 @@ describe("GraphPage (compact)", () => {
     // Reopening keeps the tab.
     expect(within(openSheet()).getByRole("tab", { name: "Papers (2)" })).toHaveAttribute("aria-selected", "true");
     expect(api.related).not.toHaveBeenCalled();
+  });
+
+  it("centres a paper picked in the sheet above the open sheet", async () => {
+    const centerAt = vi.fn();
+    engine.handle = {
+      d3Force: () => undefined,
+      d3ReheatSimulation: vi.fn(),
+      centerAt,
+      zoom: vi.fn((k?: number) => (k === undefined ? 2 : undefined)),
+      zoomToFit: vi.fn(),
+    };
+    try {
+      renderGraph();
+      await ready();
+      const canvas = screen.getByTestId("citation-graph");
+      Object.defineProperty(canvas, "clientWidth", { configurable: true, value: 400 });
+      Object.defineProperty(canvas, "clientHeight", { configurable: true, value: 800 });
+      canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 800 }) as DOMRect;
+      Object.assign(forceNode("group:seed"), { x: 10, y: 20 });
+
+      const dialog = openSheet();
+      dialog.getBoundingClientRect = () => ({ left: 0, top: 400, right: 400, bottom: 800 }) as DOMRect;
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Papers (2)" }));
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole("button", { name: /^Seed Paper/ }));
+        await new Promise((resolve) => window.requestAnimationFrame(() => resolve(null)));
+      });
+      // The free area is the top half: its middle is 200px above the
+      // canvas's, so the view centre moves 200 / 2 down.
+      expect(centerAt).toHaveBeenCalledWith(10, 20 + 200 / 2, 400);
+    } finally {
+      engine.handle = null;
+    }
   });
 
   it("closes the sheet on a range load and shows its status in the summary row", async () => {

@@ -10,15 +10,19 @@ import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
 import { useTranslation } from "react-i18next";
 import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
-import { nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
+import { markRadius, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
 import { paperTitle, truncateLabel } from "@/components/graph/paperText";
+import { centreFor, freeArea, type Rect } from "@/components/graph/viewGeometry";
 
 export interface CitationGraphHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   fit: () => void;
   reheat: () => void;
-  /** Center the view on a node (the list's keyboard path to the canvas). */
+  /**
+   * Center the view on a node (the list's keyboard path to the canvas),
+   * within the part of the canvas the overlays leave free.
+   */
   focusNode: (id: string) => void;
   /** Fix a node where it currently is. */
   pinNode: (id: string) => void;
@@ -44,6 +48,11 @@ interface CitationGraphProps {
   onBackgroundClick: () => void;
   /** A drag ended: the node is now fixed where it was dropped. */
   onNodeDragPin?: (id: string) => void;
+  /**
+   * Elements floating over the canvas (the selected-paper card, a sheet):
+   * focusing a node keeps it clear of them.
+   */
+  getOverlays?: () => readonly Element[];
 }
 
 interface ThemeStyle extends NodeStyleColors {
@@ -75,9 +84,9 @@ function cssVar(name: string): string {
 function readThemeColors(): ThemeStyle {
   const canvas = cssVar("--graph-canvas") || cssVar("--color-bg") || "#f8faf9";
   return {
-    node: cssVar("--graph-node") || "#a0a8a4",
+    node: cssVar("--graph-node") || "#858f8a",
     pinned: cssVar("--graph-node-pinned") || cssVar("--color-accent") || "#33695f",
-    saved: cssVar("--graph-node-saved") || cssVar("--color-success") || "#46689b",
+    mark: cssVar("--graph-node-mark") || canvas,
     selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
     background: cssVar("--graph-node-gap") || canvas,
     edge: cssVar("--graph-edge") || "#d6dcd8",
@@ -88,9 +97,15 @@ function readThemeColors(): ThemeStyle {
   };
 }
 
-const MAX_FIT_ZOOM = 2.5;
+/**
+ * Highest zoom a fit or the opening view uses: a graph of one or two papers
+ * would otherwise be zoomed until a node fills the screen.
+ */
+const MAX_FIT_ZOOM = 2;
 /** Other papers are labelled from this zoom up, where they have room. */
 const LABEL_ZOOM = 1.3;
+/** Focusing a paper raises a lower zoom to this, and never zooms in further. */
+const FOCUS_ZOOM = 1.5;
 /** Time for papers that just arrived to spread before the automatic fit. */
 const AUTO_FIT_DELAY = 900;
 /** Pointer travel (px) that counts as the user panning or dragging. */
@@ -115,6 +130,13 @@ function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
+/** Whether a circle (a node, with some clearance) reaches into a label's box. */
+function circleHits(cx: number, cy: number, r: number, box: Box): boolean {
+  const dx = cx - Math.min(Math.max(cx, box.x), box.x + box.w);
+  const dy = cy - Math.min(Math.max(cy, box.y), box.y + box.h);
+  return dx * dx + dy * dy < r * r;
+}
+
 /**
  * Obsidian-style force-directed citation graph: a continuous d3-force
  * simulation on canvas. Existing nodes keep their positions across range
@@ -133,6 +155,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     onNodeDoubleClick,
     onBackgroundClick,
     onNodeDragPin,
+    getOverlays,
   },
   ref,
 ) {
@@ -153,8 +176,14 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   // The view is fitted once, after the first range or top-up adds papers.
   const autoFitRef = useRef({ baseline: data.nodes.length, done: false });
   const autoFitTimerRef = useRef<number | undefined>(undefined);
+  // The engine opens at a zoom that grows as the graph shrinks (a lone seed
+  // at 4x); the first such view is held to MAX_FIT_ZOOM, until the view is
+  // fitted, focused or moved by the user.
+  const capOpeningZoomRef = useRef(true);
+  const overlaysRef = useRef(getOverlays);
   dataRef.current = data;
   pinnedRef.current = pinnedIds;
+  overlaysRef.current = getOverlays;
 
   // Track the container size so the canvas always fills it.
   useEffect(() => {
@@ -211,6 +240,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     const fg = fgRef.current;
     if (!fg) return;
     interactedRef.current = false;
+    capOpeningZoomRef.current = false;
     fg.zoomToFit(400, 60);
     // A graph of one or two papers would otherwise be zoomed until a node
     // fills the screen; cap the fitted zoom so nodes keep their scale.
@@ -283,11 +313,28 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     fit: fitView,
     reheat: () => fgRef.current?.d3ReheatSimulation(),
     focusNode: (id: string) => {
-      const fg = fgRef.current;
-      const node = findNode(id);
-      if (!fg || node?.x === undefined || node.y === undefined) return;
-      fg.centerAt(node.x, node.y, 400);
-      if (fg.zoom() < 1.5) fg.zoom(2, 400);
+      capOpeningZoomRef.current = false;
+      // The selection's card renders with this update: measure the overlays
+      // on the next frame, once it is in place.
+      window.requestAnimationFrame(() => {
+        const fg = fgRef.current;
+        const el = containerRef.current;
+        const node = findNode(id);
+        if (!fg || !el || node?.x === undefined || node.y === undefined) return;
+        // A moderate zoom at most: far enough in to read the paper's
+        // neighbourhood, never so far that the graph slides under the card.
+        const k = Math.max(fg.zoom(), FOCUS_ZOOM);
+        const box = el.getBoundingClientRect();
+        const canvas = { width: el.clientWidth, height: el.clientHeight };
+        const overlays: Rect[] = (overlaysRef.current?.() ?? []).map((overlay) => {
+          const rect = overlay.getBoundingClientRect();
+          return { left: rect.left - box.left, top: rect.top - box.top, right: rect.right - box.left, bottom: rect.bottom - box.top };
+        });
+        const free = freeArea({ left: 0, top: 0, right: canvas.width, bottom: canvas.height }, overlays);
+        const centre = centreFor({ x: node.x, y: node.y }, k, canvas, free);
+        fg.centerAt(centre.x, centre.y, 400);
+        if (k !== fg.zoom()) fg.zoom(k, 400);
+      });
     },
     pinNode: (id: string) => {
       const node = findNode(id);
@@ -317,13 +364,21 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   }, []);
 
   // The current view, as rounded data attributes (CSP-safe, no styles), so
-  // tests and audits can check that overlays never move the graph.
+  // tests and audits can check that overlays never move the graph. The
+  // engine's opening view is capped here too, as the engine reports it.
   const recordView = useCallback((view: { k: number; x: number; y: number }) => {
     const el = containerRef.current;
     if (!el) return;
     el.dataset.zoom = view.k.toFixed(2);
     el.dataset.cx = String(Math.round(view.x));
     el.dataset.cy = String(Math.round(view.y));
+    if (!capOpeningZoomRef.current) return;
+    if (interactedRef.current) capOpeningZoomRef.current = false;
+    else if (view.k > MAX_FIT_ZOOM) {
+      capOpeningZoomRef.current = false;
+      // Reported back through this handler with the capped view.
+      fgRef.current?.zoom(MAX_FIT_ZOOM);
+    }
   }, []);
 
   // Dev-only: expose live graph data for in-browser physics verification.
@@ -353,6 +408,14 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       ctx.arc(x, y, r, 0, 2 * Math.PI);
       ctx.fillStyle = style.fill;
       ctx.fill();
+
+      // A paper in the Library: a centre dot punched through the fill.
+      if (style.mark) {
+        ctx.beginPath();
+        ctx.arc(x, y, markRadius(r, globalScale), 0, 2 * Math.PI);
+        ctx.fillStyle = style.mark;
+        ctx.fill();
+      }
 
       // Dashed ring marks multi-version groups.
       if (style.versionRing) {
@@ -397,6 +460,12 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   // only from LABEL_ZOOM up, most cited first; a pinned or other label that
   // would overlap one already drawn is skipped (a collection graph pins
   // every paper, so its titles would otherwise pile up when zoomed out).
+  // The others are also skipped where they would run across another
+  // paper's circle (or the selection's ring). A pinned, selected or hovered
+  // title that would cross one below its paper moves above, right or left
+  // of it, to the first free side; a pin's with no free side is skipped too
+  // (the list and a hover still name it), the selection's and the hover's
+  // never.
   const drawLabels = useCallback(
     (ctx: CanvasRenderingContext2D, globalScale: number) => {
       const px = 1 / globalScale;
@@ -409,10 +478,26 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         if (id === hovered) return 1;
         return pinnedIds.has(id) || alwaysLabelIds.has(id) ? 2 : 3;
       };
-      const queue = dataRef.current.nodes
+      const nodes = dataRef.current.nodes;
+      const queue = nodes
         .map((node) => ({ node, rank: rank(node.id) }))
         .filter((entry) => entry.rank < 3 || globalScale >= LABEL_ZOOM)
         .sort((a, b) => a.rank - b.rank || citations(b.node) - citations(a.node));
+      const hitsNode = (box: Box, self: ForceNode) =>
+        nodes.some((other) => {
+          if (other === self) return false;
+          const reach = radiusOf(other) + (other.id === selectedId ? 9 : 2) * px;
+          return circleHits(other.x ?? 0, other.y ?? 0, reach, box);
+        });
+      // Whether a box (graph units) lies within the canvas, through the
+      // engine's current scale and translation.
+      const onScreen = (box: Box) => {
+        if (typeof ctx.getTransform !== "function" || !ctx.canvas) return true;
+        const m = ctx.getTransform();
+        const left = m.a * box.x + m.e;
+        const top = m.d * box.y + m.f;
+        return left >= 0 && top >= 0 && left + m.a * box.w <= ctx.canvas.width && top + m.d * box.h <= ctx.canvas.height;
+      };
       const drawn: Box[] = [];
       ctx.save();
       ctx.font = `12px ${colors.labelFont}`;
@@ -422,14 +507,47 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       for (const { node, rank: level } of queue) {
         const label = truncateLabel(paperTitle(node.node.selected_version, t));
         const x = node.x ?? 0;
+        const y = node.y ?? 0;
+        const r = radiusOf(node);
         const selected = node.id === selectedId;
-        const labelY = (node.y ?? 0) + radiusOf(node) + (selected ? 10 * px : 3 * px);
+        const gap = selected ? 10 * px : 3 * px;
         const width = ctx.measureText(label).width * k;
-        const box = { x: x - width / 2 - 2 * px, y: labelY - px, w: width + 4 * px, h: 15 * k + 2 * px };
+        const height = 15 * k;
+        // A label's place: its centre's x and its top's y.
+        const boxAt = ([cx, top]: [number, number]): Box => ({
+          x: cx - width / 2 - 2 * px,
+          y: top - px,
+          w: width + 4 * px,
+          h: height + 2 * px,
+        });
+        const fits = (place: [number, number]) => {
+          const candidate = boxAt(place);
+          return !hitsNode(candidate, node) && !(level >= 2 && drawn.some((other) => overlaps(candidate, other)));
+        };
+        const below: [number, number] = [x, y + r + gap];
+        // An always-labelled paper whose title would cross a circle (or
+        // another label) below it takes the first free room above, to the
+        // right or to the left of it instead.
+        // A side that runs off the canvas is only taken by a pin, and only
+        // when no side on screen is free.
+        const sides: [number, number][] = [
+          [x, y - r - gap - height],
+          [x + r + gap + width / 2, y - height / 2],
+          [x - r - gap - width / 2, y - height / 2],
+        ];
+        const place =
+          level < 3 && !fits(below)
+            ? sides.find((side) => fits(side) && onScreen(boxAt(side))) ??
+              (level === 2 ? sides.find(fits) : undefined) ??
+              below
+            : below;
+        const [labelX, labelY] = place;
+        const box = boxAt(place);
         if (level >= 2 && drawn.some((other) => overlaps(box, other))) continue;
+        if (level >= 2 && hitsNode(box, node)) continue;
         drawn.push(box);
         ctx.save();
-        ctx.translate(x, labelY);
+        ctx.translate(labelX, labelY);
         ctx.scale(k, k);
         if (level < 3) {
           ctx.lineWidth = (3 * px) / k;

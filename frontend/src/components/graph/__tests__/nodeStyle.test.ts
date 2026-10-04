@@ -1,11 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { graphDotClass, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
+import {
+  graphDotClass,
+  markRadius,
+  nodeRadius,
+  nodeStyle,
+  type NodeStyleColors,
+  type NodeStyleState,
+} from "@/components/graph/nodeStyle";
 import type { GraphNode, PaperMetadata } from "@/types";
 
 const colors: NodeStyleColors = {
   node: "grey",
   pinned: "teal",
-  saved: "blue",
+  mark: "paper",
   selected: "amber",
   background: "paper",
 };
@@ -24,11 +31,29 @@ function graphNode(versionCount = 1, isSeed = false): GraphNode {
   };
 }
 
+const ring = { color: "amber", gapColor: "paper" };
+
 describe("nodeStyle", () => {
-  it("fills pinned, then saved, then default", () => {
-    expect(nodeStyle(graphNode(), { pinned: true, saved: true, selected: false }, colors).fill).toBe("teal");
-    expect(nodeStyle(graphNode(), { pinned: false, saved: true, selected: false }, colors).fill).toBe("blue");
-    expect(nodeStyle(graphNode(), { pinned: false, saved: false, selected: false }, colors).fill).toBe("grey");
+  // Every combination of pinned, in the Library and selected: two fills,
+  // the Library as a centre mark, the selection as an outer ring only.
+  it.each<[string, NodeStyleState, { fill: string; mark?: string; selectedRing?: typeof ring }]>([
+    ["plain", { pinned: false, saved: false, selected: false }, { fill: "grey" }],
+    ["pinned", { pinned: true, saved: false, selected: false }, { fill: "teal" }],
+    ["in the Library", { pinned: false, saved: true, selected: false }, { fill: "grey", mark: "paper" }],
+    ["pinned and in the Library", { pinned: true, saved: true, selected: false }, { fill: "teal", mark: "paper" }],
+    ["selected", { pinned: false, saved: false, selected: true }, { fill: "grey", selectedRing: ring }],
+    ["selected and pinned", { pinned: true, saved: false, selected: true }, { fill: "teal", selectedRing: ring }],
+    ["selected, in the Library", { pinned: false, saved: true, selected: true }, { fill: "grey", mark: "paper", selectedRing: ring }],
+    ["selected, pinned, in the Library", { pinned: true, saved: true, selected: true }, { fill: "teal", mark: "paper", selectedRing: ring }],
+  ])("styles a %s node", (_name, state, expected) => {
+    expect(nodeStyle(graphNode(), state, colors)).toEqual({ ...expected, versionRing: false });
+  });
+
+  it("never fills a node with a Library colour", () => {
+    const fills = [true, false].flatMap((pinned) =>
+      [true, false].map((selected) => nodeStyle(graphNode(), { pinned, saved: true, selected }, colors).fill),
+    );
+    expect(new Set(fills)).toEqual(new Set(["teal", "grey"]));
   });
 
   it("no longer colors seeds once they are unpinned", () => {
@@ -36,31 +61,26 @@ describe("nodeStyle", () => {
     expect(style.fill).toBe("grey");
   });
 
-  it("rings the selected node over a gap and keeps its own fill", () => {
-    const ring = { color: "amber", gapColor: "paper" };
-    const pinned = nodeStyle(graphNode(), { pinned: true, saved: false, selected: true }, colors);
-    const saved = nodeStyle(graphNode(), { pinned: false, saved: true, selected: true }, colors);
-    const plain = nodeStyle(graphNode(), { pinned: false, saved: false, selected: true }, colors);
-    expect([pinned.fill, saved.fill, plain.fill]).toEqual(["teal", "blue", "grey"]);
-    expect(pinned.selectedRing).toEqual(ring);
-    expect(plain.selectedRing).toEqual(ring);
-    expect(nodeStyle(graphNode(), { pinned: true, saved: false, selected: false }, colors).selectedRing).toBeUndefined();
-  });
-
-  it("draws a pin as a plain filled circle", () => {
-    const style = nodeStyle(graphNode(), { pinned: true, saved: false, selected: false }, colors);
-    expect(style).toEqual({ fill: "teal", versionRing: false });
-  });
-
   it("flags multi-version groups", () => {
     expect(nodeStyle(graphNode(2), { pinned: false, saved: false, selected: false }, colors).versionRing).toBe(true);
     expect(nodeStyle(graphNode(1), { pinned: false, saved: false, selected: false }, colors).versionRing).toBe(false);
   });
 
-  it("mirrors the canvas style on HTML dots", () => {
-    expect(graphDotClass(true, true, false)).toBe("graph-dot graph-dot--pinned");
+  it("mirrors the canvas style on HTML dots, the Library mark included", () => {
+    expect(graphDotClass(true, true, false)).toBe("graph-dot graph-dot--pinned graph-dot--saved");
+    expect(graphDotClass(true, false, false)).toBe("graph-dot graph-dot--pinned");
     expect(graphDotClass(false, true, true)).toBe("graph-dot graph-dot--saved graph-dot--selected");
     expect(graphDotClass(false, false, false)).toBe("graph-dot");
+  });
+
+  it("sizes the Library mark with the node, never below 1.5 screen pixels nor above 60% of the node", () => {
+    expect(markRadius(10, 1)).toBeCloseTo(4);
+    expect(markRadius(14, 2)).toBeCloseTo(5.6);
+    // Zoomed out, a small node keeps a visible mark: 1.5px on screen.
+    expect(markRadius(4, 0.8) * 0.8).toBeCloseTo(1.5);
+    expect(markRadius(8, 0.4) * 0.4).toBeCloseTo(1.5);
+    // Very far out the fill still rings the mark.
+    expect(markRadius(4, 0.1)).toBeCloseTo(2.4);
   });
 
   it("scales the radius by citations within 4–14 graph units", () => {

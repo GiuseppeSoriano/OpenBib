@@ -8,7 +8,10 @@ interface GraphLegendProps {
   variant?: "overlay" | "inline";
 }
 
-/** Node colours, the selection ring and the edge direction; inline also the pinning hint. */
+/**
+ * The node marks (two fills, the Library's centre dot, the selection ring)
+ * and the edge direction; inline also the pinning hint.
+ */
 export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
   const { t } = useTranslation();
   const inline = variant === "inline";
@@ -21,13 +24,13 @@ export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
         <span className="legend-dot legend-dot--pinned" aria-hidden="true" /> {t("graph.legendPinned")}
       </li>
       <li>
-        <span className="legend-dot legend-dot--selected" aria-hidden="true" /> {t("graph.legendSelected")}
+        <span className="legend-dot" aria-hidden="true" /> {t("graph.legendPaper")}
       </li>
       <li>
         <span className="legend-dot legend-dot--saved" aria-hidden="true" /> {t("graph.legendSaved")}
       </li>
       <li>
-        <span className="legend-dot" aria-hidden="true" /> {t("graph.legendPaper")}
+        <span className="legend-dot legend-dot--selected" aria-hidden="true" /> {t("graph.legendSelected")}
       </li>
       <li>
         <svg className="legend-arrow" viewBox="0 0 22 10" aria-hidden="true" focusable="false">

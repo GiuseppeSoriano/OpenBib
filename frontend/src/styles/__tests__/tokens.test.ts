@@ -77,6 +77,10 @@ const NON_TEXT: [string, string][] = [
   ["--graph-node-pinned", "--color-bg"],
   ["--graph-node-saved", "--color-bg"],
   ["--graph-node-selected", "--color-bg"],
+  ["--graph-node", "--color-bg"],
+  // The Library mark, punched through either node fill.
+  ["--graph-node-mark", "--graph-node"],
+  ["--graph-node-mark", "--graph-node-pinned"],
 ];
 
 describe.each([
@@ -91,6 +95,12 @@ describe.each([
 
   it.each(NON_TEXT)("%s on %s is at least 3:1", (fg, bg) => {
     expect(contrast(colors[fg]!, colors[bg]!)).toBeGreaterThanOrEqual(3);
+  });
+
+  // Pinned vs plain is the only fill difference left on graph nodes: a
+  // lightness floor keeps it visible without relying on hue alone.
+  it("keeps pinned and plain graph nodes apart by at least 1.8:1", () => {
+    expect(contrast(colors["--graph-node-pinned"]!, colors["--graph-node"]!)).toBeGreaterThanOrEqual(1.8);
   });
 });
 

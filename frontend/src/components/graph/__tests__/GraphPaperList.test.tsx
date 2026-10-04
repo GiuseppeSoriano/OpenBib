@@ -174,6 +174,19 @@ describe("GraphPaperList", () => {
     }
   });
 
+  it("marks papers in the Library on their dot and in words, pinned or not", () => {
+    const { list } = setup({ saved: new Set(["a", "b"]) });
+    const pinnedSaved = within(list).getByRole("button", { name: /^Attention Is All You Need/ });
+    const saved = within(list).getByRole("button", { name: /^Graph Neural Networks/ });
+    const plain = within(list).getByRole("button", { name: /^Deep Residual Learning/ });
+    expect(pinnedSaved.querySelector(".graph-dot")).toHaveClass("graph-dot--pinned", "graph-dot--saved");
+    expect(saved.querySelector(".graph-dot")).toHaveClass("graph-dot--saved");
+    expect(saved.querySelector(".graph-dot")).not.toHaveClass("graph-dot--pinned");
+    expect(plain.querySelector(".graph-dot")).not.toHaveClass("graph-dot--saved");
+    expect(pinnedSaved.querySelector(".graph-list-meta")).toHaveTextContent("2017 · Cited by 120,000 · In Library");
+    expect(plain.querySelector(".graph-list-meta")).toHaveTextContent(/^2016 · Cited by 0$/);
+  });
+
   it("keeps the sheet variant's heading for assistive tech only, without Close", () => {
     setup({ variant: "sheet", onClose: undefined });
     const list = screen.getByRole("complementary", { name: "Papers on the graph" });

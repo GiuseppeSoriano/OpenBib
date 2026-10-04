@@ -11,7 +11,7 @@ import type { GraphNode } from "@/types";
 interface GraphSelectionSummaryProps {
   state: ExplorationState;
   node: GraphNode | null;
-  /** The selected paper is in the library (its dot takes the saved colour). */
+  /** The selected paper is in the library (its dot carries the centre mark). */
   saved?: boolean;
   rangeControls: RangeControls | null;
   titleRef?: Ref<HTMLButtonElement>;

@@ -148,7 +148,7 @@ function GraphExplorer({
   // Withdrawing the base aborts in-flight ranges and drops the exploration.
   const base = unavailable ? undefined : baseQuery.data ?? undefined;
 
-  // Library membership colors saved nodes (signed-in users only).
+  // Library membership marks saved nodes (signed-in users only).
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
     queryFn: () => library.listKeys(),
@@ -239,6 +239,15 @@ function GraphExplorer({
     exploration.select(id);
     graphRef.current?.focusNode(id);
   };
+  // What floats over the canvas: a paper focused from the list is centred
+  // clear of the selected-paper card (wide screens) or the controls sheet.
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const sheetContentRef = useRef<HTMLDivElement>(null);
+  const graphOverlays = () =>
+    [
+      canvasWrapRef.current?.querySelector(".graph-popup--card"),
+      sheetContentRef.current?.closest(".panel"),
+    ].filter((element): element is Element => !!element);
 
   // "Explore from here": the paper's first range, 1–30. Loads it the first
   // time, goes back to it from a later range (or after pins changed) and
@@ -371,7 +380,7 @@ function GraphExplorer({
             onClose={closePapers}
           />
         )}
-        <div className="graph-canvas-wrap">
+        <div ref={canvasWrapRef} className="graph-canvas-wrap">
           {hasGraph && (
             <CitationGraph
               ref={graphRef}
@@ -384,6 +393,7 @@ function GraphExplorer({
               onNodeDoubleClick={exploration.loadFirstRangeFor}
               onBackgroundClick={() => exploration.select(null)}
               onNodeDragPin={exploration.pinFromDrag}
+              getOverlays={graphOverlays}
             />
           )}
           {baseState}
@@ -445,6 +455,7 @@ function GraphExplorer({
           tab={sheetTab}
           onTabChange={setSheetTab}
           papersCount={nodeCount}
+          contentRef={sheetContentRef}
           controls={
             <GraphSheetControls
               state={state}

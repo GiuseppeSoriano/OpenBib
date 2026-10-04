@@ -15,7 +15,7 @@ interface GraphPaperListProps {
   nodes: GraphNode[];
   pinOrder: string[];
   pinned: ReadonlySet<string>;
-  /** paper_group_keys saved in the user's library (the node colour). */
+  /** paper_group_keys saved in the user's library (their centre mark). */
   saved?: ReadonlySet<string>;
   /** The selected paper's current range, in server order. */
   currentRangeIds: string[];
@@ -95,7 +95,8 @@ export default function GraphPaperList({
   ].filter((section) => section.nodes.length > 0);
   const matches = sections.reduce((sum, section) => sum + section.nodes.length, 0);
 
-  // As on the canvas: the state colour, plus the amber ring when selected.
+  // As on the canvas: the pin's fill, the Library's centre mark, and the
+  // amber ring when selected.
   const dotClass = (nodeId: string) =>
     graphDotClass(pinned.has(nodeId), saved.has(nodeId), nodeId === selectedId);
 
@@ -104,6 +105,8 @@ export default function GraphPaperList({
     return [
       paper.publication_date?.slice(0, 4),
       typeof paper.cited_by_count === "number" ? t("common.citedBy", { count: paper.cited_by_count }) : null,
+      // The dot's Library mark, in words.
+      saved.has(node.id) ? t("graph.listInLibrary") : null,
     ]
       .filter(Boolean)
       .join(" · ");

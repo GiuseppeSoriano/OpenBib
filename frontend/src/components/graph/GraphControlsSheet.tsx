@@ -30,6 +30,8 @@ interface GraphControlsSheetProps {
   papersCount: number;
   controls: ReactNode;
   papers: ReactNode;
+  /** Set to an element inside the open sheet: `closest(".panel")` is the sheet itself. */
+  contentRef?: RefObject<HTMLDivElement>;
 }
 
 /**
@@ -47,6 +49,7 @@ export default function GraphControlsSheet({
   papersCount,
   controls,
   papers,
+  contentRef,
 }: GraphControlsSheetProps) {
   const { t } = useTranslation();
   const baseId = useId();
@@ -80,7 +83,7 @@ export default function GraphControlsSheet({
       returnFocusRef={returnFocusRef}
       testId="graph-controls-sheet"
     >
-      <div className="graph-sheet-tabs" role="tablist" aria-label={t("graph.controls")} onKeyDown={onKeyDown}>
+      <div ref={contentRef} className="graph-sheet-tabs" role="tablist" aria-label={t("graph.controls")} onKeyDown={onKeyDown}>
         {TABS.map((key) => (
           <button
             key={key}
