@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { EMPTY_GRAPH, mergeGraph, type ForceGraphData } from "@/components/graph/mergeGraph";
+import {
+  EMPTY_GRAPH,
+  endpointId,
+  linkKey,
+  mergeGraph,
+  pruneGraph,
+  type ForceGraphData,
+} from "@/components/graph/mergeGraph";
 import type { GraphEdge, GraphNode, PaperMetadata } from "@/types";
 
 function paper(key: string, title: string): PaperMetadata {
@@ -199,5 +206,52 @@ describe("mergeGraph", () => {
     expect(second).not.toBe(first);
     expect(second.nodes).not.toBe(first.nodes);
     expect(second.nodes[0]).toBe(first.nodes[0]);
+  });
+});
+
+describe("pruneGraph", () => {
+  function sample(): ForceGraphData {
+    return mergeGraph(EMPTY_GRAPH, {
+      nodes: [node("a"), node("b"), node("c")],
+      edges: [edge("a", "b"), edge("c", "b"), edge("a", "c")],
+    });
+  }
+
+  it("keeps surviving node and link objects", () => {
+    const graph = sample();
+    const pruned = pruneGraph(graph, new Set(["a", "b"]));
+    expect(pruned.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+    expect(pruned.nodes[0]).toBe(graph.nodes[0]);
+    expect(pruned.links).toEqual([graph.links[0]]);
+    expect(pruned.links[0]).toBe(graph.links[0]);
+  });
+
+  it("drops links to removed endpoints, whether strings or d3 node objects", () => {
+    const graph = sample();
+    const byId = (id: string) => graph.nodes.find((n) => n.id === id)!;
+    // d3 has resolved one link's endpoints to node objects.
+    graph.links[1]!.source = byId("c");
+    graph.links[1]!.target = byId("b");
+
+    const pruned = pruneGraph(graph, new Set(["a", "b"]));
+    expect(pruned.links.map(linkKey)).toEqual(["a__b__cited_by"]);
+    const withoutB = pruneGraph(graph, new Set(["a", "c"]));
+    expect(withoutB.links.map((l) => `${endpointId(l.source)}>${endpointId(l.target)}`)).toEqual(["a>c"]);
+  });
+
+  it("drops links outside the kept link keys", () => {
+    const graph = sample();
+    const pruned = pruneGraph(graph, new Set(["a", "b", "c"]), new Set(["a__c__cited_by"]));
+    expect(pruned.nodes).toHaveLength(3);
+    expect(pruned.links.map(linkKey)).toEqual(["a__c__cited_by"]);
+  });
+
+  it("returns new arrays even when nothing is removed", () => {
+    const graph = sample();
+    const pruned = pruneGraph(graph, new Set(["a", "b", "c"]));
+    expect(pruned).not.toBe(graph);
+    expect(pruned.nodes).not.toBe(graph.nodes);
+    expect(pruned.links).not.toBe(graph.links);
+    expect(pruned.nodes).toEqual(graph.nodes);
   });
 });

@@ -1,21 +1,123 @@
 import { Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { useLegalConfig } from "@/lib/legal";
+import { Trans, useTranslation } from "react-i18next";
+import { ExternalLink } from "lucide-react";
+import QueryError from "@/components/ui/QueryError";
+import { inlineValue, localize, useLegalConfig, type LegalText } from "@/lib/legal";
 import "./LegalPage.css";
 
+// Role identifiers are compared without case or separators ("sub-processor" == "subprocessor").
+const ROLE_KEYS = new Map([
+  ["processor", "processor"],
+  ["controller", "controller"],
+  ["independentcontroller", "independentController"],
+  ["jointcontroller", "jointController"],
+  ["subprocessor", "subProcessor"],
+]);
+
 export default function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
-  const { i18n } = useTranslation();
-  const { data, isLoading, error } = useLegalConfig();
-  const it = i18n.resolvedLanguage?.startsWith("it");
-  if (isLoading) return <div className="legal-page">Loading…</div>;
-  if (error || !data) return <div className="legal-page">Legal information is unavailable.</div>;
+  const { t, i18n } = useTranslation();
+  const { data, isLoading, error, refetch, isFetching } = useLegalConfig();
+  if (isLoading) return <div className="legal-page legal-status" role="status">{t("legal.page.loading")}</div>;
+  if (error || !data) {
+    return (
+      <div className="legal-page legal-status">
+        <QueryError message={t("legal.page.unavailable")} onRetry={() => void refetch()} busy={isFetching} />
+      </div>
+    );
+  }
+
+  const text = (value: LegalText | null | undefined) => inlineValue(localize(value, i18n.resolvedLanguage));
+  const role = (value: LegalText) => {
+    const key = typeof value === "string" ? ROLE_KEYS.get(value.toLowerCase().replace(/[^a-z]/g, "")) : undefined;
+    return key ? t(`legal.roles.${key}`) : text(value);
+  };
   const backupsEnabled = data.backups_enabled ?? true;
   const journalEnabled = data.deletion_journal_enabled ?? backupsEnabled;
-  const operatorIdentity = [data.operator.name, data.operator.address?.trim(), data.operator.country].filter(Boolean).join(", ");
-  if (kind === "terms") return <article className="legal-page"><h1>{it ? "Termini di servizio" : "Terms of service"}</h1><p>{it ? `Versione ${data.terms_version}, in vigore dal ${data.effective_date}.` : `Version ${data.terms_version}, effective ${data.effective_date}.`}</p><h2>{it ? "Gestore del servizio" : "Service operator"}</h2><p>{operatorIdentity}. <a href={`mailto:${data.operator.support_email}`}>{data.operator.support_email}</a></p><h2>{it ? "Uso consentito" : "Acceptable use"}</h2><p>{it ? `OpenBib è destinato a utenti di almeno ${data.minimum_age} anni. Non usare il servizio per attività illecite, per aggirare limiti tecnici, compromettere altri account o sovraccaricare OpenBib e i provider bibliografici.` : `OpenBib is intended for users aged ${data.minimum_age} or older. Do not use it for unlawful activity, to bypass technical limits, compromise other accounts, or overload OpenBib and bibliographic providers.`}</p><h2>{it ? "Account e contenuti" : "Accounts and content"}</h2><p>{it ? "Sei responsabile delle credenziali e dei contenuti caricati. Mantieni i diritti sui tuoi contenuti; concedi al gestore soltanto quanto necessario per erogare il servizio e condividere le collezioni tramite link di sola lettura e collaboratori autorizzati." : "You are responsible for your credentials and uploaded content. You retain your rights; you grant the operator only what is necessary to provide the service and share collections through read-only links and authorized collaborators."}</p><h2>{it ? "Disponibilità e cessazione" : "Availability and termination"}</h2><p>{it ? "Il servizio open source è fornito senza garanzie di disponibilità continua. Puoi esportare i dati ed eliminare l’account dalle impostazioni. Gli abusi possono comportare sospensione o chiusura." : "The open-source service is provided without a guarantee of uninterrupted availability. You can export data and delete the account in Settings. Abuse may result in suspension or termination."}</p><p><Link to="/privacy">{it ? "Leggi l’informativa privacy" : "Read the privacy notice"}</Link></p></article>;
-  return <article className="legal-page"><h1>{it ? "Informativa privacy" : "Privacy notice"}</h1><p>{it ? `Versione ${data.privacy_version}, in vigore dal ${data.effective_date}.` : `Version ${data.privacy_version}, effective ${data.effective_date}.`}</p><h2>{it ? "Titolare e contatti" : "Controller and contacts"}</h2><p>{operatorIdentity}. <a href={`mailto:${data.operator.privacy_email}`}>{data.operator.privacy_email}</a></p><h2>{it ? "Dati, finalità e basi giuridiche" : "Data, purposes, and legal bases"}</h2><p>{it ? "Trattiamo email, nome, password protetta mediante hash, collezioni, libreria, note, tag, preferenze, identificativi bibliografici, mapping Zotero e log tecnici per creare e proteggere l’account, fornire il servizio richiesto, sincronizzare Zotero e prevenire abusi. Le basi sono esecuzione del servizio, sicurezza come legittimo interesse e obblighi di legge applicabili." : "We process email, name, hashed password, collections, library, notes, tags, preferences, bibliographic identifiers, Zotero mappings, and technical logs to create and protect accounts, provide the requested service, synchronize Zotero, and prevent abuse. The bases are service performance, security as legitimate interest, and applicable legal obligations."}</p><h2>{it ? "Provider e destinatari" : "Providers and recipients"}</h2><p>{it ? "Le query di ricerca e i filtri vengono inviati dal server a Semantic Scholar. Zotero riceve dati soltanto quando colleghi l’account e avvii una sincronizzazione." : "Search queries and filters are sent by the server to Semantic Scholar. Zotero receives data only when you connect it and start a synchronization."}</p><ul>{data.third_parties.map((party) => <li key={party.name}><a href={party.privacy_url} rel="noreferrer">{party.name}</a>: {party.purpose} ({party.role}, {party.region}){party.transfer_safeguard ? ` — ${party.transfer_safeguard}` : ""}</li>)}</ul><h2>{it ? "Conservazione e sicurezza" : "Retention and security"}</h2><p>{it ? `I log di accesso durano ${data.retention.access_logs_days} giorni e gli eventi di sicurezza ${data.retention.security_events_days} giorni. I dati dell’account restano fino alla cancellazione. Le email transazionali passano al fornitore SMTP; il contenuto in coda viene cancellato dopo l’invio.` : `Access logs are retained for ${data.retention.access_logs_days} days and security events for ${data.retention.security_events_days} days. Account data remains until deletion. Transactional email is sent through the SMTP provider; queued content is erased after delivery.`}</p>
-    <p>{backupsEnabled ? (it ? `Questa istanza esegue backup cifrati, conservati al massimo ${data.retention.backups_days} giorni.` : `This instance creates encrypted backups, retained for at most ${data.retention.backups_days} days.`) : (it ? "Questa istanza non esegue nuovi backup. In caso di guasto o perdita del database i dati potrebbero non essere recuperabili. Puoi scaricare una copia dei tuoi dati dalle impostazioni." : "This instance does not create new backups. Data may not be recoverable after a database failure or loss. You can download a copy of your data in Settings.")}</p>
-    {journalEnabled && <p>{it ? "Alla cancellazione registriamo una ricevuta cifrata fuori dal database, conservata al massimo 30 giorni, per impedire che un ripristino di backup ricrei l’account. Se i nuovi backup sono disattivati, questa protezione resta attiva per le copie precedenti fino alla loro eliminazione." : "Deletion records an encrypted receipt outside the database, retained for at most 30 days, so backup restores cannot recreate the account. If new backups are disabled, this protection remains active for previous copies until they are removed."}</p>}
-    <p>{it ? "La registrazione temporanea conserva email, lingua, verificatori protetti e tentativi. Scade dopo 30 minuti, oppure 15 minuti dalla verifica email; i record scaduti o consumati vengono eliminati entro 24 ore. La password viene raccolta solo dopo la verifica." : "Temporary registration stores email, language, protected verifiers and attempts. It expires after 30 minutes, or 15 minutes after email verification; expired or consumed records are deleted within 24 hours. The password is collected only after verification."}</p>
-    <p>{it ? "Alla cancellazione dell’account le collezioni condivise passano a un collaboratore. Sessione e registrazione temporanea usano cookie tecnici HttpOnly; tema e lingua restano nel localStorage. Non usiamo analytics o tracker facoltativi." : "On account deletion, shared collections transfer to a collaborator. Sessions and temporary registration use technical HttpOnly cookies; theme and language remain in localStorage. We use no optional analytics or trackers."}</p><h2>{it ? "Diritti" : "Your rights"}</h2><p>{it ? "Puoi rettificare, esportare ed eliminare i dati dalle impostazioni e contattare il titolare per accesso, limitazione, opposizione o portabilità. Puoi proporre reclamo all’autorità di controllo competente." : "You can correct, export, and delete data in Settings and contact the controller for access, restriction, objection, or portability. You may complain to the competent supervisory authority."}</p><p>{it ? `I dati sono ospitati in: ${data.data_location}. La cancellazione di OpenBib non rimuove gli elementi già inviati al tuo account Zotero.` : `Data is hosted in: ${data.data_location}. Deleting OpenBib does not remove items already sent to your Zotero account.`}</p><p><Link to="/terms">{it ? "Leggi i termini" : "Read the terms"}</Link></p></article>;
+  const operatorIdentity = [data.operator.name, data.operator.address?.trim(), text(data.operator.country)]
+    .filter(Boolean)
+    .join(", ");
+  const exportLink = { exportLink: <Link to="/settings#your-data" /> };
+  const header = (title: string, version: string) => (
+    <header className="legal-header">
+      <p className="legal-eyebrow">{t("legal.page.eyebrow")}</p>
+      <h1 className="legal-title">{title}</h1>
+      <p className="legal-version">{t("legal.page.version", { version, date: data.effective_date })}</p>
+    </header>
+  );
+
+  if (kind === "terms") {
+    return (
+      <article className="legal-page">
+        {header(t("legal.page.termsTitle"), data.terms_version)}
+        <h2>{t("legal.page.operatorHeading")}</h2>
+        <p>
+          {operatorIdentity}. <a href={`mailto:${data.operator.support_email}`}>{data.operator.support_email}</a>
+        </p>
+        <h2>{t("legal.page.acceptableUseHeading")}</h2>
+        <p>{t("legal.page.acceptableUse", { age: data.minimum_age })}</p>
+        <h2>{t("legal.page.accountsHeading")}</h2>
+        <p>{t("legal.page.accounts")}</p>
+        <h2>{t("legal.page.availabilityHeading")}</h2>
+        <p>
+          <Trans i18nKey="legal.page.availability" components={exportLink} />
+        </p>
+        <p className="legal-crosslink">
+          <Link to="/privacy">{t("legal.page.readPrivacy")}</Link>
+        </p>
+      </article>
+    );
+  }
+
+  return (
+    <article className="legal-page">
+      {header(t("legal.page.privacyTitle"), data.privacy_version)}
+      <h2>{t("legal.page.controllerHeading")}</h2>
+      <p>
+        {operatorIdentity}. <a href={`mailto:${data.operator.privacy_email}`}>{data.operator.privacy_email}</a>
+      </p>
+      <h2>{t("legal.page.dataHeading")}</h2>
+      <p>{t("legal.page.data")}</p>
+      <h2>{t("legal.page.providersHeading")}</h2>
+      <p>{t("legal.page.providers")}</p>
+      <ul className="legal-providers">
+        {data.third_parties.map((party) => {
+          const safeguard = text(party.transfer_safeguard);
+          const details = { purpose: text(party.purpose), role: role(party.role), region: text(party.region), safeguard };
+          return (
+            <li key={party.name}>
+              <a className="legal-provider-link" href={party.privacy_url} target="_blank" rel="noopener noreferrer">
+                {party.name}
+                <ExternalLink size={12} aria-hidden="true" />
+                <span className="sr-only">{` ${t("common.opensInNewTab")}`}</span>
+              </a>
+              {t(safeguard ? "legal.page.providerDetailsSafeguard" : "legal.page.providerDetails", details)}
+            </li>
+          );
+        })}
+      </ul>
+      <h2>{t("legal.page.retentionHeading")}</h2>
+      <p>
+        {t("legal.page.retention", {
+          accessDays: data.retention.access_logs_days,
+          securityDays: data.retention.security_events_days,
+        })}
+      </p>
+      <p>
+        {backupsEnabled ? (
+          t("legal.page.backupsEnabled", { days: data.retention.backups_days })
+        ) : (
+          <Trans i18nKey="legal.page.backupsDisabled" components={exportLink} />
+        )}
+      </p>
+      {journalEnabled && <p>{t("legal.page.journal")}</p>}
+      <p>{t("legal.page.registration")}</p>
+      <p>{t("legal.page.storage")}</p>
+      <h2>{t("legal.page.rightsHeading")}</h2>
+      <p>{t("legal.page.rights")}</p>
+      <p>{t("legal.page.hosting", { location: text(data.data_location) })}</p>
+      <p className="legal-crosslink">
+        <Link to="/terms">{t("legal.page.readTerms")}</Link>
+      </p>
+    </article>
+  );
 }

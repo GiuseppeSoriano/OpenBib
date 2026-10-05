@@ -1,4 +1,4 @@
-> Historical multi-provider design. The current runtime uses Semantic Scholar only. See [the implemented provider architecture](../Architecture/SemanticScholar.md) for the active endpoint mapping, authentication and limitations. The provider descriptions below are retained for future work.
+> Historical multi-provider design. The current runtime uses Semantic Scholar only. See [the implemented provider architecture](../Architecture/SemanticScholar.md) for the active endpoint mapping, authentication and limitations, and [section 10](#10-semantic-scholar-runtime-contracts-current) for the full-text link, search sorting and related-paper paging contracts. The provider descriptions below are retained for future work.
 
 # API Integration Specification
 
@@ -177,7 +177,8 @@ class SearchFilters:
 | `topics[].display_name` | `topics` |
 | `keywords[].keyword` | `keywords` |
 | `open_access.is_oa` | `open_access` |
-| `open_access.oa_url` | `pdf_url` |
+| `best_oa_location.pdf_url` (else `primary_location.pdf_url` when that location is OA) | `pdf_url` |
+| `best_oa_location.landing_page_url` (else `open_access.oa_url`), when it is not the PDF | `abstract_url` |
 | `cited_by_count` | `cited_by_count` |
 | `referenced_works` | list of OpenAlex IDs → resolve to canonical keys |
 
@@ -309,9 +310,10 @@ Does **not** provide: citations (only reference lists), author profiles, version
 | `author[].given` + `author[].family` | `authors[].name`, `given_name`, `family_name` |
 | `author[].ORCID` | `authors[].orcid` |
 | `author[].affiliation[].name` | `authors[].affiliations` |
-| `abstract` | `abstract` (may contain JATS XML tags — strip them) |
-| `published-print.date-parts` or `published-online.date-parts` | `publication_date` |
-| `container-title[0]` | `venue` |
+| `abstract` | `abstract` (JATS XML, normalized to plain-text paragraphs) |
+| `published-print`, then `published-online`, `posted`, `issued` (`date-parts`) | `publication_date` |
+| `container-title[0]` (posted content: else `institution[0].name`, else `group-title`) | `venue` |
+| DOI suffix `.vN` / `/vN` (posted content and preprints only) | `version` |
 | `volume` | `volume` |
 | `issue` | `issue` |
 | `page` | `pages` |
@@ -319,13 +321,13 @@ Does **not** provide: citations (only reference lists), author profiles, version
 | `subject` | `topics` |
 | `is-referenced-by-count` | `cited_by_count` |
 | `references-count` | `reference_count` |
-| `link[].URL` (content-type: application/pdf) | `pdf_url` |
+| `link[].URL` (`application/pdf`, not `intended-application: text-mining`, CC `license` only) | `pdf_url` |
 | `reference[]` | list of references (may have DOI, title, author) |
 
 ### 4.6 Implementation notes
 
 - **Polite pool**: Always include `mailto` parameter with the configured email. This provides better rate limits and priority.
-- **Abstract formatting**: Crossref abstracts may contain JATS XML tags (`<jats:p>`, `<jats:italic>`, etc.). Strip all XML tags to produce plain text.
+- **Abstract formatting**: Crossref abstracts may contain JATS XML tags (`<jats:p>`, `<jats:italic>`, etc.). Every provider's titles and abstracts go through `app/common/text.py`: known tags are unwrapped, section titles become a `Heading: ` prefix, paragraphs are separated by a blank line, entities are decoded, and text such as `p < 0.05` is kept. Keys are still computed from the raw provider title.
 - **References**: The `reference` field contains a list of references, but many entries have incomplete metadata (often just `unstructured` text). When a DOI is present in a reference, use it for resolution; otherwise skip.
 - **Date parsing**: Crossref dates are arrays `[[year, month, day]]`. Month and day may be missing.
 - **Pagination**: Use `offset` and `rows` (max 1000 per page).
@@ -391,7 +393,7 @@ Europe PMC uses a Lucene-like query syntax:
 | `meshHeadingList.meshHeading[].descriptorName` | `topics` |
 | `keywordList.keyword[]` | `keywords` |
 | `isOpenAccess` | `open_access` |
-| `fullTextUrlList.fullTextUrl[]` | `pdf_url`, `abstract_url` |
+| `fullTextUrlList.fullTextUrl[]` | `pdf_url` (OA PDF), `abstract_url` (HTML with `availabilityCode` `OA` or `F` only) |
 | `citedByCount` | `cited_by_count` |
 
 ### 5.6 Implementation notes
@@ -591,3 +593,65 @@ tests/fixtures/
     ├── references.json
     └── citations.json
 ```
+
+---
+
+## 10. Semantic Scholar runtime contracts (current)
+
+The sections above describe the original multi-provider design. The runtime
+uses Semantic Scholar only; the full endpoint mapping, error codes and limits
+are in [the provider architecture](../Architecture/SemanticScholar.md). This
+section records the application-level contracts that the UI relies on.
+
+### 10.1 Full-text links
+
+| Stored field | Semantic Scholar source | How the UI shows it |
+|--------------|-------------------------|---------------------|
+| `pdf_url` | `openAccessPdf.url` (an empty URL that only carries a `disclaimer` is treated as absent) | "Download PDF" only when the URL itself points at a PDF file (a `.pdf` path, a `/pdf` path segment, or a PDF render parameter); otherwise "Full text / Repository", because this field often holds a repository landing page (figshare, Zenodo) |
+| `abstract_url` | `url`, which is always `https://www.semanticscholar.org/paper/<paperId>` | A separate "View on Semantic Scholar" link, never a full-text chip; when the field is missing the link is built from `semantic_scholar_id` or an `s2:` key |
+| `doi`, `arxiv_id`, `pmid` | `externalIds` | Their own doi.org, arXiv and PubMed links; matching URLs are not repeated as full-text chips |
+
+Full-text links are listed PDFs first, without duplicates, and external
+links announce that they open a new tab. The same rules apply to records cached
+from the inactive providers.
+
+### 10.2 Search sort and continuation
+
+| API `sort` | Upstream call | Continuation | Limits |
+|------------|---------------|--------------|--------|
+| `relevance` (default) | `GET /paper/search`, `offset=(page-1)*size` | `page` + `has_more` | `offset + limit < 1000`: the first 999 results only; `window_capped` on the last reachable page, 422 `search_window_exceeded` past it |
+| `date` | `GET /paper/search/bulk?sort=publicationDate:desc`, `publicationDateOrYear=<year_from>-01-01:<min(today, year_to-12-31)>` (open start when no `year_from`; an empty page when `year_from` is in the future) | Opaque `next_cursor`, sent back as `cursor` | Batches of up to 1,000 rows cached in Redis and sliced `size` at a time; future-dated records excluded |
+| `citations` | `GET /paper/search/bulk?sort=citationCount:desc` | Opaque `next_cursor`, sent back as `cursor` | Same batches; every match is reachable |
+
+Bulk search matches every (stemmed) word and treats `+ | - " * ( ) ~` as
+operators, so OpenBib strips those characters, and the UI notes that the date
+and citation sorts list only papers matching all of the words. The cursor is bound to the query,
+filters and sort; any other combination is 422 `invalid_cursor`. Year filters
+must lie between 1800 and next year with the start not after the end (422
+`invalid_year_range`). `total_estimate` is the upstream match count, taken
+before deduplication. The author filter has no upstream equivalent and is
+applied to the served rows only (`filtered_locally: true`); the UI does not
+offer it.
+
+### 10.3 Related-paper paging
+
+Citation and reference lists (`/paper/{id}/citations`, `/paper/{id}/references`)
+are offset-paged, unordered, carry no total, and stop at
+`offset + limit < 10000` (9,999 records). OpenBib therefore:
+
+1. collects up to `GRAPH_RELATED_MAX_RESULTS` (10,000) records per paper and
+   direction into a Redis snapshot, `GRAPH_RELATED_CHUNK_SIZE` (1,000) per call
+   and `GRAPH_RELATED_PAGES_PER_REQUEST` (4) calls per request, reporting
+   `reason: "ranking"` with `scanned` and `provider_total` until it is done;
+2. ranks the snapshot once by citation count and by recency (publication date,
+   undated last), ties broken by canonical key;
+3. serves fixed ranges of `GRAPH_RELATED_RANGE_SIZE` (30) over the eligible
+   list: one entry per paper group, minus the source and the caller's pinned
+   groups. `range_start` must be a multiple of the range size (422
+   `range_start_not_aligned`); `last: true` asks for the final range, and a
+   start past the end is clamped to it.
+
+Totals are exact once the list is exhausted; above the cap they are reported as
+capped ("first 10,000 of N", N being the source's `citationCount` or
+`referenceCount`), and the ranks mean "top of the first 10,000 records
+Semantic Scholar returned", whose order the API does not specify.

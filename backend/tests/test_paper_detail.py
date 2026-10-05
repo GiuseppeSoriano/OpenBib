@@ -1,14 +1,17 @@
 """Public paper-detail endpoint: cache hit, provider fallback, 404s."""
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.common import rate_limit
 from app.dependencies import get_db
 from app.main import create_app
 from app.papers.service import cache_papers
 from app.providers.base import Author, PaperMetadata
+from app.providers.registry import DoiLookup
 
 
 def _paper(
@@ -85,11 +88,11 @@ async def test_detail_lists_sibling_versions_of_the_group(db):
 async def test_detail_falls_back_to_doi_lookup_on_cache_miss(db, monkeypatch):
     looked_up = {}
 
-    async def fake_lookup_by_doi(doi: str):
+    async def fake_resolve_doi(doi: str, **_kwargs):
         looked_up["doi"] = doi
-        return _paper("doi:10.9/fresh", "group:fresh", "Freshly Fetched")
+        return DoiLookup("found", _paper("doi:10.9/fresh", "group:fresh", "Freshly Fetched"))
 
-    monkeypatch.setattr("app.providers.registry.lookup_by_doi", fake_lookup_by_doi)
+    monkeypatch.setattr("app.providers.registry.resolve_doi", fake_resolve_doi)
     app = _make_app(db)
 
     transport = ASGITransport(app=app)
@@ -101,26 +104,102 @@ async def test_detail_falls_back_to_doi_lookup_on_cache_miss(db, monkeypatch):
     assert response.json()["title"] == "Freshly Fetched"
 
     # The lookup upserted the durable snapshot: a second request needs no provider.
-    async def exploding_lookup(doi: str):
+    async def exploding_resolve(doi: str, **_kwargs):
         raise AssertionError("provider must not be called again")
 
-    monkeypatch.setattr("app.providers.registry.lookup_by_doi", exploding_lookup)
+    monkeypatch.setattr("app.providers.registry.resolve_doi", exploding_resolve)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         again = await client.get("/api/v1/papers/doi:10.9/fresh")
     assert again.status_code == 200
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/papers/10.9/FRESH",
+        "/api/v1/papers/https%3A%2F%2Fdoi.org%2F10.9%2Ffresh",
+        "/api/v1/papers/DOI:%2010.9/fresh",
+    ],
+)
+async def test_detail_normalizes_bare_dois_and_doi_links(db, monkeypatch, path):
+    looked_up: list[str] = []
+
+    async def fake_resolve_doi(doi: str, **_kwargs):
+        looked_up.append(doi)
+        return DoiLookup("found", _paper("doi:10.9/fresh", "group:fresh", "Freshly Fetched"))
+
+    monkeypatch.setattr("app.providers.registry.resolve_doi", fake_resolve_doi)
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(path)
+
+    assert response.status_code == 200
+    assert response.json()["canonical_key"] == "doi:10.9/fresh"
+    assert looked_up == ["10.9/fresh"]
+
+
+@pytest.mark.asyncio
+async def test_live_doi_lookups_are_rate_limited_but_cached_details_are_not(db, monkeypatch):
+    # Freeze the bucket clock so slow requests cannot refill tokens mid-test.
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: 1_700_000_000.0))
+
+    async def missing(doi: str, **_kwargs):
+        return DoiLookup("not_found")
+
+    monkeypatch.setattr("app.providers.registry.resolve_doi", missing)
+    await cache_papers(db, [_paper("doi:10.1/cached", "group:cached", "Cached")])
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        misses = [(await client.get(f"/api/v1/papers/10.5/miss{i}")).status_code for i in range(21)]
+        cached = await client.get("/api/v1/papers/doi:10.1/cached")
+
+    assert misses[:20] == [404] * 20
+    assert misses[20] == 429
+    assert cached.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_detail_404_for_unknown_hash_key(db, monkeypatch):
-    async def fake_lookup_by_doi(doi: str):
+    async def fake_resolve_doi(doi: str, **_kwargs):
         raise AssertionError("hash keys must not trigger DOI lookups")
 
-    monkeypatch.setattr("app.providers.registry.lookup_by_doi", fake_lookup_by_doi)
+    monkeypatch.setattr("app.providers.registry.resolve_doi", fake_resolve_doi)
     app = _make_app(db)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get("/api/v1/papers/hash:doesnotexist")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_detail_miss_is_not_sent_to_doi_org(db, monkeypatch):
+    from app.providers import registry
+
+    class Miss:
+        name = "miss"
+
+        async def lookup_by_doi(self, doi):
+            return None
+
+    async def handle_check(doi: str):
+        raise AssertionError("viewing a paper must not query doi.org")
+
+    monkeypatch.setattr(registry, "LOOKUP_DOI_CHAIN", [Miss()])
+    monkeypatch.setattr(registry, "doi_handle_exists", handle_check)
+    app = _make_app(db)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/papers/doi:10.5/unknown")
 
     assert response.status_code == 404
 
@@ -138,3 +217,91 @@ async def test_detail_route_does_not_shadow_sibling_routes(db):
     assert dismissed.status_code == 401
     # /search validates q → 422 (not 404 from the detail route)
     assert search.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_detail_normalizes_legacy_markup_in_cached_rows(db):
+    # Rows cached before provider text normalization still hold raw markup.
+    legacy = _paper("doi:10.1/legacy", "group:legacy", "Odor <i>coding</i>")
+    legacy.abstract = "<h4>Background</h4>Old &amp; raw.<h4>Results</h4>Still works."
+    await cache_papers(db, [legacy])
+    app = _make_app(db)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/papers/doi:10.1/legacy")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["title"] == "Odor coding"
+    assert payload["abstract"] == "Background: Old & raw.\n\nResults: Still works."
+    assert payload["versions"][0]["abstract"] == payload["abstract"]
+    assert payload["paper_group_key"] == "group:legacy"
+
+
+@pytest.mark.asyncio
+async def test_unavailable_provider_is_a_503_with_retry_after_not_a_404(db, monkeypatch):
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        # The autouse fixture leaves the provider unconfigured: an operator
+        # problem, reported as such and with no retry hint.
+        unconfigured = await client.get("/api/v1/papers/doi:10.9/unconfigured")
+
+        async def resolve_doi(doi, *, confirm_missing=True):
+            return DoiLookup("unavailable", retry_after=12)
+
+        async def resolve_id(identifier):
+            return DoiLookup("unavailable", code="provider_unavailable")
+
+        monkeypatch.setattr("app.providers.registry.resolve_doi", resolve_doi)
+        monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+        by_doi = await client.get("/api/v1/papers/doi:10.9/down")
+        by_s2 = await client.get("/api/v1/papers/s2:" + "0" * 40)
+
+    assert unconfigured.status_code == 503
+    assert unconfigured.json()["detail"]["code"] == "provider_not_configured"
+    assert "retry-after" not in unconfigured.headers
+    for response, wait in ((by_doi, "12"), (by_s2, "30")):
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "provider_unavailable"
+        assert response.headers["retry-after"] == wait
+
+
+@pytest.mark.asyncio
+async def test_strong_keys_resolve_to_the_stored_row(db, monkeypatch):
+    s2_id = "5" * 40
+    snapshot = _paper(f"s2:{s2_id}", "group:titans", "Titans")
+    snapshot.semantic_scholar_id = s2_id
+    await cache_papers(db, [snapshot])
+    enriched = _paper("doi:10.48550/arxiv.2501.00663", "group:other", "Titans")
+    enriched.semantic_scholar_id = s2_id
+    looked_up: list[str] = []
+
+    async def resolve_id(identifier: str):
+        looked_up.append(identifier)
+        if identifier == "pmid:404":
+            return DoiLookup("not_found")
+        return DoiLookup("found", enriched)
+
+    monkeypatch.setattr("app.providers.registry.resolve_id", resolve_id)
+    app = _make_app(db)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        found = await client.get("/api/v1/papers/arxiv:2501.00663v2")
+        by_doi = await client.get("/api/v1/papers/10.48550/arXiv.2501.00663")
+        missing = await client.get("/api/v1/papers/pmid:404")
+
+    assert found.status_code == 200
+    assert (found.json()["canonical_key"], found.json()["paper_group_key"]) == (
+        f"s2:{s2_id}",
+        "group:titans",
+    )
+    # The DOI is now an alias of the stored row: no second lookup.
+    assert by_doi.json()["canonical_key"] == f"s2:{s2_id}"
+    assert missing.status_code == 404
+    assert looked_up == ["arxiv:2501.00663", "pmid:404"]

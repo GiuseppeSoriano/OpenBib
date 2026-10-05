@@ -2,6 +2,11 @@
 
 > Architecture for the **OpenBib MVP** — a prototype targeting < 100 concurrent users,
 > designed for vertical-slice development and future horizontal scaling.
+>
+> The runtime uses Semantic Scholar as its only metadata provider; the OpenAlex,
+> arXiv, Crossref and Europe PMC adapters are inactive. See
+> [Semantic Scholar integration](../Architecture/SemanticScholar.md) for the
+> endpoints, limits and error codes.
 
 ---
 
@@ -22,8 +27,8 @@
 │   Deduplication · Recommendations                 │
 ├──────────┬──────────────────┬─────────────────────┤
 │ Repo Layer│   Cache Layer   │   Provider Layer    │
-│ SQLAlchemy│     Redis       │ OpenAlex · arXiv    │
-│ (async)   │   (TTL-based)   │ Crossref · EuropePMC│
+│ SQLAlchemy│     Redis       │ Semantic Scholar    │
+│ (async)   │   (TTL-based)   │ (others inactive)   │
 ├──────────▼──────────────────┤                     │
 │     PostgreSQL 16+          │   External APIs     │
 └─────────────────────────────┴─────────────────────┘
@@ -81,7 +86,7 @@ backend/
 │   ├── config.py              # Pydantic Settings (env-based)
 │   ├── dependencies.py        # FastAPI dependency injection (DB session, current user, etc.)
 │   ├── auth/
-│   │   ├── router.py          # Login/sessioni; registrazione OTP in registration.py
+│   │   ├── router.py          # Login/sessions; OTP registration in registration.py
 │   │   ├── service.py         # password hash/verify, token create/validate
 │   │   └── schemas.py
 │   ├── users/
@@ -100,8 +105,9 @@ backend/
 │   │   ├── models.py          # UserPaperState, UserPaperTag, Note
 │   │   └── schemas.py
 │   ├── graph/
-│   │   ├── router.py          # GET /graph/{key}, expansion, paths
-│   │   ├── service.py         # BFS traversal, depth-limited expansion
+│   │   ├── router.py          # Base graphs, POST /graph/related and /graph/related/top-up
+│   │   ├── service.py         # Base graphs: seeds and the citation edges among them
+│   │   ├── related.py         # Ranked related-paper snapshots, ranges and top-ups
 │   │   ├── models.py          # PaperGraphEdge
 │   │   └── schemas.py
 │   ├── recommendations/
@@ -139,10 +145,11 @@ All routes are prefixed with `/api/v1`.
 |--------|--------|---------------|
 | Auth | `/auth` | `POST /register`, `POST /login`, `POST /refresh`, `POST /logout` |
 | Users | `/users` | `GET /me`, `PATCH /me`, `DELETE /me` |
-| Collections | `/collections` | `GET /`, `POST /`, `GET /{id}`, `PATCH /{id}`, `DELETE /{id}`, `POST /{id}/papers`, `DELETE /{id}/papers/{key}`, `POST /{id}/members`, `DELETE /{id}/members/{user_id}` |
-| Papers | `/papers` | `GET /{key}`, `GET /search`, `PUT /{key}/state`, `POST /{key}/tags`, `DELETE /{key}/tags/{tag}` |
+| Collections | `/collections` | `GET /`, `POST /`, `GET /{id}`, `PATCH /{id}`, `DELETE /{id}`, `GET /{id}/papers`, `POST /{id}/papers`, `DELETE /{id}/papers/{key}`, `POST /{id}/import/dois`, `POST /{id}/import/keys`, `POST /{id}/members`, `DELETE /{id}/members/{user_id}`, read-link routes |
+| Papers | `/papers` | `GET /{key}`, `GET /search?q=&year_from=&year_to=&open_access_only=&sort=relevance\|date\|citations&page=&cursor=&size=`, `PUT /{key}/state`, `POST /{key}/tags`, `DELETE /{key}/tags/{tag}` |
+| Library | `/library` | `GET /entries?q=&state=&tag=&collection_id=&sort=&page=&size=` (envelope `{items, total, page, size}`), `GET /facets`, `GET /keys`, `POST /entries`, `GET\|PATCH\|DELETE /entries/{group}` (`DELETE ?detach=`), `POST /entries/{group}/versions`, `DELETE /entries/{group}/versions/{key}`, `POST /resolve` |
 | Notes | `/notes` | `POST /`, `GET /?target_type=...&target_key=...`, `PATCH /{id}`, `DELETE /{id}` |
-| Graph | `/graph` | `GET /{key}` (neighborhood), `GET /{key}/expand` (one-hop), `GET /path?from=...&to=...` |
+| Graph | `/graph` | `GET /paper/{key}`, `GET /collection/{id}`, `GET /library` (base graphs: seeds and the edges among them), `POST /related` (one ranked range of a paper's citers or references), `POST /related/top-up` (expand pinned nodes). `POST /expand` was removed |
 | Recommendations | `/recommendations` | `GET /similar/{key}`, `GET /trending`, `GET /serendipity` |
 | Import/Export | `/import` | `POST /bibtex`, `POST /doi-list` |
 | Export | `/export` | `GET /bibtex?collection_id=...`, `GET /json` (full backup) |
@@ -385,6 +392,11 @@ Examples:
 - `openbib:cache:openalex:lookup:sha256("doi=10.1234/example")`
 - `openbib:cache:arxiv:search:sha256("query=attention+is+all&start=0&max=25")`
 
+In the current single-provider runtime `{provider}` is the namespace
+`papers-v3:semantic_scholar`, search entries carry `SEARCH_CACHE_VERSION`, and
+bulk-search batches and related-paper snapshots use their own key families;
+see [Persistence](../Architecture/Persistence.md#redis--short-ttl-api-cache).
+
 ### 6.3 TTL configuration
 
 | Query type | Default TTL | Env variable |
@@ -398,9 +410,15 @@ Examples:
 ### 6.4 Cache failure behavior
 
 If Redis is unreachable:
-1. Log a warning with the connection error details.
-2. Bypass cache — fetch directly from the provider.
-3. Do **not** crash the request. The system degrades gracefully to uncached mode.
+1. Rate-limited routes fail closed: authentication, search, paper lookup, graph,
+   collection add/import, `POST /library/resolve` and Zotero return 503 with
+   `Retry-After: 30` before any provider call.
+2. Other authenticated CRUD (collections, Library edits, tags, notes) continues
+   and logs a sanitized warning.
+3. A cache read or write error inside a request that the rate limiter has
+   already allowed is skipped (for example the search cache), never fatal.
+
+See [Persistence: Redis](../Architecture/Persistence.md#redis--short-ttl-api-cache).
 
 ---
 
@@ -409,44 +427,79 @@ If Redis is unreachable:
 ### 7.1 Paper addition (by DOI)
 
 ```
-User enters DOI
-  → POST /api/v1/collections/{id}/papers  { "doi": "10.1234/..." }
-  → Service: normalize DOI → build canonical key
-  → Cache lookup (any provider, lookup type)
-    → MISS: try OpenAlex → Crossref → arXiv → Europe PMC
-    → First success: cache response, extract metadata
-  → Dedup check: does canonical key already exist in collection?
-    → YES: return existing paper
-    → NO: insert into collection_papers
-  → Async: fetch references/citations in background, store edges in paper_graph_edges
-  → Return paper metadata to client
+User enters a DOI, DOI link, s2: key or Semantic Scholar link, arXiv ID, pmid: or pmcid:
+  → POST /api/v1/collections/{id}/papers  { "paper_canonical_key": "10.1234/..." }
+  → Phase 1 (locks held): lock collection, check edit rights
+    → strict parse → normalized key (422 invalid_identifier)
+    → duplicate check for the key and for a paper cached under any alias (409 already_in_collection)
+    → cached? insert now under the stored row's key (no provider call, no phase 2)
+    → unknown hash: key → 422 unknown_paper_key
+    → otherwise commit (releases the user row and collection locks)
+  → Phase 2 (no transaction): resolve
+    → Semantic Scholar GET /paper/{id}
+    → DOI miss: doi.org handle check
+      → not registered → 422 doi_not_found
+      → registered, unknown or check failed → pending
+    → other identifier miss → 422 identifier_not_found
+    → provider failure: DOI → pending; other identifier → 503 with Retry-After
+  → Phase 3 (short transaction): re-lock user row and collection, re-check edit rights
+    → upsert cached_paper_metadata; take the stored row's key and group
+    → duplicate check again (409)
+    → insert collection_papers under the stored key
+    → Library entry + version pin for the acting user (synthetic group while pending)
+  → 201 with the row (resolved: true | false)
 ```
+
+Imports (`POST /{id}/import/dois`, up to 500 lines) follow the same phases,
+resolving all lines with batch lookups, and return a per-line `ImportResult`
+(see [Collection sharing](../Architecture/CollectionSharing.md#adding-and-importing-papers)).
+A pending paper is retried or corrected with `POST /library/resolve`.
 
 ### 7.2 Search
 
 ```
-User types query
-  → GET /api/v1/papers/search?q=...&provider=...&page=1&size=25
-  → Service: build provider-specific query
-  → Cache lookup (search type)
-    → MISS: call provider search endpoint
-    → Cache response
-  → Deduplicate results (merge entries with same canonical key)
-  → Return paginated results with provider attribution
+User submits a query (the URL holds q, year_from, year_to, oa and sort)
+  → GET /api/v1/papers/search?q=...&year_from=&year_to=&open_access_only=&sort=relevance&page=1&size=20
+  → Validate years (422 invalid_year_range) and cursor (422 invalid_cursor) before the cache
+  → Cache lookup (search type, keyed by SEARCH_CACHE_VERSION and every parameter)
+    → MISS, sort=relevance: Semantic Scholar /paper/search, page by page
+      (first 999 results; 422 search_window_exceeded past them)
+    → MISS, sort=date|citations: Semantic Scholar /paper/search/bulk batch of up to
+      1,000 rows (cached per batch), sliced through an opaque cursor
+    → Provider failure: coded 503/422, never cached
+  → Deduplicate, store only the served rows in cached_paper_metadata
+  → Group versions, flag possible_versions
+  → Return {items, has_more, next_cursor, total_estimate, window_capped, sort, source, …}
+"Show more" asks for page+1 (relevance) or sends next_cursor back as cursor (other sorts).
 ```
 
-### 7.3 Graph expansion
+### 7.3 Graph exploration
 
 ```
-User clicks "expand" on a node in the graph
-  → GET /api/v1/graph/{key}/expand?depth=1&max_nodes=50
-  → Service: check paper_graph_edges for existing edges
-  → If edges missing or stale:
-    → Fetch references + citations from providers
-    → Store new edges in paper_graph_edges
-  → BFS from key, limited by depth and max_nodes
-  → Return { nodes: [...], edges: [...] } for Cytoscape rendering
+Open a graph (paper, collection or library)
+  → GET /api/v1/graph/paper/{key} | /graph/collection/{id} | /graph/library
+  → Seeds + the citation edges among them (batched reference IDs, cached in Redis;
+    edges_partial when the edge budget runs out)
+Select a node → no request; the range controls show 1–30 as current but not loaded
+Load a range (tap 1–30, next, last, or double-click the node)
+  → POST /api/v1/graph/related
+      { source_key, source_group_key, direction: cited_by|cites,
+        order: cited_by_count|recent, range_start, last, exclude_group_keys (pins) }
+  → Release the user row lock before any provider call
+  → Redis snapshot of the source's citations or references
+    → still collecting: { reason: "ranking", scanned, provider_total, nodes: [] }
+      (the client repeats the request and shows progress)
+    → ranked: positions [range_start, range_start + 30) of the eligible list
+  → Hydrate only the served papers (database, then one batch lookup)
+  → Return { nodes, edges, group_keys, totals, has_more, … }
+Expand pinned nodes
+  → POST /api/v1/graph/related/top-up: each pinned source's branch up to 30 papers;
+    per-source errors ("ranking", "rate_limited", …) do not fail the others
 ```
+
+`POST /graph/expand`, which returned 422 above 20 nodes, was removed.
+Provider failures are 503 `related_provider_unavailable` with a `reason` and,
+when rate limited, `Retry-After`; they are never cached.
 
 ### 7.4 Recommendation generation
 
@@ -518,9 +571,8 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # Providers
-OPENALEX_API_KEY=<your-key>
-OPENALEX_EMAIL=<your-email>
-CROSSREF_MAILTO=<your-email>
+SEMANTIC_SCHOLAR_API_KEY=<your-key>   # required; or SEMANTIC_SCHOLAR_API_KEY_FILE
+# DOI_RESOLVE_*, IMPORT_* and GRAPH_RELATED_* tuning: see the README configuration table
 
 # Cache TTLs (seconds)
 CACHE_TTL_LOOKUP=86400

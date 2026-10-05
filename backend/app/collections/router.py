@@ -12,6 +12,7 @@ from app.collections.schemas import (
     CollectionRead,
     CollectionUpdate,
     IdentifierImport,
+    ImportResult,
     KeyImport,
     MemberAdd,
     MemberRead,
@@ -84,11 +85,42 @@ async def list_collection_papers(
     collection_id: uuid.UUID, user: OptionalUser, db: DB, share_token: ShareToken = None
 ):
     user_id = user.id if user else None
-    return await service.list_papers(db, collection_id, user_id, share_token)
+    return await service.list_papers(db, collection_id, user_id, share_token, with_annotations=True)
 
 
 @router.post("/{collection_id}/papers", response_model=CollectionPaperRead, status_code=201)
-async def add_paper(collection_id: uuid.UUID, body: PaperAdd, user: CurrentUser, db: DB):
+async def add_paper(
+    collection_id: uuid.UUID,
+    body: PaperAdd,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: DB,
+    redis: Redis,
+):
+    """Add a paper by DOI — bare (``10.1038/nature14539``), ``doi:``/``DOI``
+    prefixed, or a ``https://doi.org/`` link — by Semantic Scholar key
+    (``s2:<paperId>``) or link, arXiv ID or link, ``pmid:``/``pmcid:`` key,
+    or by an existing ``hash:`` key.
+
+    The identifier is resolved before saving (a cached paper is added under
+    its stored key). ``resolved=false`` means the provider could not describe
+    a DOI and the paper was stored as pending; other identifiers are never
+    pending. Errors: 409 ``already_in_collection``; 422
+    ``invalid_identifier``, ``doi_not_found``, ``identifier_not_found`` or
+    ``unknown_paper_key``; 503 ``provider_unavailable`` with ``Retry-After``
+    (nothing saved).
+    """
+    await enforce_rate_limit(
+        redis,
+        request,
+        response,
+        scope="collection-add",
+        identity=f"user:{user.id}",
+        limit=60,
+        window_seconds=60,
+        fail_closed=True,
+    )
     return await service.add_paper(db, collection_id, user.id, body.paper_canonical_key)
 
 
@@ -138,20 +170,55 @@ async def remove_member(collection_id: uuid.UUID, member_id: uuid.UUID, user: Cu
 # --- Import (export is handled by the Zotero sync in app/zotero) ---
 
 
-@router.post("/{collection_id}/import/dois")
-async def import_dois(collection_id: uuid.UUID, body: IdentifierImport, user: CurrentUser, db: DB):
-    from app.collections.import_export import import_doi_list
+async def _limit_import(redis, request: Request, response: Response, user_id: uuid.UUID) -> None:
+    await enforce_rate_limit(
+        redis,
+        request,
+        response,
+        scope="collection-import",
+        identity=f"user:{user_id}",
+        limit=30,
+        window_seconds=60,
+        fail_closed=True,
+    )
 
-    result = await import_doi_list(db, collection_id, user.id, body.dois)
-    return result
+
+@router.post("/{collection_id}/import/dois", response_model=ImportResult)
+async def import_dois(
+    collection_id: uuid.UUID,
+    body: IdentifierImport,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: DB,
+    redis: Redis,
+):
+    """Import up to 500 identifiers (same forms as adding a single paper).
+    Blank lines are ignored; every other line gets a result: ``added``,
+    ``duplicate``, ``invalid``, ``not_found``, ``unresolved`` (a pending DOI)
+    or ``unavailable`` (not saved; retry the line)."""
+    from app.collections.import_export import import_identifiers
+
+    await _limit_import(redis, request, response, user.id)
+    return await import_identifiers(db, collection_id, user.id, body.dois)
 
 
-@router.post("/{collection_id}/import/keys")
-async def import_keys(collection_id: uuid.UUID, body: KeyImport, user: CurrentUser, db: DB):
-    from app.collections.import_export import import_canonical_keys
+@router.post("/{collection_id}/import/keys", response_model=ImportResult)
+async def import_keys(
+    collection_id: uuid.UUID,
+    body: KeyImport,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: DB,
+    redis: Redis,
+):
+    """Import paper keys (``doi:``, ``s2:``, ``hash:``, …); validated exactly
+    like ``/import/dois``."""
+    from app.collections.import_export import import_identifiers
 
-    result = await import_canonical_keys(db, collection_id, user.id, body.keys)
-    return result
+    await _limit_import(redis, request, response, user.id)
+    return await import_identifiers(db, collection_id, user.id, body.keys)
 
 
 @router.get("/{collection_id}/read-link", response_model=ReadLinkRead)

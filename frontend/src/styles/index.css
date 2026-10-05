@@ -21,9 +21,19 @@
   }
 
   html {
-    font-size: 16px;
+    /* 100%, not 16px: respect the browser's text-size preference. */
+    font-size: 100%;
+    /* Scrolling an element into view (focus, links) keeps it clear of the
+       fixed top nav and the phone tab bar instead of under them. */
+    scroll-padding-top: var(--nav-height);
+    scroll-padding-bottom: var(--bottomnav-clearance);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scroll lock while a modal dialog is open (ui/dialogStack). */
+  html.has-modal {
+    overflow: hidden;
   }
 
   body {
@@ -44,8 +54,54 @@
 
   button {
     cursor: pointer;
-    font-family: inherit;
     color: inherit;
+  }
+  /* Form controls take the UI face too, not the user agent's default. */
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  /* Headings are serif, as in a journal; components size them. */
+  h1,
+  h2 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    line-height: var(--leading-tight);
+  }
+
+  /* Keyboard hints: "/", "⌘K", "Esc". */
+  kbd {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    line-height: 1.4;
+    color: var(--color-text-secondary);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    padding: 0 0.4em;
+    white-space: nowrap;
+  }
+
+  /* Every count lines up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Honour reduced motion everywhere: the base layer's !important wins over
+     every later layer's normal and important declarations. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   .container {
@@ -70,22 +126,36 @@
 /* ── Components: shared primitives ──────────────────────── */
 
 @layer components {
-  /* Buttons */
+  /* Buttons: 34px on desktop, the full touch target on touch screens. */
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-sm);
-    padding: 0.45rem var(--space-md);
+    min-height: var(--control-min);
+    padding: 0.375rem 0.875rem;
     border-radius: var(--radius-sm);
-    font-size: 0.875rem;
+    font-size: var(--text-md);
     font-weight: 500;
+    line-height: var(--leading-tight);
     border: 1px solid transparent;
     transition:
-      background 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease;
-    white-space: nowrap;
+      background var(--duration-base) ease,
+      border-color var(--duration-base) ease,
+      color var(--duration-base) ease;
+    /* A label wraps instead of widening the page (long translations, 200%
+       text). No flex shrinking, so it keeps one line wherever that fits. */
+    flex-shrink: 0;
+    max-width: 100%;
+    text-align: center;
+    overflow-wrap: break-word;
+  }
+  /* One icon size in every button, whatever size the markup asks for, so
+     labels in sibling buttons start at the same offset. */
+  .btn > svg {
+    flex-shrink: 0;
+    width: var(--icon-btn);
+    height: var(--icon-btn);
   }
   .btn:focus-visible {
     outline: none;
@@ -94,6 +164,17 @@
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Icon only (a page's More menu): square, as tall as its neighbours. */
+  .btn--icon {
+    min-width: var(--control-min);
+    padding-inline: 0;
+  }
+  /* Compact action inside a popover footer or a dense toolbar. */
+  .btn--sm {
+    min-height: 30px;
+    padding: 0.25rem 0.75rem;
+    font-size: var(--text-sm);
   }
 
   .btn-primary {
@@ -104,16 +185,18 @@
   .btn-primary:hover:not(:disabled) {
     background: var(--color-accent-hover);
     border-color: var(--color-accent-hover);
+    color: var(--color-on-accent);
   }
 
   .btn-secondary {
     background: var(--color-surface);
     color: var(--color-text);
-    border-color: var(--color-border);
+    border-color: var(--color-border-strong);
   }
   .btn-secondary:hover:not(:disabled) {
     background: var(--color-surface-hover);
     border-color: var(--color-text-secondary);
+    color: var(--color-text);
   }
 
   .btn-ghost {
@@ -126,10 +209,13 @@
     border-radius: var(--radius-sm);
     color: var(--color-text-secondary);
     padding: var(--space-xs);
+    transition:
+      background var(--duration-fast) ease,
+      color var(--duration-fast) ease;
   }
   .btn-ghost:hover {
     color: var(--color-text);
-    background: var(--color-surface-hover);
+    background: var(--color-hover-quiet);
   }
   .btn-ghost:focus-visible {
     outline: none;
@@ -145,41 +231,147 @@
     filter: brightness(0.92);
   }
 
-  /* Segmented control */
-  .segmented {
+  /* Quiet text actions on result rows: Save, Cite, Not relevant… */
+  .btn-quiet {
     display: inline-flex;
-    border: 1px solid var(--color-border);
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0.125rem 0.5rem;
+    border: 0;
     border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    padding: 2px;
-    gap: 2px;
-  }
-  .segmented button {
-    border: none;
     background: transparent;
     color: var(--color-text-secondary);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     font-weight: 500;
-    padding: 0.25rem 0.65rem;
-    border-radius: calc(var(--radius-sm) - 2px);
-    transition: background 0.12s ease, color 0.12s ease;
+    line-height: var(--leading-tight);
+    text-align: left;
+    text-decoration: none;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    transition:
+      background var(--duration-fast) ease,
+      color var(--duration-fast) ease;
   }
-  .segmented button:hover {
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--color-hover-quiet);
     color: var(--color-text);
   }
-  .segmented button.active {
-    background: var(--color-accent);
-    color: var(--color-on-accent);
+  .btn-quiet:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .btn-quiet:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-quiet--muted {
+    color: var(--color-text-muted);
+  }
+  .btn-quiet--accent,
+  .btn-quiet[aria-pressed="true"] {
+    color: var(--color-accent);
+  }
+  .btn-quiet--danger {
+    color: var(--color-danger);
+  }
+  /* Icon only (Edit, Delete): a square, 30px, or 44px on touch screens. */
+  .btn-quiet--icon {
+    justify-content: center;
+    min-width: 30px;
+    padding: 0;
+  }
+
+  /* Touch screens: the small controls grow to the full target. */
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    .btn--sm,
+    .btn-quiet {
+      min-height: var(--touch-target);
+    }
+    .btn-quiet--icon {
+      min-width: var(--touch-target);
+    }
+  }
+
+  /* Segmented control (ui/SegmentedControl is the radiogroup version; older
+     callers use aria-pressed or .active). A track holding the options: the
+     selected one is a rounded pill with its own accent border, inset from the
+     track's edge, so no border is doubled or clipped at the corners. */
+  .segmented {
+    display: inline-flex;
+    flex-wrap: wrap;
+    max-width: 100%;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+  }
+  .segmented button {
+    flex: 1 1 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    /* The track's border and padding make the group --control-min tall. */
+    min-height: calc(var(--control-min) - 6px);
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: var(--leading-tight);
+    padding: 0.2rem 0.75rem;
+    overflow-wrap: break-word;
+    transition:
+      background var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
+      color var(--duration-fast) ease;
+  }
+  /* Touch: each segment is a full 44px target (the group grows by its track). */
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    .segmented button {
+      min-height: var(--touch-target);
+    }
+  }
+  .segmented button:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+  .segmented button.active,
+  .segmented button[aria-pressed="true"],
+  .segmented button[aria-checked="true"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
+    /* The soft fill alone is under 3:1 against the surface: the accent
+       border marks the selected segment, as on an active chip. */
+    border-color: var(--color-accent);
+  }
+  .segmented button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .segmented button:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
+  /* Full-width variant for sheets (sort in the mobile Filters dialog, the
+     graph controls): the options share the track equally, so stacked groups
+     split at the same x. Inline groups keep hugging their labels. */
+  .segmented--block {
+    display: flex;
+    width: 100%;
+  }
+  .segmented--block button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 
-  /* Cards */
+  /* Cards — only for floating things now (selected paper, dialogs). */
   .card {
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-hairline);
     border-radius: var(--radius-md);
     padding: var(--space-lg);
     box-shadow: var(--shadow-sm);
@@ -188,14 +380,17 @@
   /* Inputs */
   .input {
     width: 100%;
-    padding: 0.45rem var(--space-md);
-    border: 1px solid var(--color-border);
+    min-height: var(--control-min);
+    padding: 0.375rem 0.75rem;
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-sm);
-    font-size: 0.875rem;
+    font-size: var(--text-md);
     font-family: inherit;
     background: var(--color-surface);
     color: var(--color-text);
-    transition: border-color 0.15s ease;
+    transition:
+      border-color var(--duration-base) ease,
+      box-shadow var(--duration-base) ease;
   }
   .input:focus {
     outline: none;
@@ -209,6 +404,15 @@
   select.input {
     appearance: auto;
   }
+  .input--numeric {
+    font-variant-numeric: tabular-nums;
+  }
+  /* 16px on phones, so iOS does not zoom into a focused field. */
+  @media (max-width: 639px) {
+    .input {
+      font-size: var(--text-base);
+    }
+  }
 
   /* Badges */
   .badge {
@@ -217,10 +421,11 @@
     gap: 4px;
     padding: 1px var(--space-sm);
     border-radius: var(--radius-full);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 500;
+    font-variant-numeric: tabular-nums;
     background: var(--color-accent-soft);
-    color: var(--color-accent);
+    color: var(--color-accent-strong);
   }
   .badge--success {
     background: var(--color-success-soft);
@@ -234,33 +439,356 @@
     background: var(--color-surface-hover);
     color: var(--color-text-secondary);
   }
+  .badge--warning {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+  }
 
-  /* Pill toggle (filters) */
+  /* Reading-state pills: to read, reading, read. */
+  .state-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px var(--space-sm);
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+    background: var(--color-surface-hover);
+    color: var(--color-text-secondary);
+  }
+  .state-pill--toread {
+    background: var(--color-state-toread-soft);
+    color: var(--color-state-toread-text);
+  }
+  .state-pill--reading {
+    background: var(--color-state-reading-soft);
+    color: var(--color-state-reading-text);
+  }
+  .state-pill--read {
+    background: var(--color-state-read-soft);
+    color: var(--color-state-read-text);
+  }
+
+  /* Pill toggle (filters) — the rounded sibling of .chip for sheets. */
   .pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border: 1px solid var(--color-border);
+    min-height: var(--control-min);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-full);
     background: var(--color-surface);
-    color: var(--color-text-secondary);
-    font-size: 0.8rem;
+    color: var(--color-text);
+    font-size: var(--text-sm);
     font-weight: 500;
-    padding: 0.25rem 0.75rem;
-    transition: all 0.12s ease;
+    padding: 0.25rem 0.875rem;
+    transition:
+      background var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
+      color var(--duration-fast) ease;
   }
   .pill:hover {
+    background: var(--color-surface-hover);
     border-color: var(--color-text-secondary);
-    color: var(--color-text);
   }
-  .pill.active {
+  .pill.active,
+  .pill[aria-pressed="true"],
+  .pill[aria-checked="true"] {
     background: var(--color-accent-soft);
     border-color: var(--color-accent);
-    color: var(--color-accent);
+    color: var(--color-accent-strong);
   }
   .pill:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+
+  /* Chips (ui/Chip): filter toggles, popover triggers, active-filter tags. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--control-min);
+    max-width: 100%;
+    flex-shrink: 0;
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: var(--leading-tight);
+    text-align: left;
+    overflow-wrap: break-word;
+    transition:
+      background var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
+      color var(--duration-fast) ease;
+  }
+  button.chip:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+  }
+  .chip--active,
+  .chip[aria-pressed="true"] {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
+  }
+  button.chip--active:hover:not(:disabled),
+  button.chip[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent-hover);
+  }
+  .chip:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  /* A muted prefix: "Sort  Most cited". */
+  .chip-prefix {
+    color: var(--color-text-secondary);
+    font-weight: 400;
+  }
+  .chip--active .chip-prefix {
+    color: inherit;
+  }
+  .chip-count {
+    font-variant-numeric: tabular-nums;
+  }
+  .chip-caret {
+    flex-shrink: 0;
+    transition: transform var(--duration-fast) ease;
+  }
+  .chip[aria-expanded="true"] .chip-caret {
+    transform: rotate(180deg);
+  }
+  /* A static tag with a remove button; the button is the target. */
+  .chip--static {
+    padding-right: 0;
+  }
+  .chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    min-width: calc(var(--control-min) - 2px);
+    margin-block: -0.25rem;
+    border: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: transparent;
+    color: inherit;
+  }
+  .chip-remove:hover {
+    background: var(--color-hover-quiet);
+  }
+  .chip-remove:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-inset);
+  }
+  /* Compact screens (COMPACT_QUERY, where Search and the Library and
+     collection toolbars fold their filters): every chip is a pill, as in
+     MobileSearch.dc.html. Desktop chips keep the 6px control radius. */
+  @media (max-width: 639px), (max-height: 500px) {
+    .chip {
+      border-radius: var(--radius-full);
+    }
+    .chip-remove {
+      border-radius: 0 var(--radius-full) var(--radius-full) 0;
+    }
+  }
+  /* A wrapping toolbar of chips; .chip-row--scroll scrolls sideways (phones). */
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+  .chip-row--scroll {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* Room for a 3px focus ring inside the scroll box, which clips it. */
+    padding: 4px;
+    margin-inline: -4px;
+    scroll-padding-inline: 4px;
+  }
+  .chip-row--scroll .chip {
+    white-space: nowrap;
+  }
+  .chip-row-spacer {
+    flex: 1 1 auto;
+  }
+
+  /* Small-caps label: section index, popover titles, sidebar groups, the
+     page eyebrow. The app's only uppercase label style. */
+  .label-caps,
+  .page-header-eyebrow {
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  /* Section heading (ui/SectionHeading): serif title over an ink rule. */
+  .section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-xs) var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--color-rule);
+  }
+  .section-heading-title {
+    min-width: 0;
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    line-height: var(--leading-tight);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .section-heading-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-sm);
+    font-size: var(--text-sm);
+  }
+
+  /* Page header (ui/PageHeader): eyebrow, serif h1, description, actions. */
+  .page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-md) var(--space-lg);
+  }
+  .page-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .page-header-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-2xl);
+    font-weight: 600;
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-display);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .page-header--display .page-header-title {
+    font-size: var(--text-3xl);
+  }
+  .page-header-description {
+    font-size: var(--text-md);
+    color: var(--color-text-secondary);
+    max-width: 60ch;
+  }
+  .page-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+  @media (max-width: 639px) {
+    .page-header-title,
+    .page-header--display .page-header-title {
+      font-size: 1.625rem;
+    }
+  }
+
+  /* Hairline-separated rows, like a journal's table of contents. */
+  .list-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .list-rows--ruled {
+    border-top: 1px solid var(--color-rule);
+  }
+  .list-row {
+    padding: var(--space-md) 4px;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+  .list-rows--interactive .list-row {
+    transition: background var(--duration-fast) ease;
+  }
+  .list-rows--interactive .list-row:hover {
+    background: var(--color-row-hover);
+  }
+  /* Serif title link inside a row. */
+  .row-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    line-height: var(--leading-snug);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  a.row-title:hover {
+    color: var(--color-accent);
+  }
+  .row-meta {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  /* Data tables (collections, dashboard). Wrap in .data-table-wrap so a
+     narrow viewport scrolls the table, not the page. */
+  .data-table-wrap {
+    overflow-x: auto;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-md);
+  }
+  .data-table th {
+    padding: 10px 4px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    text-align: left;
+    color: var(--color-text-secondary);
+  }
+  .data-table td {
+    padding: 12px 4px;
+    border-top: 1px solid var(--color-hairline);
+    vertical-align: baseline;
+  }
+  .data-table tbody tr {
+    transition: background var(--duration-fast) ease;
+  }
+  .data-table tbody tr:hover {
+    background: var(--color-row-hover);
+  }
+  /* Counts and dates stay on one line ("16 hours ago"); names wrap instead. */
+  .data-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .data-table .muted {
+    color: var(--color-text-muted);
+  }
+
+  /* A quiet margin note (backup notice and similar asides). */
+  .margin-note {
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    border-left: 2px solid var(--color-border-strong);
+    padding-left: 12px;
   }
 
   /* Skeletons */
@@ -321,17 +849,21 @@
     width: 52px;
     height: 52px;
     border-radius: var(--radius-full);
-    background: var(--color-accent-soft);
+    border: 1px solid var(--color-hairline);
+    background: var(--color-surface);
     color: var(--color-accent);
     margin-bottom: var(--space-xs);
   }
   .empty-state-title {
-    font-size: 1rem;
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
     font-weight: 600;
+    line-height: var(--leading-tight);
     color: var(--color-text);
   }
   .empty-state-description {
-    font-size: 0.88rem;
+    font-size: var(--text-md);
+    line-height: 1.55;
     max-width: 380px;
   }
   .empty-state-action {
@@ -342,7 +874,7 @@
   .toast-container {
     position: fixed;
     top: calc(var(--nav-height) + var(--space-md));
-    right: var(--space-lg);
+    right: max(var(--space-lg), env(safe-area-inset-right, 0px));
     z-index: 1100;
     display: flex;
     flex-direction: column;
@@ -353,13 +885,17 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
+    /* The 44px close button supplies the height; keep the card compact. */
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    /* A uniform 1px border like every floating card; the coloured icon alone
+       carries the status (a stripe would meet the rounded corners). */
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
-    font-size: 0.88rem;
-    animation: toast-in 0.2s ease-out;
+    font-size: var(--text-md);
+    line-height: 1.45;
+    animation: toast-in var(--duration-slow) var(--ease-out);
   }
   .toast--success .toast-icon {
     color: var(--color-success);
@@ -381,11 +917,18 @@
     border: none;
     color: var(--color-text-secondary);
     display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
     padding: 2px;
     border-radius: var(--radius-sm);
   }
   .toast-close:hover {
     color: var(--color-text);
+  }
+  .toast-close:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
   @keyframes toast-in {
     from {
@@ -400,9 +943,9 @@
   @media (max-width: 639px) {
     .toast-container {
       top: auto;
-      bottom: calc(var(--bottomnav-height) + var(--space-md));
-      left: var(--space-md);
-      right: var(--space-md);
+      bottom: calc(var(--bottomnav-clearance) + var(--space-md));
+      left: max(var(--space-md), env(safe-area-inset-left, 0px));
+      right: max(var(--space-md), env(safe-area-inset-right, 0px));
       max-width: none;
     }
   }
@@ -424,7 +967,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
-    animation: modal-in 0.15s ease-out;
+    animation: modal-in var(--duration-base) var(--ease-out);
   }
   .modal-header {
     display: flex;
@@ -432,13 +975,42 @@
     justify-content: space-between;
     gap: var(--space-md);
   }
-  .modal-title {
-    font-size: 1.05rem;
+  /* One overlay heading for dialogs and sheets: a serif title. */
+  .modal-title,
+  .panel-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    line-height: var(--leading-tight);
+    overflow-wrap: anywhere;
     font-weight: 600;
     color: var(--color-text);
   }
   .modal-close {
     padding: var(--space-xs);
+  }
+  /* Dialog and toast close buttons: full touch targets around small icons. */
+  .panel-header .btn-ghost,
+  .modal-close,
+  .toast-close {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+  /* One X size for every overlay. */
+  .panel-header .btn-ghost > svg,
+  .modal-close > svg,
+  .toast-close > svg {
+    width: var(--icon-row);
+    height: var(--icon-row);
+  }
+  /* The dialog and sheet X: its glyph, not its 44px target, lines up with
+     the content column's right edge, as the title does on the left. */
+  .panel-header .btn-ghost,
+  .modal-close {
+    margin-right: calc((var(--icon-row) - var(--touch-target)) / 2);
+  }
+  .modal:focus,
+  .panel:focus {
+    outline: none;
   }
   @keyframes modal-in {
     from {
@@ -451,7 +1023,7 @@
     }
   }
   .confirm-message {
-    font-size: 0.88rem;
+    font-size: var(--text-md);
     color: var(--color-text-secondary);
     line-height: 1.5;
   }
@@ -476,11 +1048,11 @@
     bottom: 0;
     width: min(460px, 94vw);
     background: var(--color-surface);
-    border-left: 1px solid var(--color-border);
+    border-left: 1px solid var(--color-hairline);
     box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
-    animation: panel-in 0.18s ease-out;
+    animation: panel-in var(--duration-slow) var(--ease-out);
   }
   .panel-handle {
     display: none;
@@ -491,22 +1063,21 @@
     justify-content: space-between;
     gap: var(--space-md);
     padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    /* viewport-fit=cover: keep content clear of a landscape notch. */
+    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
+    border-bottom: 1px solid var(--color-hairline);
     flex-shrink: 0;
   }
   .panel-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
   }
   .panel-body {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-lg);
+    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
+    padding-bottom: calc(var(--space-lg) + var(--safe-area-bottom));
   }
   @keyframes panel-in {
     from {
@@ -518,6 +1089,50 @@
       opacity: 1;
     }
   }
+  /* Bottom sheet: always for placement="bottom", and for every panel ≤767px. */
+  .panel--bottom {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 88vh;
+    max-height: 88dvh;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-in var(--duration-slow) var(--ease-out);
+  }
+  .panel--bottom .panel-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-border);
+    margin: var(--space-sm) auto 0;
+    flex-shrink: 0;
+  }
+  .panel--bottom .panel-header,
+  .panel--bottom .panel-body {
+    padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
+  }
+  /* A sheet's closing action (Show N results, Done): one full-width button,
+     the same in every sheet (MobileFilters.dc.html). */
+  .sheet-submit {
+    width: 100%;
+    min-height: 48px;
+    font-size: var(--text-base);
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(28px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
   @media (max-width: 767px) {
     .panel {
       top: auto;
@@ -526,10 +1141,11 @@
       bottom: 0;
       width: 100%;
       max-height: 88vh;
+      max-height: 88dvh;
       border-left: none;
       border-top: 1px solid var(--color-border);
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-      animation: sheet-in 0.2s ease-out;
+      animation: sheet-in var(--duration-slow) var(--ease-out);
     }
     .panel-handle {
       display: block;
@@ -540,15 +1156,9 @@
       margin: var(--space-sm) auto 0;
       flex-shrink: 0;
     }
-    @keyframes sheet-in {
-      from {
-        transform: translateY(28px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
+    .panel-header,
+    .panel-body {
+      padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
     }
   }
 
@@ -558,11 +1168,11 @@
     align-items: center;
     gap: 5px;
     padding: 0.25rem 0.7rem;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-full);
     background: var(--color-surface);
     color: var(--color-text);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 500;
   }
   .link-chip:hover {
@@ -573,6 +1183,8 @@
   /* Theme toggle / icon buttons in nav */
   .theme-toggle {
     padding: var(--space-sm);
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 
   /* Popover menus (ui/Menu) */
@@ -580,25 +1192,43 @@
     position: relative;
     display: inline-flex;
   }
+  /* Never wider than the viewport minus its gutters; Menu nudges it
+     sideways (--menu-shift) when its trigger sits near an edge. */
   .menu-popover {
     position: absolute;
     top: calc(100% + 6px);
-    min-width: 200px;
+    width: max-content;
+    min-width: min(200px, calc(100vw - 2 * var(--space-md)));
+    max-width: min(22rem, calc(100vw - 2 * var(--space-md)));
+    /* Menu caps the height to the room beside its trigger (--menu-max-height):
+       a menu clipped above a fixed sidebar cannot be scrolled into view. */
+    max-height: var(--menu-max-height, calc(100vh - 2 * var(--space-md)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    translate: var(--menu-shift, 0px) 0;
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     padding: var(--space-xs);
     z-index: 1200;
     display: flex;
     flex-direction: column;
-    animation: menu-in 0.12s ease-out;
+    animation: menu-in var(--duration-fast) var(--ease-out);
   }
   .menu-popover--right {
     right: 0;
   }
   .menu-popover--left {
     left: 0;
+  }
+  /* Opens upwards from a trigger at the foot of the sidebar. */
+  .menu-popover--up {
+    top: auto;
+    bottom: calc(100% + 6px);
+  }
+  .menu-group-label {
+    padding: var(--space-xs) 10px 2px;
   }
   @keyframes menu-in {
     from {
@@ -610,23 +1240,41 @@
       transform: translateY(0);
     }
   }
-  .menu-item {
+  /* One list-row spec for every list in a popover: menu items and listbox
+     options (and the palette's, shell.css) share size, height, radius and
+     the inset focus ring, like the sidebar's rows. */
+  .menu-item,
+  .popover-option {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     width: 100%;
-    padding: 0.45rem var(--space-sm);
+    min-height: var(--control-min);
+    padding: 0.375rem 10px;
     border: none;
     background: transparent;
     border-radius: var(--radius-sm);
     color: var(--color-text);
-    font-size: 0.85rem;
+    font-size: var(--text-md);
+    line-height: var(--leading-tight);
     text-align: left;
     text-decoration: none;
   }
-  .menu-item:hover {
-    background: var(--color-surface-hover);
+  .menu-item:hover,
+  .popover-option:hover {
+    background: var(--color-hover-quiet);
     color: var(--color-text);
+  }
+  .menu-item:focus-visible,
+  .popover-option:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-inset);
+  }
+  /* Icons sit in the same 16px column as the radio items' check. */
+  .menu-item > svg {
+    flex-shrink: 0;
+    width: var(--icon-row);
+    height: var(--icon-row);
   }
   .menu-item--danger {
     color: var(--color-danger);
@@ -637,7 +1285,8 @@
   }
   .menu-item-check {
     display: inline-flex;
-    width: 16px;
+    flex-shrink: 0;
+    width: var(--icon-row);
     justify-content: center;
     color: var(--color-accent);
   }
@@ -648,32 +1297,131 @@
   .menu-header {
     display: flex;
     flex-direction: column;
-    padding: var(--space-sm);
+    padding: var(--space-sm) 10px;
     gap: 1px;
+    overflow-wrap: anywhere;
   }
   .menu-header-name {
-    font-size: 0.85rem;
+    font-size: var(--text-md);
     font-weight: 600;
     color: var(--color-text);
   }
   .menu-header-email {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
   .menu-separator {
     height: 1px;
-    background: var(--color-border);
+    background: var(--color-hairline);
     margin: var(--space-xs) 0;
+  }
+  /* A visible note under an item (its aria-describedby), indented to the
+     item's label column: row padding, icon column and gap. */
+  .menu-hint {
+    padding: 0 10px var(--space-xs) calc(10px + var(--icon-row) + var(--space-sm));
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
   }
   .menu-empty {
     padding: var(--space-sm);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
+  /* Long names (up to 200 characters) wrap to two lines, then end in an
+     ellipsis; the item's title carries the full name. */
   .menu-item-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* Non-modal popovers (ui/Popover): year range, sort listbox. Like the menu,
+     never wider than the viewport, nudged sideways through --popover-shift. */
+  .popover-root {
+    position: relative;
+    display: inline-flex;
+  }
+  .popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    width: max-content;
+    min-width: min(220px, calc(100vw - 2 * var(--space-md)));
+    max-width: min(22rem, calc(100vw - 2 * var(--space-md)));
+    translate: var(--popover-shift, 0px) 0;
+    padding: 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 1200;
+    animation: menu-in var(--duration-fast) var(--ease-out);
+  }
+  .popover--start {
+    left: 0;
+  }
+  .popover--end {
+    right: 0;
+  }
+  .popover:focus {
+    outline: none;
+  }
+  .popover-title {
+    margin: 2px 6px 8px;
+  }
+  .popover-listbox {
+    display: flex;
+    flex-direction: column;
+  }
+  /* A preset or listbox option row: the list-row spec above (.menu-item). */
+  .popover-option {
+    cursor: pointer;
+    transition: background var(--duration-fast) ease;
+  }
+  .popover-option--active,
+  .popover-option[aria-selected="true"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
+    font-weight: 500;
+  }
+  .popover-option-check {
+    display: inline-flex;
+    flex-shrink: 0;
+    width: var(--icon-row);
+    margin-left: auto;
+    color: var(--color-accent);
+  }
+  .popover-section {
+    margin-top: 6px;
+    padding: 10px 6px 4px;
+    border-top: 1px solid var(--color-hairline);
+  }
+  .popover-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 8px 6px 2px;
+  }
+
+  /* Shared list feedback: a failed query's retry and the "Show more" row. */
+  .query-feedback,
+  .load-more {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: var(--space-md);
+    margin-block: var(--space-lg);
+  }
+
+  .query-feedback .btn,
+  .load-more .btn {
+    min-height: var(--control-min);
   }
 }
 
@@ -687,5 +1435,3 @@
 .skeleton[data-height="1.1rem"] { height: 1.1rem; }
 .skeleton[data-height="1.5rem"] { height: 1.5rem; }
 .skeleton[data-height="4rem"] { height: 4rem; }
-
-.query-feedback, .load-more { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--space-md); margin-block: var(--space-lg); }

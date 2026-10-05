@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { assertSession, invalidateSession, sessionGeneration, SessionChangedError, withSessionLock } from "./session";
-import type { CitingOrder, ExpandRequest, ExpandResponse, GraphResponse, LibraryEntry, LibraryEntryListItem, LibraryVersionPin, Note, PaperDetail, PaperState, ReadingState, TokenResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
+import type { GraphResponse,LibraryEntry, LibraryEntryListItem, LibraryFacets, LibraryListParams, LibraryResolveRequest, LibraryResolveResult, LibraryVersionPin, Note, PaginatedResponse, PaperDetail, PaperState, PaperTag, ReadingState, RelatedRangeRequest, RelatedRangeResponse, SearchParams, SearchResult, TokenResponse, TopUpRequest, TopUpResponse, ZoteroStatus, ZoteroSyncReport } from "@/types";
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string> | null = null;
@@ -69,10 +69,11 @@ api.interceptors.response.use((response) => {
 });
 
 export const papers = {
+  async search(params: SearchParams, options: { signal?: AbortSignal } = {}) { return (await api.get<SearchResult>("/papers/search", { params, signal: options.signal })).data; },
   async getDetail(canonicalKey: string) { return (await api.get<PaperDetail>(`/papers/${encodeURIComponent(canonicalKey)}`)).data; },
   async getStates(canonicalKey: string) { return (await api.get<PaperState[]>(`/papers/${encodeURIComponent(canonicalKey)}/states`)).data; },
   async setState(canonicalKey: string, state: ReadingState) { return (await api.put<PaperState>(`/papers/${encodeURIComponent(canonicalKey)}/state`, { state })).data; },
-  async getTags(canonicalKey: string) { return (await api.get<{ tag: string }[]>(`/papers/${encodeURIComponent(canonicalKey)}/tags`)).data; },
+  async getTags(canonicalKey: string) { return (await api.get<PaperTag[]>(`/papers/${encodeURIComponent(canonicalKey)}/tags`)).data; },
   async addTag(canonicalKey: string, tag: string) { return (await api.post(`/papers/${encodeURIComponent(canonicalKey)}/tags`, { tag })).data; },
   async removeTag(canonicalKey: string, tag: string) { await api.delete(`/papers/${encodeURIComponent(canonicalKey)}/tags/${encodeURIComponent(tag)}`); },
 };
@@ -84,12 +85,14 @@ export const notes = {
 };
 
 export const library = {
-  async listEntries(params: { page?: number; size?: number } = {}) { return (await api.get<LibraryEntryListItem[]>("/library/entries", { params: { page: params.page ?? 1, size: params.size ?? 25 } })).data; },
+  async listEntries(params: LibraryListParams = {}) { return (await api.get<PaginatedResponse<LibraryEntryListItem>>("/library/entries", { params: { ...params, page: params.page ?? 1, size: params.size ?? 25 } })).data; },
+  async getFacets() { return (await api.get<LibraryFacets>("/library/facets")).data; },
   async listKeys() { return (await api.get<string[]>("/library/keys")).data; },
   async getEntry(groupKey: string) { return (await api.get<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`)).data; },
   async ensureEntry(body: { paper_group_key: string; paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryEntry>("/library/entries", body)).data; },
   async repinPrimary(groupKey: string, primaryCanonicalKey: string) { return (await api.patch<LibraryEntry>(`/library/entries/${encodeURIComponent(groupKey)}`, { primary_canonical_key: primaryCanonicalKey })).data; },
-  async deleteEntry(groupKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`); },
+  async deleteEntry(groupKey: string, options: { detach?: boolean } = {}) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}`, options.detach ? { params: { detach: true } } : undefined); },
+  async resolve(body: LibraryResolveRequest) { return (await api.post<LibraryResolveResult>("/library/resolve", body)).data; },
   async addVersion(groupKey: string, body: { paper_canonical_key: string; source_provider?: string | null }) { return (await api.post<LibraryVersionPin>(`/library/entries/${encodeURIComponent(groupKey)}/versions`, body)).data; },
   async removeVersion(groupKey: string, canonicalKey: string) { await api.delete(`/library/entries/${encodeURIComponent(groupKey)}/versions/${encodeURIComponent(canonicalKey)}`); },
 };
@@ -103,10 +106,11 @@ export const zotero = {
 };
 
 export const graph = {
-  async buildPaper(paperKey: string, order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`, { params: { order } })).data; },
-  async buildCollection(collectionId: string, order: CitingOrder = "cited_by_count", headers: Record<string, string> = {}) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { params: { order }, headers })).data; },
-  async buildLibrary(order: CitingOrder = "cited_by_count") { return (await api.get<GraphResponse>("/graph/library", { params: { order } })).data; },
-  async expand(body: ExpandRequest) { return (await api.post<ExpandResponse>("/graph/expand", body)).data; },
+  async buildPaper(paperKey: string) { return (await api.get<GraphResponse>(`/graph/paper/${encodeURIComponent(paperKey)}`)).data; },
+  async buildCollection(collectionId: string, headers: Record<string, string> = {}) { return (await api.get<GraphResponse>(`/graph/collection/${encodeURIComponent(collectionId)}`, { headers })).data; },
+  async buildLibrary() { return (await api.get<GraphResponse>("/graph/library")).data; },
+  async related(body: RelatedRangeRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<RelatedRangeResponse>("/graph/related", body, { signal: options.signal })).data; },
+  async topUp(body: TopUpRequest, options: { signal?: AbortSignal } = {}) { return (await api.post<TopUpResponse>("/graph/related/top-up", body, { signal: options.signal })).data; },
 };
 
 export default api;

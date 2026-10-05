@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     EmailStr,
     Field,
     HttpUrl,
@@ -20,12 +23,37 @@ from pydantic import (
 
 from app.config import settings
 
+logger = logging.getLogger("openbib.legal")
+
+PLACEHOLDER_MARKERS = ("replace-me", "replace me", "<your", "your-", "todo:", "example.com")
+# Role identifiers the frontend translates itself (legal.roles.*), compared without separators.
+KNOWN_ROLES = {
+    "processor",
+    "controller",
+    "independentcontroller",
+    "jointcontroller",
+    "subprocessor",
+}
+
+
+class LocalizedText(BaseModel):
+    """User-visible legal text in every language the frontend ships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    en: str = Field(min_length=1)
+    it: str = Field(min_length=1)
+
+
+# Plain strings stay valid so existing single-language files keep loading.
+Text = str | LocalizedText
+
 
 class OperatorConfig(BaseModel):
     name: str = Field(min_length=2)
     # Operators may omit a public postal address; legal suitability remains theirs to review.
     address: str = ""
-    country: str = Field(min_length=2)
+    country: Annotated[str, Field(min_length=2)] | LocalizedText
     privacy_email: EmailStr
     support_email: EmailStr
 
@@ -40,11 +68,11 @@ class OperatorConfig(BaseModel):
 
 class ThirdPartyConfig(BaseModel):
     name: str
-    purpose: str
-    role: str
-    region: str
+    purpose: Text
+    role: Text
+    region: Text
     privacy_url: HttpUrl
-    transfer_safeguard: str | None = None
+    transfer_safeguard: Text | None = None
 
 
 class RetentionConfig(BaseModel):
@@ -64,7 +92,7 @@ class LegalConfig(BaseModel):
     backups_enabled: StrictBool = True
     deletion_journal_enabled: StrictBool | None = None
     operator: OperatorConfig
-    data_location: str
+    data_location: Text
     third_parties: list[ThirdPartyConfig]
     retention: RetentionConfig = RetentionConfig()
 
@@ -77,6 +105,23 @@ class LegalConfig(BaseModel):
         if self.retention.backups_days != (30 if self.backups_enabled else 0):
             raise ValueError("Backup retention must be 30 days when enabled, otherwise 0")
         return self
+
+
+def untranslated_fields(config: LegalConfig) -> list[str]:
+    """Paths of user-visible fields that are still single-language plain strings."""
+    fields = [
+        ("data_location", config.data_location),
+        ("operator.country", config.operator.country),
+    ]
+    for index, party in enumerate(config.third_parties):
+        prefix = f"third_parties[{index}]"
+        fields += [(f"{prefix}.purpose", party.purpose), (f"{prefix}.region", party.region)]
+        if party.transfer_safeguard is not None:
+            fields.append((f"{prefix}.transfer_safeguard", party.transfer_safeguard))
+        if isinstance(party.role, str) and re.sub(r"[^a-z]", "", party.role.lower()) in KNOWN_ROLES:
+            continue
+        fields.append((f"{prefix}.role", party.role))
+    return [path for path, value in fields if isinstance(value, str)]
 
 
 def _development_config() -> LegalConfig:
@@ -145,11 +190,13 @@ def get_legal_config() -> LegalConfig:
         if has_empty_strings(raw) or len(config.third_parties) < 3:
             raise RuntimeError("Legal configuration is incomplete")
         serialized = json.dumps(raw).lower()
-        if any(
-            marker in serialized
-            for marker in ("example.com", "replace-me", "replace me", "your ", "todo")
-        ):
+        if any(marker in serialized for marker in PLACEHOLDER_MARKERS):
             raise RuntimeError("Legal configuration still contains placeholder values")
         if str(config.public_url).rstrip("/") != settings.app_public_url.rstrip("/"):
             raise RuntimeError("Legal public_url does not match APP_PUBLIC_URL")
+        if untranslated := untranslated_fields(config):
+            logger.warning(
+                "Legal fields are plain strings and show the same text in every language: "
+                + ", ".join(untranslated)
+            )
     return config

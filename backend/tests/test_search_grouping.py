@@ -67,6 +67,27 @@ def test_build_search_response_groups_versions_and_keeps_singletons():
     assert payload["items"][1]["paper"]["canonical_key"] == "hash:single"
 
 
+def test_build_search_response_compares_versions_numerically():
+    same_day = date(2024, 1, 1)
+    result = SearchResult(
+        papers=[
+            make_paper("hash:v9", "group:paper", "Grouped Paper", same_day, "v9"),
+            make_paper("hash:v10", "group:paper", "Grouped Paper", same_day, "v10"),
+            make_paper("hash:v2", "group:paper", "Grouped Paper", same_day, "v2"),
+        ],
+        total_count=3,
+        page=1,
+        page_size=20,
+        provider="crossref",
+    )
+
+    payload = service.build_search_response(result)
+
+    group = payload["items"][0]
+    assert group["selected_version"]["canonical_key"] == "hash:v10"
+    assert [v["canonical_key"] for v in group["versions"]] == ["hash:v10", "hash:v9", "hash:v2"]
+
+
 @pytest.mark.asyncio
 async def test_cache_papers_roundtrip(db):
     papers = [
@@ -174,3 +195,57 @@ async def test_cached_paper_to_read_falls_back_to_provider_source(db):
     cached.provider_sources_json = None
     read = service.cached_paper_to_read(cached)
     assert read.provider_sources == ["openalex"]
+
+
+def test_dedupe_keeps_the_provider_estimate_and_window_flag():
+    duplicate = make_paper("doi:10.1/d", "group:d", "Duplicate Paper", date(2024, 1, 1))
+    result = SearchResult(
+        papers=[duplicate, duplicate],
+        total_count=2,
+        page=1,
+        page_size=20,
+        provider="semantic_scholar",
+        total_estimate=4321,
+        window_capped=True,
+    )
+
+    merged = service.round_robin_dedupe([result])
+
+    assert len(merged.papers) == 1 and merged.total_count == 2
+    assert (merged.total_estimate, merged.window_capped) == (4321, True)
+    assert service.round_robin_dedupe([]).total_estimate is None
+
+
+def test_build_search_response_reports_sort_continuation_and_versions():
+    title = "Graph Neural Networks in Recommender Systems"
+    preprint = make_paper("s2:" + "a" * 40, "group:pre", title, date(2020, 1, 1))
+    article = make_paper("doi:10.1/rec", "group:rec", title.lower(), date(2021, 5, 1))
+    result = SearchResult(
+        papers=[preprint, article],
+        total_count=2,
+        page=1,
+        page_size=20,
+        provider="semantic_scholar",
+        has_more=True,
+        total_estimate=77,
+    )
+
+    payload = service.build_search_response(
+        result, sort="date", next_cursor="abc", filtered_locally=True, source="semantic_scholar"
+    )
+
+    assert {k: payload[k] for k in ("sort", "next_cursor", "total_estimate", "window_capped")} == {
+        "sort": "date",
+        "next_cursor": "abc",
+        "total_estimate": 77,
+        "window_capped": False,
+    }
+    assert payload["filtered_locally"] is True and payload["source"] == "semantic_scholar"
+    first, second = payload["items"]
+    assert first["possible_versions"] == [
+        {"paper_group_key": "group:rec", "title": title.lower(), "provider_sources": ["openalex"]}
+    ]
+    assert second["possible_versions"][0]["paper_group_key"] == "group:pre"
+    # Defaults keep the relevance shape for callers that pass only the result.
+    assert service.build_search_response(result)["sort"] == "relevance"
+    assert "source" not in service.build_search_response(result)

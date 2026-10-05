@@ -11,7 +11,7 @@ describe("App routing (anonymous)", () => {
       await screen.findByText("Discover, organize, and explore research papers"),
     ).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText("Search millions of papers by title, author, DOI…"),
+      screen.getByPlaceholderText("Search papers by title, author, DOI…"),
     ).toBeInTheDocument();
   });
 

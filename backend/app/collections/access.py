@@ -30,6 +30,18 @@ def accessible_to(user_id: uuid.UUID):
     )
 
 
+def editable_by(user_id: uuid.UUID):
+    """SQL form of ``authorize(permission="edit")``: the owner or an editor."""
+    return or_(
+        Collection.owner_id == user_id,
+        Collection.id.in_(
+            select(CollectionMember.collection_id).where(
+                CollectionMember.user_id == user_id, CollectionMember.role == "editor"
+            )
+        ),
+    )
+
+
 def link_matches(collection: Collection, token: str | None) -> bool:
     return bool(
         token

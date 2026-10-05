@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useQueryClient } from "@tanstack/react-query";
 import api, { refreshAccessToken, setAccessToken, setAuthFailureHandler } from "@/lib/api";
 import { assertSession, changeSession, listenForSessionChanges, sessionGeneration } from "@/lib/session";
+import { clearScrollPositions } from "@/hooks/useScrollRestore";
+import { clearLastSearch } from "@/lib/lastSearch";
 import type { TokenResponse, User } from "@/types";
 
 interface RegistrationInput { password: string; displayName: string; termsVersion: string; privacyVersion: string; }
@@ -25,7 +27,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearSession = useCallback(() => {
     setAccessToken(null); setUser(null);
-    if (activeUserId.current !== null) queryClient.clear();
+    // The startup refresh of an anonymous visit also lands here; that must
+    // not drop the search the first page just ran.
+    if (activeUserId.current !== null) { queryClient.clear(); clearLastSearch(); }
+    clearScrollPositions();
     activeUserId.current = null;
   }, [queryClient]);
 
@@ -33,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const expected = sessionGeneration();
     const { data } = await api.get<User>("/users/me");
     assertSession(expected);
-    if (activeUserId.current !== null && activeUserId.current !== data.id) queryClient.clear();
+    if (activeUserId.current !== null && activeUserId.current !== data.id) { queryClient.clear(); clearScrollPositions(); clearLastSearch(); }
     activeUserId.current = data.id;
     setUser(data);
   }, [queryClient]);

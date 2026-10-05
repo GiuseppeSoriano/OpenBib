@@ -1,87 +1,282 @@
 @layer pages {
+  /* Search.dc.html: one reading column under the page's own header. */
   .search-page {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
+    width: 100%;
+    max-width: 61.25rem;
+    margin-inline: auto;
   }
 
-  /* Sticky compact search bar directly under the navbar */
+  .search-header h1 {
+    font-size: var(--text-2xl);
+    letter-spacing: var(--tracking-display);
+  }
+
+  .search-header h1:focus {
+    outline: none;
+  }
+
+  /* Desktop: the field sticks under the nav on its own; the chip row scrolls. */
+  .search-top {
+    display: contents;
+  }
+
   .search-bar {
     position: sticky;
     top: var(--nav-height);
     z-index: 20;
     display: flex;
     gap: var(--space-sm);
-    padding: var(--space-sm) 0;
+    /* The padding is the stuck bar's backdrop; the negative margin keeps it
+       out of the page rhythm. */
+    padding-block: var(--space-sm);
+    margin-block: calc(-1 * var(--space-sm));
     background: var(--color-bg);
   }
 
-  .search-input-wrap {
+  /* Search.dc.html rhythm: title 16px, field 14px, chips 18px, status 10px. */
+  .search-top > .search-filters {
+    margin-top: -2px;
+  }
+
+  .search-page > .search-status {
+    margin-top: 2px;
+  }
+
+  .search-page > .search-results,
+  .search-page > .skeleton-cards {
+    margin-top: -6px;
+  }
+
+  /* The sticky field covers the top of the viewport: what is scrolled into
+     view (focus, links) lands below it. SearchPage measures the field into
+     --search-bar-height; the rem estimate only covers the first frame. */
+  :root:has(.search-page) {
+    scroll-padding-top: calc(
+      var(--nav-height) + var(--search-bar-height, 4.25rem) + var(--space-xs)
+    );
+  }
+
+  .search-field {
     position: relative;
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 46px;
+    padding: 0 6px 0 14px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+    transition:
+      border-color var(--duration-base) ease,
+      box-shadow var(--duration-base) ease;
+  }
+
+  .search-field:focus-within {
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
   }
 
   .search-icon {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
+    flex-shrink: 0;
     color: var(--color-text-secondary);
     pointer-events: none;
   }
 
   .search-input {
-    padding-left: 38px;
-    padding-top: 0.55rem;
-    padding-bottom: 0.55rem;
-    font-size: 0.92rem;
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;
+    border: 0;
+    outline: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: var(--text-base);
   }
 
-  .search-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-  }
-
-  .search-meta {
-    font-size: 0.8rem;
+  .search-input::placeholder {
     color: var(--color-text-secondary);
+    opacity: 0.75;
   }
 
-  .search-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
+  /* "/" and ⌘K hints: for the way in, so they step aside while typing. */
+  .search-kbd {
+    display: inline-flex;
+    gap: 4px;
+    flex-shrink: 0;
+    padding-right: 8px;
   }
 
-  .search-list {
+  .search-field:focus-within .search-kbd {
+    display: none;
+  }
+
+  .search-clear {
+    flex-shrink: 0;
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    padding: 0;
+  }
+
+  .search-submit {
+    min-height: 46px;
+    padding-inline: 20px;
+  }
+
+  .search-results {
     display: flex;
     flex-direction: column;
+  }
+
+  /* The row takes focus when a possible other version is shown; the root's
+     scroll padding keeps it clear of the sticky field. */
+  .search-result {
+    padding: 20px 4px 18px;
+    border-radius: var(--radius-sm);
+    scroll-margin-top: var(--space-sm);
+    transition:
+      background var(--duration-slow) ease,
+      box-shadow var(--duration-slow) ease;
+  }
+
+  .search-result:focus {
+    outline: none;
+  }
+
+  .search-result:focus-visible,
+  .search-result--highlight {
+    background: var(--color-accent-soft);
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+  }
+
+  /* Loading placeholders take the shape of the rows they stand in for. */
+  .search-page .skeleton-cards {
+    gap: 0;
+    border-top: 1px solid var(--color-rule);
+  }
+
+  .search-page .skeleton-card {
     gap: var(--space-sm);
+    padding: 20px 4px 18px;
+    border: 0;
+    border-bottom: 1px solid var(--color-hairline);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
-  .search-error {
-    color: var(--color-danger);
-    font-size: 0.88rem;
+  .search-result .btn-quiet[aria-disabled="true"] {
+    cursor: default;
   }
 
-  .version-picker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-    margin-top: var(--space-xs);
+  .search-result .btn-quiet[aria-disabled="true"]:hover {
+    background: transparent;
   }
 
-  .pill--sm {
-    font-size: 0.72rem;
-    padding: 0.15rem 0.6rem;
+  /* Touch screens: no physical keyboard hints. */
+  @media (pointer: coarse), (max-width: 639px), (max-height: 500px) {
+    .search-kbd {
+      display: none;
+    }
   }
 
-  .dismiss-btn {
-    font-size: 0.78rem;
-    margin-left: auto;
+  /* Phones and short landscape screens: the page heading stays for
+     assistive tech; the field leads (MobileSearch.dc.html). */
+  @media (max-width: 639px), (max-height: 500px) {
+    .search-header {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    .search-page {
+      gap: var(--space-sm);
+    }
+
+    .search-top {
+      display: block;
+    }
+
+    .search-bar {
+      position: static;
+      padding: 0;
+      margin-block: 0;
+      background: transparent;
+    }
+
+    .search-top .search-filters {
+      margin-top: 0;
+      padding: 10px 0 12px;
+    }
+
+    /* MobileSearch.dc.html: status 12px under the chips, 4px over the list. */
+    .search-page > .search-status {
+      margin-top: 4px;
+    }
+
+    .search-page > .search-results,
+    .search-page > .skeleton-cards {
+      margin-top: -4px;
+    }
+
+    .search-result,
+    .search-page .skeleton-card {
+      padding: 14px 0 8px;
+    }
+
+    /* The field is in the flow here: nothing sticky to clear. */
+    :root:has(.search-page) {
+      scroll-padding-top: var(--nav-height);
+    }
+  }
+
+  /* Phones: an edge-to-edge bar on the sidebar ground. */
+  @media (max-width: 639px) {
+    .search-top {
+      margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-md)) 0;
+      padding: 10px var(--space-md) 0;
+      padding-left: max(var(--space-md), env(safe-area-inset-left, 0px));
+      padding-right: max(var(--space-md), env(safe-area-inset-right, 0px));
+      background: var(--color-sidebar);
+      border-bottom: 1px solid var(--color-hairline);
+    }
+
+    .search-field {
+      border-radius: var(--radius-md);
+      box-shadow: none;
+    }
+
+    /* The keyboard's Search key submits; the field keeps the full width. */
+    .search-submit {
+      display: none;
+    }
+  }
+
+  /* Portrait phones: field and chips stay on screen while the results scroll.
+     Short landscape screens keep them in the flow. */
+  @media (max-width: 639px) and (min-height: 501px) {
+    .search-top {
+      position: sticky;
+      top: var(--nav-height);
+      z-index: 20;
+    }
+
+    /* Field plus chip row, measured into --search-top-height (it does not
+       scale with the text size alone); the rem estimate covers the first frame. */
+    :root:has(.search-page) {
+      scroll-padding-top: calc(
+        var(--nav-height) + var(--search-top-height, 8.25rem) + var(--space-xs)
+      );
+    }
   }
 }

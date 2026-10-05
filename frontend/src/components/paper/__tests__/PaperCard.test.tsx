@@ -50,8 +50,59 @@ describe("PaperCard", () => {
     renderCard();
     expect(screen.getByText("A Very Important Paper")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith, Bob Jones")).toBeInTheDocument();
-    expect(screen.getByText(/Journal of Tests · 2024 · 12 citations/)).toBeInTheDocument();
-    expect(screen.getByText(/OpenAlex/)).toBeInTheDocument();
+    expect(screen.getByText(/Journal of Tests · 2024/)).toHaveTextContent(
+      "Journal of Tests · 2024 · Cited by 12 · OpenAlex",
+    );
+    // The source list would only repeat the provider credited with the count.
+    expect(screen.queryByText(/— OpenAlex/)).toBeNull();
+  });
+
+  it("shows which provider the citation count comes from as visible text", () => {
+    renderCard();
+    expect(screen.getByText("· OpenAlex")).toBeVisible();
+    expect(screen.getByText(/Citation count from OpenAlex/)).toHaveClass("sr-only");
+    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("Cited by 12");
+  });
+
+  it("formats large citation counts with the locale's grouping", () => {
+    renderCard({ paper: { ...paper, cited_by_count: 10565 } });
+    expect(screen.getByTitle("Citation count from OpenAlex")).toHaveTextContent("Cited by 10,565");
+  });
+
+  it("lists the sources when they add to the citation provenance", () => {
+    renderCard({ providerSources: ["openalex", "crossref"] });
+    expect(screen.getByText(/— OpenAlex, Crossref/)).toBeInTheDocument();
+  });
+
+  it("names the source when there is no citation count", () => {
+    renderCard({ paper: { ...paper, cited_by_count: null } });
+    expect(document.querySelector(".paper-meta")).toHaveTextContent("Journal of Tests · 2024 — OpenAlex");
+  });
+
+  it("renders a note under the meta line", () => {
+    renderCard({ note: <p>Possible other version</p> });
+    const note = screen.getByText("Possible other version");
+    expect(document.querySelector(".paper-meta")?.nextElementSibling).toBe(note);
+  });
+
+  it("previews a structured abstract without leaking markup", () => {
+    renderCard({
+      paper: {
+        ...paper,
+        title: "Clean title",
+        abstract: "<h4>Background</h4>Odor <i>coding</i><h4>Results</h4>p < 0.05<script>x()</script>",
+      },
+    });
+    const preview = document.querySelector(".paper-abstract");
+    expect(preview).toHaveTextContent("Background: Odor coding Results: p < 0.05");
+    expect(preview?.textContent).not.toMatch(/<\/?[a-z]/i);
+    expect(preview?.textContent).not.toContain("x()");
+  });
+
+  it("keeps tag-like literal text in the preview", () => {
+    const abstract = "Typed Box<T> handles <mask> tokens when x<a and y>b.";
+    renderCard({ paper: { ...paper, abstract } });
+    expect(document.querySelector(".paper-abstract")?.textContent).toBe(abstract);
   });
 
   it("never shows the raw DOI or canonical key", () => {
@@ -77,5 +128,21 @@ describe("PaperCard", () => {
   it("renders the actions slot", () => {
     renderCard({ actions: <button>Custom action</button> });
     expect(screen.getByRole("button", { name: "Custom action" })).toBeInTheDocument();
+  });
+
+  it("renders as a hairline row with an italic venue and open access in the meta line", () => {
+    renderCard({ variant: "row" });
+    const article = document.querySelector("article");
+    expect(article).toHaveClass("paper-card--row");
+    expect(article).not.toHaveClass("card");
+    expect(screen.getByText("Journal of Tests")).toHaveClass("paper-venue");
+    expect(document.querySelector(".paper-meta")).toHaveTextContent(
+      "Journal of Tests · 2024 · Cited by 12, Citation count from OpenAlex · Open Access",
+    );
+    // The provider is named for assistive tech and in the tooltip, not in every row.
+    expect(document.querySelector(".paper-citations-source")).toBeNull();
+    expect(document.querySelector(".paper-citations")).toHaveAttribute("title", "Citation count from OpenAlex");
+    // Open access moves from a title badge to the meta line.
+    expect(document.querySelector(".paper-title-row .badge")).toBeNull();
   });
 });

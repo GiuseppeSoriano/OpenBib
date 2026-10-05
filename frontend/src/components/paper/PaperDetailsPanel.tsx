@@ -1,35 +1,76 @@
+import { useEffect, useId, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, ExternalLink, FileText, GitFork, LogIn, Pin, Trash2 } from "lucide-react";
+import { BookMarked, FileDown, GitFork, LogIn, Pin, RotateCcw, Trash2 } from "lucide-react";
 import api, { library, papers } from "@/lib/api";
+import { abstractParagraphs } from "@/lib/abstract";
+import { apiStatus } from "@/lib/apiError";
+import { doiUrl, parseIdentifier } from "@/lib/identifiers";
+import { useApiErrorText } from "@/hooks/useApiErrorText";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import Skeleton from "@/components/ui/Skeleton";
+import AnnouncedText from "@/components/ui/AnnouncedText";
 import ReadingStateSelect from "@/components/paper/ReadingStateSelect";
 import TagEditor from "@/components/paper/TagEditor";
 import NotesPanel from "@/components/paper/NotesPanel";
 import AddToCollectionMenu from "@/components/paper/AddToCollectionMenu";
-import { providerLabel, versionLabel } from "@/components/paper/versionLabel";
-import type { LibraryVersionPin, PaperDetail, PaperMemberships } from "@/types";
+import ExternalLinkChip from "@/components/paper/ExternalLinkChip";
+import { fullTextLinks, pubmedUrl, semanticScholarUrl } from "@/components/paper/links";
+import {
+  providerLabel,
+  versionLabels,
+  type VersionLabel,
+} from "@/components/paper/versionLabel";
+import type { LibraryVersionPin, PaperMemberships } from "@/types";
 import "./PaperDetailsPanel.css";
 
 interface PaperDetailsPanelProps {
   /** Canonical key of the paper to show; null keeps the panel closed. */
   paperKey: string | null;
   onClose: () => void;
+  /** Focus target on close when the opener no longer exists. */
+  fallbackFocus?: () => HTMLElement | null | undefined;
+  /**
+   * The stored paper has no details yet: once they load, re-resolve it so
+   * the lists pick them up. Pass it only when the signed-in user can edit
+   * the row or has it in their Library, never for read-link visitors.
+   */
+  resolveOnOpen?: boolean;
 }
 
+// Answers a retry would not change: missing papers, bad keys, provider waits.
+const NO_RETRY_STATUSES = new Set([400, 403, 404, 422, 429, 503]);
+
+// Query families that list papers; a re-resolve can re-key rows in any of them.
+const LIST_QUERIES = [
+  ["collection-papers"],
+  ["library-entries"],
+  ["library-facets"],
+  ["library-keys"],
+  ["paper-memberships"],
+];
+
 /** Human label for a pinned version — metadata match first, provider fallback. */
-function pinLabel(
-  pin: LibraryVersionPin,
-  paper: PaperDetail,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  const match = paper.versions.find((v) => v.canonical_key === pin.paper_canonical_key);
-  if (match) return versionLabel(match, t as never);
-  return providerLabel(pin.source_provider);
+function pinLabel(pin: LibraryVersionPin, labels: Map<string, VersionLabel>): VersionLabel {
+  const match = labels.get(pin.paper_canonical_key);
+  if (match) return match;
+  const label = providerLabel(pin.source_provider);
+  return { label, accessibleName: label, details: "" };
+}
+
+/** A version row's text: the distinct label plus a quieter details line. */
+function VersionText({ info, id }: { info: VersionLabel; id?: string }) {
+  return (
+    <span className="pd-version-text">
+      <span className="pd-version-label" id={id}>
+        {info.label}
+      </span>
+      {info.details && <span className="pd-version-details">{info.details}</span>}
+    </span>
+  );
 }
 
 /**
@@ -37,17 +78,61 @@ function pinLabel(
  * Low-level identifiers (DOIs, canonical keys) never appear as text —
  * external references are presented as link chips.
  */
-export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPanelProps) {
+export default function PaperDetailsPanel({
+  paperKey,
+  onClose,
+  fallbackFocus,
+  resolveOnOpen = false,
+}: PaperDetailsPanelProps) {
   const { t, i18n } = useTranslation();
+  const titleId = useId();
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: paper, isLoading, isError } = useQuery({
+  const {
+    data: paper,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
     queryKey: ["paper-detail", paperKey],
     queryFn: () => papers.getDetail(paperKey!),
     enabled: !!paperKey,
+    retry: (failures, err) => failures < 1 && !NO_RETRY_STATUSES.has(apiStatus(err) ?? 0),
   });
+
+  // Distinct explanations: no such paper, a provider wait (counted down), or anything else.
+  const errorStatus = apiStatus(error);
+  const notFound = errorStatus === 404 || errorStatus === 422;
+  const waitable = errorStatus === 503 || errorStatus === 429 || (!!error && errorStatus === null);
+  const {
+    text: liveErrorText,
+    announcement,
+    waiting,
+  } = useApiErrorText(waitable ? error : null, t("paper.loadFailedHint"));
+  const keyDoi = paperKey ? (parseIdentifier(paperKey)?.doi ?? null) : null;
+  let errorText = t("paper.loadFailedHint");
+  if (notFound) errorText = t("paper.notFoundHint");
+  else if (waitable) errorText = liveErrorText;
+
+  // Re-resolve an unresolved row once per opened key, after its details load.
+  const resolvedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resolveOnOpen || !user || !paper || !paperKey || resolvedKey.current === paperKey) return;
+    resolvedKey.current = paperKey;
+    library
+      .resolve({ paper_canonical_key: paperKey })
+      .then((result) => {
+        if (result.status === "resolved" || result.canonical_key !== result.previous_key) {
+          for (const queryKey of LIST_QUERIES) void queryClient.invalidateQueries({ queryKey });
+        }
+      })
+      // Best effort: the row keeps its Retry and Fix actions.
+      .catch(() => {});
+  }, [resolveOnOpen, user, paper, paperKey, queryClient]);
 
   const { data: libraryKeys } = useQuery({
     queryKey: ["library-keys"],
@@ -94,8 +179,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
       library.removeVersion(paper!.paper_group_key, canonicalKey),
     onSuccess: invalidateEntry,
     onError: (err: unknown) => {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      toast(status === 409 ? t("library.remove409") : t("library.removeFailed"), "error");
+      toast(apiStatus(err) === 409 ? t("library.remove409") : t("library.removeFailed"), "error");
     },
   });
 
@@ -118,14 +202,51 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
       ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }).format(new Date(value))
       : null;
 
+  const labels = useMemo(
+    () => versionLabels(paper?.versions ?? [], t, i18n.language),
+    [paper, t, i18n.language],
+  );
+  const paragraphs = useMemo(() => abstractParagraphs(paper?.abstract), [paper]);
+  const fullText = useMemo(() => (paper ? fullTextLinks(paper) : []), [paper]);
+  const pubmed = paper ? pubmedUrl(paper) : null;
+  const semanticScholar = paper ? semanticScholarUrl(paper) : null;
+
   return (
-    <Panel open={!!paperKey} onClose={onClose} title={t("paper.detailsTitle")}>
+    <Panel
+      open={!!paperKey}
+      onClose={onClose}
+      title={t("paper.detailsTitle")}
+      labelledBy={paper ? titleId : undefined}
+      fallbackFocus={fallbackFocus}
+    >
       {isLoading && <Skeleton lines={8} />}
-      {isError && <p className="pd-error">{t("paper.notFound")}</p>}
+      {isError && !paper && (
+        <div className="pd-error-state" role="alert">
+          <p className="pd-error">
+            <AnnouncedText text={errorText} announcement={announcement} />
+          </p>
+          <div className="pd-error-actions">
+            {notFound && keyDoi && (
+              <ExternalLinkChip href={doiUrl(keyDoi)}>{t("paper.openDoi")}</ExternalLinkChip>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void refetch()}
+              disabled={isFetching || waiting}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              {isFetching ? t("common.retrying") : t("common.retry")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {paper && (
         <div className="pd" data-testid="paper-details">
-          <h2 className="pd-title">{paper.title}</h2>
+          <h2 id={titleId} className="pd-title">
+            {paper.title}
+          </h2>
 
           <div className="pd-badges">
             {paper.open_access && <span className="badge">{t("paper.openAccess")}</span>}
@@ -139,13 +260,15 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
           )}
 
           <p className="pd-venue">
-            {[paper.venue, formatDate(paper.publication_date)].filter(Boolean).join(" · ")}
+            {paper.venue && <span className="pd-venue-name">{paper.venue}</span>}
+            {paper.venue && paper.publication_date && " · "}
+            {formatDate(paper.publication_date)}
             {paper.volume && ` · Vol. ${paper.volume}`}
             {paper.issue && ` (${paper.issue})`}
             {paper.pages && `, ${paper.pages}`}
           </p>
 
-          <div className="pd-counts">
+          <div className="pd-counts tabular">
             {paper.cited_by_count != null && (
               <span>{t("paper.citations", { count: paper.cited_by_count })}</span>
             )}
@@ -153,6 +276,11 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
               <span>{t("paper.referencesCount", { count: paper.reference_count })}</span>
             )}
           </div>
+          {paper.cited_by_count != null && paper.provider_source && (
+            <p className="pd-count-source">
+              {t("paper.citationsFrom", { provider: providerLabel(paper.provider_source) })}
+            </p>
+          )}
 
           <div className="pd-actions">
             <Link
@@ -160,7 +288,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
               className="btn btn-secondary"
               onClick={onClose}
             >
-              <GitFork size={14} />
+              <GitFork size={14} aria-hidden="true" />
               {t("paper.exploreGraph")}
             </Link>
             {user && (
@@ -171,7 +299,7 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
                   onClick={() => saveMutation.mutate()}
                   disabled={inLibrary || saveMutation.isPending}
                 >
-                  <BookMarked size={14} />
+                  <BookMarked size={14} aria-hidden="true" />
                   {inLibrary ? t("paper.inLibrary") : t("paper.saveToLibrary")}
                 </button>
                 <AddToCollectionMenu
@@ -182,49 +310,48 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
             )}
           </div>
 
-          {paper.abstract && (
+          {paragraphs.length > 0 && (
             <section className="pd-section">
-              <h3>{t("paper.abstractHeading")}</h3>
-              <p className="pd-abstract">{paper.abstract}</p>
+              <h3 className="label-caps">{t("paper.abstractHeading")}</h3>
+              <div className="pd-abstract">
+                {paragraphs.map((paragraph, index) => (
+                  <p key={index}>
+                    {paragraph.label && <strong>{`${paragraph.label}: `}</strong>}
+                    {paragraph.text}
+                  </p>
+                ))}
+              </div>
             </section>
           )}
 
-          {(paper.doi || paper.arxiv_id || paper.pdf_url) && (
+          {(paper.doi || paper.arxiv_id || pubmed || fullText.length > 0 || semanticScholar) && (
             <section className="pd-section">
-              <h3>{t("paper.linksHeading")}</h3>
+              <h3 className="label-caps">{t("paper.linksHeading")}</h3>
               <div className="pd-links">
                 {paper.doi && (
-                  <a
-                    className="link-chip"
-                    href={`https://doi.org/${paper.doi}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <ExternalLinkChip href={`https://doi.org/${paper.doi}`}>
                     {t("paper.publisherLink")}
-                    <ExternalLink size={12} />
-                  </a>
+                  </ExternalLinkChip>
                 )}
                 {paper.arxiv_id && (
-                  <a
-                    className="link-chip"
-                    href={`https://arxiv.org/abs/${paper.arxiv_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <ExternalLinkChip href={`https://arxiv.org/abs/${paper.arxiv_id}`}>
                     arXiv
-                    <ExternalLink size={12} />
-                  </a>
+                  </ExternalLinkChip>
                 )}
-                {paper.pdf_url && (
-                  <a
-                    className="link-chip"
-                    href={paper.pdf_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {pubmed && <ExternalLinkChip href={pubmed}>PubMed</ExternalLinkChip>}
+                {fullText.map((link) => (
+                  <ExternalLinkChip
+                    key={link.url}
+                    href={link.url}
+                    icon={link.kind === "pdf" ? <FileDown size={12} aria-hidden="true" /> : undefined}
                   >
-                    <FileText size={12} />
-                    {t("paper.pdf")}
-                  </a>
+                    {link.kind === "pdf" ? t("paper.downloadPdf") : t("paper.fullText")}
+                  </ExternalLinkChip>
+                ))}
+                {semanticScholar && (
+                  <ExternalLinkChip href={semanticScholar}>
+                    {t("paper.links.semanticScholar")}
+                  </ExternalLinkChip>
                 )}
               </div>
             </section>
@@ -242,16 +369,17 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
 
           {entry && entry.pinned_versions.length > 0 ? (
             <section className="pd-section" data-testid="managed-versions">
-              <h3>{t("library.pinnedVersions")}</h3>
+              <h3 className="label-caps">{t("library.pinnedVersions")}</h3>
               <ul className="pd-versions">
-                {entry.pinned_versions.map((pin) => {
+                {entry.pinned_versions.map((pin, index) => {
                   const isPrimary = pin.paper_canonical_key === entry.primary_canonical_key;
+                  const labelId = `${titleId}-pin-${index}`;
                   return (
                     <li
                       key={pin.paper_canonical_key}
                       className={isPrimary ? "pd-version active" : "pd-version"}
                     >
-                      <span>{pinLabel(pin, paper, t)}</span>
+                      <VersionText id={labelId} info={pinLabel(pin, labels)} />
                       <span className="pd-version-actions">
                         {isPrimary ? (
                           <span className="badge">{t("library.primary")}</span>
@@ -263,8 +391,10 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
                               disabled={repinMutation.isPending}
                               onClick={() => repinMutation.mutate(pin.paper_canonical_key)}
                               title={t("library.repinTitle")}
+                              aria-label={t("library.repinTitle")}
+                              aria-describedby={labelId}
                             >
-                              <Pin size={13} />
+                              <Pin size={13} aria-hidden="true" />
                             </button>
                             <button
                               type="button"
@@ -274,8 +404,10 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
                                 removeVersionMutation.mutate(pin.paper_canonical_key)
                               }
                               title={t("library.removeVersionTitle")}
+                              aria-label={t("library.removeVersionTitle")}
+                              aria-describedby={labelId}
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={13} aria-hidden="true" />
                             </button>
                           </>
                         )}
@@ -288,20 +420,23 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
           ) : (
             paper.versions.length > 1 && (
               <section className="pd-section">
-                <h3>{t("paper.versionsHeading")}</h3>
+                <h3 className="label-caps">{t("paper.versionsHeading")}</h3>
                 <ul className="pd-versions">
-                  {paper.versions.map((version) => (
-                    <li
-                      key={version.canonical_key}
-                      className={
-                        version.canonical_key === paper.canonical_key
-                          ? "pd-version active"
-                          : "pd-version"
-                      }
-                    >
-                      <span>{versionLabel(version, t)}</span>
-                    </li>
-                  ))}
+                  {paper.versions.map((version) => {
+                    const info = labels.get(version.canonical_key);
+                    return (
+                      <li
+                        key={version.canonical_key}
+                        className={
+                          version.canonical_key === paper.canonical_key
+                            ? "pd-version active"
+                            : "pd-version"
+                        }
+                      >
+                        {info && <VersionText info={info} />}
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             )
@@ -310,23 +445,23 @@ export default function PaperDetailsPanel({ paperKey, onClose }: PaperDetailsPan
           {user ? (
             <>
               <section className="pd-section">
-                <h3>{t("paper.readingState")}</h3>
+                <h3 className="label-caps">{t("paper.readingState")}</h3>
                 <ReadingStateSelect paperKey={paper.canonical_key} />
               </section>
               <section className="pd-section">
-                <h3>{t("paper.tags")}</h3>
+                <h3 className="label-caps">{t("paper.tags")}</h3>
                 <TagEditor paperKey={paper.canonical_key} />
               </section>
               <section className="pd-section">
-                <h3>{t("paper.notes")}</h3>
+                <h3 className="label-caps">{t("paper.notes")}</h3>
                 <NotesPanel paperKey={paper.canonical_key} paperGroupKey={paper.paper_group_key} />
               </section>
             </>
           ) : (
-            <div className="pd-signin card">
+            <div className="pd-signin">
               <p>{t("paper.signInToSave")}</p>
               <Link to="/login" className="btn btn-primary" onClick={onClose}>
-                <LogIn size={14} />
+                <LogIn size={14} aria-hidden="true" />
                 {t("nav.signIn")}
               </Link>
             </div>

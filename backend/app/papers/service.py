@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date
 from itertools import zip_longest
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.exceptions import NotFoundError
+from app.common.exceptions import ApiError, NotFoundError
+from app.common.identifiers import ParsedIdentifier, normalize_paper_key, parse_lookup_key
 from app.papers.models import (
     READING_STATES,
     CachedPaperMetadata,
@@ -25,13 +27,24 @@ from app.providers.base import Author, PaperMetadata
 from app.providers.base import SearchResult as ProviderSearchResult
 from app.providers.identity import deduplicate, normalize_arxiv, normalize_doi
 
+if TYPE_CHECKING:
+    from app.providers.registry import DoiLookup
 
-def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, str]:
+
+def _version_number(version: str | None) -> int:
+    """``"v10"`` -> 10, so v10 sorts after v9; anything unparseable is 0."""
+    try:
+        return int((version or "").strip().lower().lstrip("v"))
+    except ValueError:
+        return 0
+
+
+def _paper_sort_key(paper: PaperMetadata | PaperMetadataRead) -> tuple[int, date, int]:
     publication_date = paper.publication_date or date.min
     return (
         1 if paper.publication_date else 0,
         publication_date,
-        paper.version or "",
+        _version_number(paper.version),
     )
 
 
@@ -162,24 +175,37 @@ async def cache_papers(db: AsyncSession, papers: list[PaperMetadata]) -> list[Pa
     return stored
 
 
+# Alias prefix -> cached column, for keys that are not the row's own key.
+_ALIAS_FIELDS = {
+    "s2": "semantic_scholar_id",
+    "doi": "doi",
+    "arxiv": "arxiv_id",
+    "pmid": "pmid",
+    "pmcid": "pmcid",
+}
+
+
+def _alias_value(prefix: str, value: str) -> str:
+    # The same normalizers as ``identity.aliases``.
+    normalize = {
+        "doi": normalize_doi,
+        "arxiv": normalize_arxiv,
+        "s2": str.lower,
+        "pmcid": str.upper,
+    }.get(prefix)
+    return normalize(value.strip()) if normalize else value.strip()
+
+
 async def get_cached_paper(db: AsyncSession, canonical_key: str) -> CachedPaperMetadata | None:
     row = await db.get(CachedPaperMetadata, canonical_key)
     if row is not None:
         return row
     prefix, _, value = canonical_key.partition(":")
-    fields = {
-        "s2": "semantic_scholar_id",
-        "doi": "doi",
-        "arxiv": "arxiv_id",
-        "pmid": "pmid",
-        "pmcid": "pmcid",
-    }
-    if prefix not in fields:
+    if prefix not in _ALIAS_FIELDS:
         return None
-    value = {"doi": normalize_doi, "arxiv": normalize_arxiv}.get(prefix, str.strip)(value)
     result = await db.execute(
         select(CachedPaperMetadata)
-        .where(getattr(CachedPaperMetadata, fields[prefix]) == value)
+        .where(getattr(CachedPaperMetadata, _ALIAS_FIELDS[prefix]) == _alias_value(prefix, value))
         .order_by(CachedPaperMetadata.canonical_key)
         .limit(1)
     )
@@ -197,35 +223,141 @@ async def get_cached_papers_by_group(
     return list(result.scalars().all())
 
 
-async def get_paper_detail(db: AsyncSession, canonical_key: str) -> dict:
-    """Hydrate a single paper from the durable metadata snapshot, falling
-    back to a live stable-identifier lookup on a cache miss.
+async def get_cached_papers_by_groups(
+    db: AsyncSession, paper_group_keys: set[str]
+) -> dict[str, list[CachedPaperMetadata]]:
+    """Batched ``get_cached_papers_by_group``: versions per group, same order."""
+    if not paper_group_keys:
+        return {}
+    result = await db.execute(
+        select(CachedPaperMetadata)
+        .where(CachedPaperMetadata.paper_group_key.in_(paper_group_keys))
+        .order_by(CachedPaperMetadata.publication_date.desc(), CachedPaperMetadata.canonical_key)
+    )
+    grouped: dict[str, list[CachedPaperMetadata]] = defaultdict(list)
+    for row in result.scalars().all():
+        grouped[row.paper_group_key].append(row)
+    return dict(grouped)
 
-    hash:-keyed papers with no cached row cannot be re-fetched and 404.
-    """
-    row = await get_cached_paper(db, canonical_key)
 
-    if row is None and canonical_key.startswith(("doi:", "s2:", "arxiv:", "pmid:", "pmcid:")):
-        from app.providers import registry
+@dataclass
+class ResolvedPaper:
+    status: Literal["found", "not_found", "unavailable"]
+    row: CachedPaperMetadata | None = None
+    # Provider's Retry-After (seconds) for an ``unavailable`` lookup, if known.
+    retry_after: int | None = None
+    # Provider's error code for an ``unavailable`` lookup, if it gave one.
+    code: str | None = None
 
-        paper = (
-            await registry.lookup_by_doi(canonical_key[4:])
-            if canonical_key.startswith("doi:")
-            else await registry.lookup_by_id(canonical_key)
+
+async def lookup_identifier(parsed: ParsedIdentifier, *, confirm_missing: bool = True) -> DoiLookup:
+    """Ask the provider about ``parsed``; no database access, so callers can
+    run it with no transaction open. DOIs go through ``registry.resolve_doi``
+    (doi.org confirms a miss; a registered DOI the provider cannot describe is
+    ``unavailable`` and may be saved as pending); ``s2:``, ``arxiv:``,
+    ``pmid:`` and ``pmcid:`` through ``registry.resolve_id``, where a miss is
+    definitive. A ``hash:`` key is never looked up."""
+    from app.providers import registry
+
+    if parsed.doi is not None:
+        return await registry.resolve_doi(parsed.doi, confirm_missing=confirm_missing)
+    if parsed.lookup_id is None:
+        return registry.DoiLookup("not_found")
+    return await registry.resolve_id(parsed.lookup_id)
+
+
+async def store_paper(db: AsyncSession, paper: PaperMetadata) -> CachedPaperMetadata | None:
+    """Upsert a provider record and return the row it is stored as. The upsert
+    merges it into a row already holding one of its aliases and keeps that
+    row's key and group, so writes must use the returned row's keys (a DOI
+    found for a paper cached as ``s2:Y`` stays ``s2:Y``)."""
+    stored = (await cache_papers(db, [paper]))[0]
+    return await get_cached_paper(db, stored.canonical_key)
+
+
+_OPERATOR_CODES = {
+    "provider_not_configured": "Semantic Scholar is not configured on this server.",
+    "provider_key_rejected": "Semantic Scholar rejected this server's API key.",
+}
+
+
+def provider_unavailable(retry_after: int | None, code: str | None = None) -> ApiError:
+    """503 for an identifier the provider could not resolve right now
+    (nothing was saved). Keeps the provider's code: configuration problems
+    are reported as such and carry no ``Retry-After``; anything else is
+    ``provider_unavailable`` (or ``provider_rate_limited``) with a retry hint."""
+    from app.providers.semantic_scholar import DEFAULT_RETRY_AFTER, ProviderError
+
+    if code in _OPERATOR_CODES:
+        return ProviderError(code, _OPERATOR_CODES[code])
+    if code == "provider_rate_limited":
+        return ProviderError(
+            code,
+            "Semantic Scholar is rate limiting requests; please retry.",
+            retry_after=retry_after or DEFAULT_RETRY_AFTER,
         )
-        if paper is not None:
-            paper = (await cache_papers(db, [paper]))[0]
-            row = await get_cached_paper(db, paper.canonical_key)
+    return ProviderError(
+        "provider_unavailable",
+        "Semantic Scholar is unavailable; please retry.",
+        retry_after=retry_after or DEFAULT_RETRY_AFTER,
+    )
 
-    if row is None:
-        raise NotFoundError(f"Paper not found: {canonical_key}")
 
+async def resolve_identifier(db: AsyncSession, parsed: ParsedIdentifier) -> ResolvedPaper:
+    """Cached snapshot first (alias-aware), then the provider for DOIs and the
+    other strong identifiers, upserting the snapshot. A DOI miss is not
+    confirmed with doi.org here: it is ``not_found``. Only for callers that
+    hold no per-user lock: write paths split the provider call out of their
+    transaction instead."""
+    row = await get_cached_paper(db, parsed.canonical_key)
+    if row is not None:
+        return ResolvedPaper("found", row)
+    if parsed.lookup_id is None:
+        return ResolvedPaper("not_found")
+    lookup = await lookup_identifier(parsed, confirm_missing=False)
+    if lookup.paper is None:
+        return ResolvedPaper(lookup.status, retry_after=lookup.retry_after, code=lookup.code)
+    return ResolvedPaper("found", await store_paper(db, lookup.paper))
+
+
+async def _detail_from_row(db: AsyncSession, row: CachedPaperMetadata) -> dict:
     detail = cached_paper_to_read(row).model_dump(mode="json")
     siblings = await get_cached_papers_by_group(db, row.paper_group_key)
     detail["versions"] = [
         cached_paper_to_read(sibling).model_dump(mode="json") for sibling in siblings
     ]
     return detail
+
+
+async def get_cached_detail(db: AsyncSession, canonical_key: str) -> dict | None:
+    row = await get_cached_paper(db, normalize_paper_key(canonical_key))
+    return await _detail_from_row(db, row) if row is not None else None
+
+
+async def get_paper_detail(
+    db: AsyncSession, canonical_key: str, *, allow_lookup: bool = True
+) -> dict:
+    """Hydrate a single paper from the durable metadata snapshot, falling
+    back to a live lookup of a DOI or another strong identifier (which
+    upserts the snapshot) on a cache miss.
+
+    The key is normalized first, so a bare DOI or a DOI link resolves too.
+    A definitive miss, and a ``hash:`` key with no cached row, is a 404; a
+    provider that cannot answer right now is a 503 with ``Retry-After``.
+    """
+    key = normalize_paper_key(canonical_key)
+    row = await get_cached_paper(db, key)
+
+    if row is None and allow_lookup and (parsed := parse_lookup_key(key)) is not None:
+        resolved = await resolve_identifier(db, parsed)
+        if resolved.status == "unavailable":
+            raise provider_unavailable(resolved.retry_after, resolved.code)
+        row = resolved.row
+
+    if row is None:
+        raise NotFoundError(f"Paper not found: {key}")
+
+    return await _detail_from_row(db, row)
 
 
 async def get_cached_papers_by_keys(
@@ -237,6 +369,32 @@ async def get_cached_papers_by_keys(
         select(CachedPaperMetadata).where(CachedPaperMetadata.canonical_key.in_(canonical_keys))
     )
     return {row.canonical_key: row for row in result.scalars().all()}
+
+
+async def get_cached_papers_by_aliases(
+    db: AsyncSession, keys: set[str]
+) -> dict[str, CachedPaperMetadata]:
+    """Batched ``get_cached_paper``: per key, the row stored under it, else the
+    row with the lowest canonical key holding it as an alias (an ``s2:`` row
+    enriched with a DOI answers for that ``doi:`` key)."""
+    found = await get_cached_papers_by_keys(db, keys)
+    result = {key: found[key] for key in keys if key in found}
+    wanted: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for key in keys - result.keys():
+        prefix, _, value = key.partition(":")
+        if prefix in _ALIAS_FIELDS:
+            wanted[_ALIAS_FIELDS[prefix]][_alias_value(prefix, value)].append(key)
+    for field, by_value in wanted.items():
+        column = getattr(CachedPaperMetadata, field)
+        rows = await db.execute(
+            select(CachedPaperMetadata)
+            .where(column.in_(by_value))
+            .order_by(CachedPaperMetadata.canonical_key)
+        )
+        for row in rows.scalars().all():
+            for key in by_value.get(getattr(row, field), ()):
+                result.setdefault(key, row)
+    return result
 
 
 def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchResult:
@@ -271,6 +429,8 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
 
     raw_total = sum(len(r.papers) for r in results)
     provider_names = [r.provider for r in results if r.provider]
+    # The providers' own match counts, taken before deduplication shrinks the page.
+    estimates = [r.total_estimate for r in results if r.total_estimate is not None]
 
     return ProviderSearchResult(
         papers=ordered,
@@ -280,10 +440,24 @@ def round_robin_dedupe(results: list[ProviderSearchResult]) -> ProviderSearchRes
         provider="+".join(provider_names),
         providers=provider_names,
         has_more=any(result.has_more for result in results),
+        total_estimate=sum(estimates) if estimates else None,
+        window_capped=any(result.window_capped for result in results),
     )
 
 
-def build_search_response(result: ProviderSearchResult) -> dict:
+def build_search_response(
+    result: ProviderSearchResult,
+    *,
+    sort: Literal["relevance", "date", "citations"] = "relevance",
+    next_cursor: str | None = None,
+    filtered_locally: bool = False,
+    source: str | None = None,
+) -> dict:
+    """Group the served rows by ``paper_group_key`` in first-appearance
+    order (the provider's sort order) and flag possible other versions
+    among them (``papers.similarity``; never merged)."""
+    from app.papers.similarity import find_possible_versions
+
     grouped: dict[str, list[tuple[int, PaperMetadata]]] = defaultdict(list)
     for index, paper in enumerate(result.papers):
         grouped[paper.paper_group_key].append((index, paper))
@@ -328,9 +502,24 @@ def build_search_response(result: ProviderSearchResult) -> dict:
             }
         )
 
+    # One item per group, in ``ordered_group_keys`` order.
+    summaries = {
+        group_key: {
+            "paper_group_key": group_key,
+            "title": grouped[group_key][0][1].title,
+            "provider_sources": sorted(
+                {name for _, paper in grouped[group_key] for name in _provider_sources_for(paper)}
+            ),
+        }
+        for group_key in ordered_group_keys
+    }
+    related = find_possible_versions(result.papers)
+    for group_key, item in zip(ordered_group_keys, items, strict=True):
+        item["possible_versions"] = [summaries[other] for other in related.get(group_key, [])]
+
     providers_list = result.providers or ([result.provider] if result.provider else [])
 
-    return {
+    payload = {
         "items": items,
         "total_count": len(items),
         "raw_total_count": result.total_count,
@@ -338,7 +527,15 @@ def build_search_response(result: ProviderSearchResult) -> dict:
         "page": result.page,
         "page_size": result.page_size,
         "providers": providers_list,
+        "sort": sort,
+        "next_cursor": next_cursor,
+        "total_estimate": result.total_estimate,
+        "window_capped": result.window_capped,
+        "filtered_locally": filtered_locally,
     }
+    if source:
+        payload["source"] = source
+    return payload
 
 
 async def set_paper_state(
@@ -376,13 +573,25 @@ async def set_paper_state(
 async def get_paper_states(
     db: AsyncSession, user_id: uuid.UUID, paper_key: str
 ) -> list[UserPaperState]:
+    return (await get_paper_states_batch(db, user_id, [paper_key]))[paper_key]
+
+
+async def get_paper_states_batch(
+    db: AsyncSession, user_id: uuid.UUID, paper_keys: list[str]
+) -> dict[str, list[UserPaperState]]:
+    """Batched ``get_paper_states``: the user's states per exact key."""
+    states: dict[str, list[UserPaperState]] = {key: [] for key in paper_keys}
+    if not states:
+        return states
     result = await db.execute(
         select(UserPaperState).where(
             UserPaperState.user_id == user_id,
-            UserPaperState.paper_canonical_key == paper_key,
+            UserPaperState.paper_canonical_key.in_(list(states)),
         )
     )
-    return list(result.scalars().all())
+    for row in result.scalars().all():
+        states[row.paper_canonical_key].append(row)
+    return states
 
 
 async def add_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> UserPaperTag:
@@ -421,16 +630,44 @@ async def add_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str
 
 
 async def _tag_scope(db: AsyncSession, paper_key: str) -> tuple[str | None, set[str]]:
-    cached = await get_cached_paper(db, paper_key)
-    if cached is None or not cached.paper_group_key:
-        return None, {paper_key}
-    rows = await get_cached_papers_by_group(db, cached.paper_group_key)
-    group_keys = {row.canonical_key for row in rows}
-    group_keys.add(paper_key)
-    return cached.paper_group_key, group_keys
+    return (await _tag_scopes(db, [paper_key]))[paper_key]
+
+
+async def _tag_scopes(
+    db: AsyncSession, paper_keys: list[str]
+) -> dict[str, tuple[str | None, set[str]]]:
+    """Per key, the paper group its tags are shared across and the version
+    keys of that group (legacy tags stored without a group key), or
+    ``(None, {key})`` for a key with no cached paper."""
+    cached = await get_cached_papers_by_aliases(db, set(paper_keys))
+    siblings = await get_cached_papers_by_groups(
+        db, {row.paper_group_key for row in cached.values() if row.paper_group_key}
+    )
+    scopes: dict[str, tuple[str | None, set[str]]] = {}
+    for key in paper_keys:
+        row = cached.get(key)
+        if row is None or not row.paper_group_key:
+            scopes[key] = (None, {key})
+            continue
+        group_keys = {sibling.canonical_key for sibling in siblings.get(row.paper_group_key, [])}
+        group_keys.add(key)
+        scopes[key] = (row.paper_group_key, group_keys)
+    return scopes
 
 
 async def remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> None:
+    """Exact key first, then the normalized one, so tags stored under a
+    legacy raw key stay removable."""
+    try:
+        await _remove_tag(db, user_id, paper_key, tag)
+    except NotFoundError:
+        normalized = normalize_paper_key(paper_key)
+        if normalized == paper_key:
+            raise
+        await _remove_tag(db, user_id, normalized, tag)
+
+
+async def _remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: str) -> None:
     paper_group_key, group_keys = await _tag_scope(db, paper_key)
     if paper_group_key:
         result = await db.execute(
@@ -464,35 +701,49 @@ async def remove_tag(db: AsyncSession, user_id: uuid.UUID, paper_key: str, tag: 
 
 
 async def get_tags(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> list[UserPaperTag]:
-    paper_group_key, group_keys = await _tag_scope(db, paper_key)
-    if paper_group_key:
-        result = await db.execute(
-            select(UserPaperTag)
-            .where(
-                UserPaperTag.user_id == user_id,
-                or_(
-                    UserPaperTag.paper_group_key == paper_group_key,
-                    UserPaperTag.paper_canonical_key.in_(group_keys),
-                ),
-            )
-            .order_by(UserPaperTag.created_at)
-        )
-        tags: list[UserPaperTag] = []
-        seen: set[str] = set()
-        for row in result.scalars().all():
-            if row.tag in seen:
-                continue
-            seen.add(row.tag)
-            tags.append(row)
-        return tags
+    return (await get_tags_batch(db, user_id, [paper_key]))[paper_key]
 
+
+async def get_tags_batch(
+    db: AsyncSession, user_id: uuid.UUID, paper_keys: list[str]
+) -> dict[str, list[UserPaperTag]]:
+    """Batched ``get_tags``: per key, the user's tags on any version of its
+    paper group (one row per tag, oldest first), or on the exact key when the
+    paper is not cached."""
+    tags: dict[str, list[UserPaperTag]] = {key: [] for key in paper_keys}
+    if not tags:
+        return tags
+    scopes = await _tag_scopes(db, list(tags))
+    group_keys = {group for group, _ in scopes.values() if group}
+    version_keys = set().union(*(keys for _, keys in scopes.values()))
+    conditions = [UserPaperTag.paper_canonical_key.in_(version_keys)]
+    if group_keys:
+        conditions.append(UserPaperTag.paper_group_key.in_(group_keys))
     result = await db.execute(
-        select(UserPaperTag).where(
-            UserPaperTag.user_id == user_id,
-            UserPaperTag.paper_canonical_key == paper_key,
-        )
+        select(UserPaperTag)
+        .where(UserPaperTag.user_id == user_id, or_(*conditions))
+        # Tags added in one transaction share created_at: break ties stably.
+        .order_by(UserPaperTag.created_at, UserPaperTag.tag, UserPaperTag.paper_canonical_key)
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    by_group: dict[str, list[int]] = defaultdict(list)
+    by_key: dict[str, list[int]] = defaultdict(list)
+    for index, row in enumerate(rows):
+        if row.paper_group_key:
+            by_group[row.paper_group_key].append(index)
+        by_key[row.paper_canonical_key].append(index)
+    for key, (group, keys) in scopes.items():
+        indexes = set(by_key[key])
+        if group:
+            indexes.update(by_group[group])
+            for version_key in keys:
+                indexes.update(by_key[version_key])
+        seen: set[str] = set()
+        for index in sorted(indexes):
+            if rows[index].tag not in seen:
+                seen.add(rows[index].tag)
+                tags[key].append(rows[index])
+    return tags
 
 
 # ── Dismiss ─────────────────────────────────────────────────
@@ -522,13 +773,16 @@ async def dismiss_paper(db: AsyncSession, user_id: uuid.UUID, paper_key: str) ->
 
 
 async def undismiss_paper(db: AsyncSession, user_id: uuid.UUID, paper_key: str) -> None:
-    result = await db.execute(
-        select(UserDismissedPaper).where(
-            UserDismissedPaper.user_id == user_id,
-            UserDismissedPaper.paper_canonical_key == paper_key,
+    # Exact key first, then the normalized one (legacy raw keys).
+    for key in dict.fromkeys((paper_key, normalize_paper_key(paper_key))):
+        result = await db.execute(
+            select(UserDismissedPaper).where(
+                UserDismissedPaper.user_id == user_id,
+                UserDismissedPaper.paper_canonical_key == key,
+            )
         )
-    )
-    row = result.scalar_one_or_none()
-    if row is None:
-        return  # idempotent — already undismissed
-    await db.delete(row)
+        row = result.scalar_one_or_none()
+        if row is not None:
+            await db.delete(row)
+            return
+    # idempotent — already undismissed

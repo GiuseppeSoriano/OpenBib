@@ -151,6 +151,14 @@ Explicit feedback states on papers: unseen, seen, saved, to-read, reading, read,
 
 **Edge cases**: very dense graphs; cycles; missing references; inferred (non-certain) relations; isolated nodes; conflicting edges from different providers.
 
+**Current implementation notes** (citation graph; see [System architecture §7.3](03-SystemArchitecture.md#73-graph-exploration)):
+
+- **FR-041, expanding a node.** A node's citers or references load in fixed **ranges of 30** (`GRAPH_RELATED_RANGE_SIZE`), ordered by citation count or recency, with first, previous, current, next and last range controls and "first 10,000 of N" totals for larger lists. Selecting a node never fetches anything: the controls show 1–30 as current but not loaded, and tapping it (or double-clicking the node) loads it. Loading another range replaces that source's unpinned results only; pins, shared nodes and other sources' branches stay. Switching direction or ordering while the selected source has a loaded branch loads 1–30 for the new mode in the same way. While Semantic Scholar's list is still being collected and ranked, the graph shows "Ranking N of about M" and continues automatically.
+- **FR-048, pinning.** Pins are **session-only**: they live in the page's memory and reset on reload. Seed papers start pinned. Pinned papers are excluded from every range before it is partitioned, so pinning or unpinning changes the next range loaded, and unpinning puts a paper back at its original rank. Pin changes never send a request by themselves.
+- **"Expand pinned nodes"** (shown when no node is selected) brings each pinned source's branch, for the current direction and ordering, up to 30 connected papers with `POST /graph/related/top-up`. It never removes earlier branches, skips sources that are full or exhausted, and reports per-source failures without discarding the others. It is disabled when nothing is pinned.
+- **FR-047.** Depth is bounded by the 10,000-record cap per paper and direction (`GRAPH_RELATED_MAX_RESULTS`); base graphs of a collection or the library are limited to 200 seed papers. The former "Expand entire graph" action (`POST /graph/expand`, which failed above 20 nodes) is removed.
+- **FR-049** (named snapshots) is not implemented: the exploration state, including pins, is not saved.
+
 ### 3.7 Recommendations & Discovery
 
 | ID | Requirement |
@@ -257,7 +265,7 @@ Explicit feedback states on papers: unseen, seen, saved, to-read, reading, read,
 | AC-04 | **Feedback loop**: User marks a paper as excluded | That paper does not reappear in subsequent recommendations unless new context emerges |
 | AC-05 | **Collaboration**: Owner shares a collection; editor adds a paper and a note | Owner sees the change in the activity log; permissions are respected throughout |
 | AC-06 | **Data preservation on merge**: Two duplicate records are merged | All notes, tags, and reading states from both records are preserved in the surviving record |
-| AC-07 | **Graceful degradation**: OpenAlex is down | User sees a clear message; cached data remains available; user data (collections, notes) is unaffected |
+| AC-07 | **Graceful degradation**: Semantic Scholar is down or rate limiting | User sees a clear message; cached data remains available; user data (collections, notes) is unaffected; added DOIs are saved as pending and Retry resolves them later |
 
 ---
 

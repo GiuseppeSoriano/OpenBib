@@ -1,0 +1,146 @@
+@layer components {
+  .search-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+
+  .search-filters-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  /* Year popover (Search.dc.html): presets, then From – To, Clear and Apply. */
+  .search-year-popover {
+    width: 300px;
+  }
+
+  .search-years-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-sm);
+  }
+
+  .search-years-field {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .search-years-field label {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .search-years-dash {
+    padding-bottom: var(--space-sm);
+    color: var(--color-text-muted);
+  }
+
+  .search-years-error {
+    margin-top: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--color-danger);
+  }
+
+  .search-years .input[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+
+  /* At large text the two fields stack rather than squeeze. */
+  @media (max-width: 22rem) {
+    .search-years-row {
+      flex-wrap: wrap;
+    }
+    .search-years-dash {
+      display: none;
+    }
+  }
+
+  /* Phone Filters sheet (MobileFilters.dc.html): the shared sheet header
+     (.panel-header, .panel-title), with Reset beside the title. */
+  .search-sheet-title {
+    flex: 1 1 auto;
+  }
+
+  .search-sheet-title:focus {
+    outline: none;
+  }
+
+  .search-sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding-top: var(--space-sm);
+    padding-bottom: var(--space-md);
+  }
+
+  .search-sheet-label {
+    margin-top: var(--space-sm);
+  }
+
+  .search-sheet-label:first-child {
+    margin-top: 0;
+  }
+
+  .search-sheet-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .search-sheet-presets .pill {
+    min-height: var(--touch-target);
+  }
+
+  .search-sheet .search-years {
+    margin-top: var(--space-xs);
+  }
+
+  .search-sheet .search-years .input {
+    min-height: var(--touch-target);
+  }
+
+  .search-sheet-toggles {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .search-sheet-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-height: 48px;
+    border-bottom: 1px solid var(--color-hairline);
+    font-size: var(--text-base);
+    cursor: pointer;
+  }
+
+  .search-sheet-toggle:last-child {
+    border-bottom: 0;
+  }
+
+  .search-sheet-toggle input {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    accent-color: var(--color-accent);
+  }
+
+  .search-sheet-footer {
+    flex-shrink: 0;
+    padding: var(--space-sm) var(--space-lg) calc(var(--space-md) + var(--safe-area-bottom));
+    padding-left: max(var(--space-lg), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px));
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  /* The sheet's footer carries the safe area, not the body. */
+  .search-sheet .panel-body {
+    padding-bottom: var(--space-md);
+  }
+}

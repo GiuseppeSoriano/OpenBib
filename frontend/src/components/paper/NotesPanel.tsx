@@ -53,12 +53,12 @@ export default function NotesPanel({ paperKey, paperGroupKey }: NotesPanelProps)
                 </span>
                 <button
                   type="button"
-                  className="btn-ghost note-delete"
+                  className="btn-quiet btn-quiet--muted note-delete"
                   onClick={() => deleteMutation.mutate(note.id)}
                   disabled={deleteMutation.isPending}
                   aria-label={t("common.delete")}
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={13} aria-hidden="true" />
                 </button>
               </div>
             </li>
@@ -70,6 +70,10 @@ export default function NotesPanel({ paperKey, paperGroupKey }: NotesPanelProps)
           className="input notes-textarea"
           value={content}
           onChange={(e) => setContent(e.target.value)}
+          onKeyDown={(e) => {
+            // Keep an unsaved draft: Escape must not close the details panel.
+            if (e.key === "Escape" && content.trim()) e.preventDefault();
+          }}
           placeholder={t("paper.notePlaceholder")}
           rows={3}
         />

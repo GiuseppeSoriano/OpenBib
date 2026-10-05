@@ -1,9 +1,13 @@
-import { mockRefresh } from "@/test/auth-mock";
-import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { mockRefresh, testAuth } from "@/test/auth-mock";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useLocation, useNavigationType } from "react-router-dom";
 import LibraryPage from "@/pages/LibraryPage";
+import { library, papers } from "@/lib/api";
+import { COMPACT_QUERY } from "@/lib/breakpoints";
 import { renderWithProviders } from "@/test/utils";
-import type { PaperMetadata } from "@/types";
+import type { LibraryEntryListItem, LibraryListParams, PaperMetadata } from "@/types";
 
 function paper(key: string, title: string): PaperMetadata {
   return {
@@ -36,40 +40,69 @@ function paper(key: string, title: string): PaperMetadata {
   };
 }
 
-const entries = [
-  {
-    paper_group_key: "group:doi:10.1/a",
-    primary_canonical_key: "doi:10.1/a",
+function entry(key: string, title: string, extra: Partial<LibraryEntryListItem> = {}) {
+  return {
+    paper_group_key: `group:${key}`,
+    primary_canonical_key: key,
     created_at: "2026-01-01T00:00:00Z",
-    primary_version: paper("doi:10.1/a", "First Library Paper"),
-    version_count: 2,
-    tags: ["ml", "survey"],
-  },
-  {
-    paper_group_key: "group:doi:10.1/b",
-    primary_canonical_key: "doi:10.1/b",
-    created_at: "2026-01-02T00:00:00Z",
-    primary_version: paper("doi:10.1/b", "Second Library Paper"),
+    primary_version: paper(key, title),
+    resolved: true,
     version_count: 1,
     tags: [],
-  },
+    ...extra,
+  };
+}
+
+const COLLECTION_ID = "0b5f3c2e-8d4a-4c1b-9e7f-2a6d8c4b1e30";
+
+const entries: LibraryEntryListItem[] = [
+  entry("doi:10.1/a", "First Library Paper", { version_count: 2, tags: ["ml", "survey"] }),
+  entry("doi:10.1/b", "Second Library Paper"),
 ];
+
+function envelope(items: LibraryEntryListItem[], total = items.length, page = 1, size = 25) {
+  return Promise.resolve({ items, total, page, size });
+}
 
 vi.mock("@/lib/api", () => ({
   refreshAccessToken: vi.fn(() => mockRefresh()),
   setAccessToken: vi.fn(),
   setAuthFailureHandler: vi.fn(),
-  default: { get: vi.fn(() => Promise.resolve({ data: [] })), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  default: {
+    get: vi.fn((url: string) =>
+      Promise.resolve({
+        data:
+          url === "/users/me"
+            ? { id: "u1", email: "me@example.com", display_name: "Me" }
+            : url === "/collections"
+              ? [{ id: COLLECTION_ID, name: "Reading group" }]
+              : [],
+      }),
+    ),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
   library: {
-    listEntries: vi.fn(() => Promise.resolve(entries)),
+    listEntries: vi.fn(),
+    getFacets: vi.fn(() =>
+      Promise.resolve({
+        tags: [
+          { tag: "ml", count: 1 },
+          { tag: "survey", count: 1 },
+        ],
+        states: [{ state: "reading", count: 1 }],
+        total: 2,
+        unresolved: 0,
+      }),
+    ),
     listKeys: vi.fn(() => Promise.resolve([])),
     getEntry: vi.fn(),
     deleteEntry: vi.fn(),
+    resolve: vi.fn(),
   },
   papers: {
-    getDetail: vi.fn(() =>
-      Promise.resolve({ ...entries[0]!.primary_version, versions: [] }),
-    ),
+    getDetail: vi.fn(() => Promise.resolve({ ...entries[0]!.primary_version, versions: [] })),
   },
   notes: { listForPaperGroup: vi.fn(() => Promise.resolve([])) },
   graph: {},
@@ -81,19 +114,60 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+function LocationProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="location" data-navigation={navigationType}>
+      {location.search}
+    </output>
+  );
+}
+
+function renderLibrary(route = "/library") {
+  return renderWithProviders(
+    <>
+      <LibraryPage />
+      <LocationProbe />
+    </>,
+    { route },
+  );
+}
+
+const lastListParams = () =>
+  vi.mocked(library.listEntries).mock.calls.slice(-1)[0]?.[0] as LibraryListParams;
+
+beforeEach(() => {
+  vi.mocked(library.listEntries).mockImplementation(() => envelope(entries));
+});
+
+afterEach(() => {
+  vi.mocked(library.listEntries).mockReset();
+  vi.mocked(library.getEntry).mockReset();
+});
+
 describe("LibraryPage", () => {
   it("renders rich human-readable entries", async () => {
-    renderWithProviders(<LibraryPage />, { route: "/library" });
+    const { container } = renderLibrary();
 
     expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
     expect(screen.getByText("Second Library Paper")).toBeInTheDocument();
-    expect(screen.getAllByText(/ICML · 2020 · 42 citations/)).toHaveLength(2);
-    expect(screen.getByText("ml")).toBeInTheDocument();
+    // The meta line may split the citation count into several elements.
+    const meta = Array.from(container.querySelectorAll(".paper-meta"), (el) => el.textContent);
+    expect(meta.filter((text) => /ICML · 2020 · Cited by 42/.test(text ?? ""))).toHaveLength(2);
+    expect(screen.getAllByText("ml").length).toBeGreaterThan(0);
     expect(screen.getByText("2 versions")).toBeInTheDocument();
+    expect(screen.getByText("2 papers")).toBeInTheDocument();
+  });
+
+  it("describes the Library without internal wording", async () => {
+    renderLibrary();
+    const subtitle = await screen.findByText(/Every paper you save, in one place/);
+    expect(subtitle.textContent).not.toMatch(/anchor|canonical/i);
   });
 
   it("exposes no low-level identifiers or accordion toggles", async () => {
-    const { container } = renderWithProviders(<LibraryPage />, { route: "/library" });
+    const { container } = renderLibrary();
     await screen.findByText("First Library Paper");
 
     const text = container.textContent ?? "";
@@ -106,25 +180,341 @@ describe("LibraryPage", () => {
   });
 
   it("offers add-to-collection on every entry", async () => {
-    renderWithProviders(<LibraryPage />, { route: "/library" });
+    renderLibrary();
     await screen.findByText("First Library Paper");
     expect(screen.getAllByTestId("add-to-collection")).toHaveLength(2);
   });
 
+  it("keeps a recovery card that opens details for entries without metadata", async () => {
+    vi.mocked(library.listEntries).mockImplementation(() =>
+      envelope([entry("doi:10.1/x", "", { primary_version: null, resolved: false })]),
+    );
+    renderLibrary();
+    fireEvent.click(await screen.findByRole("button", { name: "Details unavailable" }));
+    expect(await screen.findByRole("dialog", { name: /Paper details/ })).toBeInTheDocument();
+  });
+
   it("opens the details panel when an entry is clicked", async () => {
-    renderWithProviders(<LibraryPage />, { route: "/library" });
+    renderLibrary();
     fireEvent.click(await screen.findByText("First Library Paper"));
     expect(await screen.findByTestId("paper-details")).toBeInTheDocument();
   });
 
-  it("opens the details panel from a ?focus= deep link", async () => {
-    renderWithProviders(<LibraryPage />, {
-      route: "/library?focus=group%3Adoi%3A10.1%2Fb",
+  it("loads the next page on Show more and appends it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.listEntries).mockImplementation((params = {}) =>
+      params.page === 2
+        ? envelope([entry("doi:10.1/c", "Third Library Paper")], 3, 2, 2)
+        : envelope(entries, 3, 1, 2),
+    );
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+    expect(screen.getByText("Showing 2 of 3")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByText("Third Library Paper")).toBeInTheDocument();
+    expect(screen.getByText("First Library Paper")).toBeInTheDocument();
+    expect(lastListParams()).toMatchObject({ page: 2, size: 25 });
+    expect(screen.getByText("3 papers")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("opens a ?focus= entry that is not on the first page via getEntry", async () => {
+    vi.mocked(library.getEntry).mockResolvedValue({
+      paper_group_key: "group:far",
+      primary_canonical_key: "doi:10.1/far",
+      created_at: "2025-01-01T00:00:00Z",
+      primary_version: paper("doi:10.1/far", "Far Away Paper"),
+      pinned_versions: [],
+      notes_count: 0,
+      tags: [],
+      states: [],
     });
+    renderLibrary("/library?focus=group%3Afar");
+
     expect(await screen.findByTestId("paper-details")).toBeInTheDocument();
+    expect(library.getEntry).toHaveBeenCalledWith("group:far");
+    expect(papers.getDetail).toHaveBeenCalledWith("doi:10.1/far");
+    // Resolved directly, not by paging through the list.
+    expect(library.listEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus into the details dialog and back to the title on Escape", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    const title = await screen.findByRole("button", { name: "First Library Paper" });
+
+    await user.click(title);
+    const dialog = await screen.findByRole("dialog", { name: /Paper details/ });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(title);
+  });
+
+  it("closes a ?focus= deep-linked panel without a trigger, focusing the page heading", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.getEntry).mockResolvedValue({
+      ...entries[1]!,
+      pinned_versions: [],
+      notes_count: 0,
+      states: [],
+    });
+    renderLibrary("/library?focus=group%3Adoi%3A10.1%2Fb");
+    await screen.findByTestId("paper-details");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Library" }));
   });
 });
 
+describe("LibraryPage filters", () => {
+  it("syncs a debounced search to the URL and the query", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+
+    await user.type(screen.getByRole("searchbox", { name: "Search your Library" }), "graph nets");
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("?q=graph+nets"));
+    await waitFor(() => expect(lastListParams()).toMatchObject({ q: "graph nets", page: 1 }));
+    // Debounced: one request for the whole phrase, none per keystroke.
+    expect(vi.mocked(library.listEntries).mock.calls).toHaveLength(2);
+  });
+
+  it("clears the search with its Clear button, replacing the history entry", async () => {
+    const user = userEvent.setup();
+    renderLibrary("/library?q=graph&sort=title");
+    await screen.findByText("First Library Paper");
+    const field = screen.getByRole("searchbox", { name: "Search your Library" });
+    expect(field).toHaveValue("graph");
+
+    await user.click(screen.getByRole("button", { name: "Clear search text" }));
+
+    expect(field).toHaveValue("");
+    expect(field).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\?sort=title$/));
+    expect(screen.getByTestId("location")).toHaveAttribute("data-navigation", "REPLACE");
+    expect(screen.queryByRole("button", { name: "Clear search text" })).toBeNull();
+  });
+
+  it("applies state, tag, collection and sort from the filter chips", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+
+    // Each chip opens a listbox; facet counts label the options.
+    const pick = async (chip: RegExp, option: string) => {
+      await user.click(await screen.findByRole("button", { name: chip }));
+      await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: option }));
+      expect(screen.queryByRole("listbox")).toBeNull();
+    };
+    await pick(/^Reading state/, "Reading (1)");
+    await pick(/^Tag/, "ml (1)");
+    await pick(/^Collection/, "Reading group");
+    await pick(/^Sort /, "Most cited");
+
+    await waitFor(() =>
+      expect(lastListParams()).toMatchObject({
+        state: "reading",
+        tag: "ml",
+        collection_id: COLLECTION_ID,
+        sort: "citations",
+      }),
+    );
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `?state=reading&tag=ml&collection_id=${COLLECTION_ID}&sort=citations`,
+    );
+    expect(screen.getByText("3 filters active")).toBeInTheDocument();
+    // The chips name their values and show them as applied.
+    expect(screen.getByRole("button", { name: "Reading state: Reading" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Tag: ml" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Collection: Reading group" })).toHaveClass("chip--active");
+    expect(screen.getByRole("button", { name: "Sort Most cited" })).toHaveClass("chip--active");
+  });
+
+  it("marks the current value in a filter listbox and keeps it on Escape", async () => {
+    const user = userEvent.setup();
+    renderLibrary("/library?tag=ml");
+    await screen.findByText("First Library Paper");
+
+    const chip = await screen.findByRole("button", { name: "Tag: ml" });
+    await user.click(chip);
+    expect(chip).toHaveAttribute("aria-expanded", "true");
+    const selected = screen.getByRole("option", { name: "ml (1)" });
+    expect(selected).toHaveAttribute("aria-selected", "true");
+    expect(selected).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(chip).toHaveFocus();
+    expect(screen.getByTestId("location")).toHaveTextContent("?tag=ml");
+  });
+
+  it("scrolls a long tag list to the selected tag and jumps by typed letter", async () => {
+    const tags = Array.from({ length: 40 }, (_, i) => ({ tag: `alpha-${i}`, count: 1 }));
+    const previous = vi.mocked(library.getFacets).getMockImplementation()!;
+    vi.mocked(library.getFacets).mockResolvedValue({
+      tags: [...tags, { tag: "beta", count: 2 }, { tag: "zeta", count: 1 }],
+      states: [],
+      total: 2,
+      unresolved: 0,
+    });
+    // jsdom has no layout, so record the call instead.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const user = userEvent.setup();
+      renderLibrary("/library?tag=zeta");
+      await screen.findByText("First Library Paper");
+
+      await user.click(await screen.findByRole("button", { name: "Tag: zeta" }));
+      const selected = screen.getByRole("option", { name: "zeta (1)" });
+      expect(selected).toHaveFocus();
+      expect(scrollIntoView.mock.contexts).toContain(selected);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+      await user.keyboard("b");
+      expect(screen.getByRole("option", { name: "beta (2)" })).toHaveFocus();
+      await user.keyboard("a");
+      expect(screen.getByRole("option", { name: "Any tag" })).toHaveFocus();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+      vi.mocked(library.getFacets).mockImplementation(previous);
+    }
+  });
+
+  it("reads filters from the URL and resets them", async () => {
+    const user = userEvent.setup();
+    renderLibrary("/library?q=graph&state=reading&sort=title");
+    await screen.findByText("First Library Paper");
+
+    expect(lastListParams()).toMatchObject({ q: "graph", state: "reading", sort: "title" });
+    expect(screen.getByRole("searchbox")).toHaveValue("graph");
+    expect(screen.getByText("2 filters active")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset filters" }));
+
+    await waitFor(() => expect(screen.getByTestId("location")).toBeEmptyDOMElement());
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    await waitFor(() => expect(lastListParams()).toEqual({ page: 1, size: 25 }));
+  });
+
+  it("shows a no-matches state with a reset when filters exclude everything", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.listEntries).mockImplementation((params = {}) =>
+      params.q ? envelope([], 0) : envelope(entries),
+    );
+    renderLibrary("/library?q=nothing");
+
+    expect(await screen.findByText("No papers match these filters")).toBeInTheDocument();
+    expect(screen.queryByText("Your library is empty")).toBeNull();
+
+    const empty = screen.getByTestId("empty-state");
+    await user.click(within(empty).getByRole("button", { name: "Reset filters" }));
+
+    expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toBeEmptyDOMElement();
+  });
+
+  it("offers the reset when the filtered collection is no longer viewable", async () => {
+    const goneId = "5d0e9a41-7c3b-4f2a-8e6d-1b9c0a7f3e52";
+    vi.mocked(library.listEntries).mockImplementation((params = {}) =>
+      params.collection_id
+        ? Promise.reject({ response: { status: 404, data: { detail: "Collection not found" } } })
+        : envelope(entries),
+    );
+    renderLibrary(`/library?collection_id=${goneId}`);
+
+    expect(await screen.findByText("No papers match these filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collection: Selected collection" })).toBeInTheDocument();
+  });
+
+  it("offers the reset when the API rejects a filter value", async () => {
+    vi.mocked(library.listEntries).mockImplementation((params = {}) =>
+      params.tag
+        ? Promise.reject({ response: { status: 422, data: { detail: "Invalid tag" } } })
+        : envelope(entries),
+    );
+    renderLibrary("/library?tag=ml");
+
+    expect(await screen.findByText("No papers match these filters")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t load your Library.")).toBeNull();
+  });
+
+  it("ignores a malformed collection id in the URL", async () => {
+    renderLibrary("/library?collection_id=gone");
+
+    expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+    expect(lastListParams()).toEqual({ page: 1, size: 25 });
+    expect(screen.queryByText(/filters? active/)).toBeNull();
+  });
+
+  it("shows an error with a retry when the list fails to load", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.listEntries).mockImplementationOnce(() =>
+      Promise.reject({ response: { status: 503 } }),
+    );
+    renderLibrary();
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("Couldn’t load your Library.")).toBeInTheDocument();
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("hides the reading-state filter when no entry has a state", async () => {
+    vi.mocked(library.getFacets).mockResolvedValueOnce({
+      tags: [],
+      states: [],
+      total: 2,
+      unresolved: 0,
+    });
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Reading state/ })).toBeNull());
+    expect(screen.getByRole("button", { name: /^Sort / })).toBeInTheDocument();
+  });
+
+  it("folds the filters behind a toggle on compact screens", async () => {
+    const user = userEvent.setup();
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      ...original(query),
+      matches: query === COMPACT_QUERY,
+    })) as typeof window.matchMedia;
+    try {
+      renderLibrary("/library?state=reading");
+      await screen.findByText("First Library Paper");
+
+      const toggle = screen.getByRole("button", { name: /Filters/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("· 1");
+      expect(toggle).toHaveAccessibleName(/1 filter active/);
+      const stateChip = screen.getByRole("button", { name: /^Reading state/, hidden: true });
+      expect(stateChip).not.toBeVisible();
+      // The active summary and Reset stay reachable while the panel is closed.
+      expect(screen.getByText("1 filter active", { selector: ".library-filters-active span" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Reset filters" })).toBeVisible();
+
+      await user.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(stateChip).toBeVisible();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+});
+
+// Five pages of full cards: slow under a loaded parallel run, hence the timeout.
 it("continues beyond 100 entries without duplicating page overlaps", async () => {
   const { library } = await import("@/lib/api");
   const { waitFor } = await import("@testing-library/react");
@@ -136,7 +526,7 @@ it("continues beyond 100 entries without duplicating page overlaps", async () =>
       return { ...entries[0]!, paper_group_key: key, primary_canonical_key: key, primary_version: paper(key, `Library item ${start + i}`) };
     });
     if (page === 5) batch[0] = { ...batch[0]!, paper_group_key: 'entry-99', primary_version: paper('entry-99', 'Library item 99') };
-    return batch;
+    return { items: batch, total: 102, page, size: 25 };
   });
   renderWithProviders(<LibraryPage />);
   await screen.findByText("Library item 0");
@@ -146,13 +536,129 @@ it("continues beyond 100 entries without duplicating page overlaps", async () =>
   }
   expect(screen.getAllByText("Library item 99")).toHaveLength(1);
   await waitFor(() => expect(screen.queryByRole("button", { name: "Show more" })).toBeNull());
-});
+}, 20_000);
 
 it("shows a retry instead of an empty library on a failed request", async () => {
   const { library } = await import("@/lib/api");
-  vi.mocked(library.listEntries).mockRejectedValueOnce(new Error("offline")).mockResolvedValue(entries);
+  vi.mocked(library.listEntries)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ items: entries, total: entries.length, page: 1, size: 25 });
   renderWithProviders(<LibraryPage />);
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("First Library Paper")).toBeInTheDocument();
+});
+
+it("keeps loaded entries and retries a failed next page", async () => {
+  let failNext = true;
+  vi.mocked(library.listEntries).mockImplementation((params = {}) => {
+    if (params.page !== 2) return envelope(entries, 3, 1, 2);
+    if (failNext) return Promise.reject(new Error("offline"));
+    return envelope([entry("doi:10.1/c", "Third Library Paper")], 3, 2, 2);
+  });
+  renderLibrary();
+  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(screen.getByText("First Library Paper")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  failNext = false;
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+  expect(await screen.findByText("Third Library Paper")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+describe("LibraryPage — recovery, deletion and export", () => {
+  const pending = entry("10.1109/TNN.2008.2005605", "", {
+    paper_group_key: "group:0123456789abcdef",
+    primary_version: null,
+    resolved: false,
+  });
+
+  afterEach(() => {
+    testAuth.authenticated = false;
+    vi.mocked(library.deleteEntry).mockReset();
+    vi.mocked(library.resolve).mockReset();
+  });
+
+  it("shows an unresolved entry's DOI with Retry, Fix and Delete", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.listEntries).mockImplementation(() => envelope([pending, entries[1]!]));
+    vi.mocked(library.resolve).mockResolvedValue({
+      status: "resolved", previous_key: pending.primary_canonical_key, canonical_key: "doi:10.1109/tnn.2008.2005605",
+      paper_group_key: "group:tnn", paper: paper("doi:10.1109/tnn.2008.2005605", "The Graph Neural Network Model"), moved: {},
+    });
+    vi.mocked(library.deleteEntry).mockResolvedValue(undefined);
+    renderLibrary();
+
+    const card = (await screen.findByRole("button", { name: "Details unavailable" })).closest("article")!;
+    expect(within(card).getByText(/^DOI/)).toHaveTextContent("DOI 10.1109/tnn.2008.2005605");
+    expect(within(card).queryByRole("link", { name: /Explore graph/ })).toBeNull();
+
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    expect(library.resolve).toHaveBeenCalledWith({ paper_canonical_key: pending.primary_canonical_key, replacement: null });
+    expect(await screen.findByText("Details found for “The Graph Neural Network Model”.")).toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Fix identifier" }));
+    expect(within(card).getByLabelText("Correct DOI or arXiv ID")).toHaveValue("10.1109/tnn.2008.2005605");
+
+    await user.click(within(card).getByRole("button", { name: "Delete" }));
+    const confirm = await screen.findByRole("dialog", { name: "Delete from Library" });
+    expect(confirm.textContent).not.toMatch(/anchored/);
+    await user.click(within(confirm).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(library.deleteEntry).toHaveBeenCalledWith(pending.paper_group_key, { detach: false }));
+  });
+
+  it("lists blocking collections, warns about shared ones and deletes with detach", async () => {
+    const user = userEvent.setup();
+    vi.mocked(library.deleteEntry)
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            detail: {
+              code: "entry_in_collections",
+              message: "blocked",
+              collections: [
+                { id: COLLECTION_ID, name: "Reading group", is_owner: true },
+                { id: "c-shared", name: "Lab shelf", is_owner: false },
+              ],
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce(undefined);
+    renderLibrary();
+
+    await user.click((await screen.findAllByRole("button", { name: "Delete from Library" }))[0]!);
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Paper still in collections" });
+    expect(within(dialog).getByText("This paper is still in 2 collections you can edit:")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Reading group" })).toHaveAttribute("href", `/collections/${COLLECTION_ID}`);
+    expect(within(dialog).getByRole("link", { name: "Lab shelf" })).toHaveAttribute("href", "/collections/c-shared");
+    expect(within(dialog).getAllByText("Shared with you")).toHaveLength(1);
+    expect(within(dialog).getByText(/Some of these collections belong to other people/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete and remove from 2 collections" }));
+    await waitFor(() => expect(library.deleteEntry).toHaveBeenLastCalledWith("group:doi:10.1/a", { detach: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("links to the data export and, without Zotero, to its settings from the More menu", async () => {
+    const user = userEvent.setup();
+    testAuth.authenticated = true;
+    renderLibrary();
+    await screen.findByText("First Library Paper");
+    // The header keeps to the graph link and More, last.
+    expect(screen.queryByRole("link", { name: "Export data" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Export data" })).toHaveAttribute("href", "/settings#your-data");
+    const connect = await screen.findByRole("menuitem", { name: "Connect Zotero to sync" });
+    expect(connect).toHaveAttribute("href", "/settings#zotero");
+    expect(screen.getByText("Zotero isn’t connected. Add your API key in Settings.")).toBeVisible();
+    expect(connect).toHaveAccessibleDescription("Zotero isn’t connected. Add your API key in Settings.");
+  });
 });

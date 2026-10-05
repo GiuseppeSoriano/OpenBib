@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 _DEV_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -68,6 +68,28 @@ class Settings(BaseSettings):
     # Only providers in the registry enablement list are instantiated.
     semantic_scholar_api_key: SecretStr = SecretStr("")
     semantic_scholar_api_key_file: str = ""
+
+    # Budget for resolving one DOI (or other identifier) before it is stored
+    # as pending: longer than the provider's whole rate-limit retry chain (two
+    # backoffs of 2 s and 4 s), so a rate-limited lookup reports its retry
+    # delay instead of timing out. Batch
+    # imports resolve with one provider call per 500 DOIs; the concurrency
+    # bounds only the doi.org checks of their misses.
+    doi_resolve_timeout_seconds: float = 15.0
+    import_resolve_concurrency: int = 4
+    import_request_budget_seconds: float = 25.0
+
+    # Graph related-paper ranges: range size, Semantic Scholar page size,
+    # depth cap in raw provider records (its paging stops below 10,000),
+    # provider pages fetched per request, per-request scan budget (hydration
+    # gets 5 s more, so a request ends within 25 s) and top-up concurrency
+    # (the provider allows one call at a time).
+    graph_related_range_size: int = Field(30, ge=5, le=100)
+    graph_related_chunk_size: int = Field(1000, ge=100, le=1000)
+    graph_related_max_results: int = Field(10000, ge=1000, le=10000)
+    graph_related_pages_per_request: int = Field(4, ge=1, le=10)
+    graph_related_scan_budget_seconds: float = Field(20.0, gt=0, le=20)
+    graph_related_topup_concurrency: int = Field(1, ge=1, le=8)
 
     # Inactive provider configuration is retained for future use.
     openalex_api_key: str = ""

@@ -93,4 +93,171 @@
     font-size: 0.78rem;
     padding: 0.3rem 0.7rem;
   }
+
+  /* Long unbroken titles (URLs, formulas) must not widen the page. */
+  .paper-title {
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Unresolved papers (details unavailable) ─────────────── */
+
+  .paper-card--unresolved {
+    border-style: dashed;
+  }
+
+  .paper-identifier {
+    font-size: 0.84rem;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+
+  .paper-identifier-link {
+    display: inline;
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .paper-identifier-link svg {
+    display: inline;
+    margin-left: 3px;
+    vertical-align: -1px;
+  }
+
+  .paper-unresolved-status {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+  }
+
+  .paper-field-error {
+    font-size: 0.8rem;
+    color: var(--color-danger);
+  }
+
+  .paper-fix-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+  }
+  .paper-fix-form label {
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .paper-fix-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+  .paper-fix-row .input {
+    flex: 1 1 14rem;
+    min-width: 0;
+  }
+  .paper-fix-form .input[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+
+  /* ── Row variant (Search results): a journal table-of-contents row ── */
+
+  .paper-card--row {
+    gap: 0;
+    padding: 0;
+  }
+
+  .paper-card--row .paper-title-row {
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-xs) var(--space-md);
+  }
+
+  .paper-card--row .paper-title {
+    flex: 1 1 18rem;
+    min-width: 0;
+    font-size: var(--text-lg);
+    line-height: var(--leading-snug);
+  }
+
+  /* Row badges are quiet text: "In Library", "In 2 collections", "Dismissed". */
+  .paper-card--row .paper-title-row .badge {
+    padding: 0;
+    background: transparent;
+    color: var(--color-accent);
+    white-space: nowrap;
+  }
+
+  .paper-card--row .paper-title-row .badge--neutral {
+    color: var(--color-text-secondary);
+  }
+
+  .paper-card--row .paper-authors {
+    margin-top: 5px;
+    font-size: var(--text-sm);
+  }
+
+  /* Authors and abstract in body ink; the meta line a step lighter. */
+  .paper-card--row .paper-authors,
+  .paper-card--row .paper-abstract {
+    color: var(--color-text-body);
+  }
+
+  .paper-card--row .paper-meta {
+    margin-top: 3px;
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .paper-venue {
+    font-style: italic;
+  }
+
+  .paper-oa {
+    color: var(--color-accent);
+  }
+
+  .paper-card--row .paper-abstract {
+    margin-top: var(--space-sm);
+    font-size: var(--text-md);
+    line-height: 1.6;
+  }
+
+  .paper-card--row .paper-actions {
+    gap: 2px;
+    margin: var(--space-sm) 0 0 -8px;
+  }
+
+  /* Row action and menu icons never shrink when a label wraps. */
+  .paper-card--row .paper-actions svg {
+    flex-shrink: 0;
+  }
+
+  /* Not relevant sits at the far end of the actions. */
+  .paper-actions-end {
+    margin-left: auto;
+  }
+
+  /* Touch screens: the icon-only More trigger gets the full square target. */
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    .paper-card--row .paper-actions-end .menu-root > .btn-quiet {
+      justify-content: center;
+      min-width: var(--touch-target);
+    }
+  }
+
+  @media (max-width: 639px) {
+    .paper-card--row .paper-title {
+      font-size: 1.0625rem;
+    }
+
+    .paper-card--row .paper-meta {
+      font-size: var(--text-xs);
+    }
+
+    /* MobileSearch: title, authors and meta; the abstract is in the details. */
+    .paper-card--row .paper-abstract {
+      display: none;
+    }
+
+    .paper-card--row .paper-actions {
+      margin-left: -10px;
+    }
+  }
 }

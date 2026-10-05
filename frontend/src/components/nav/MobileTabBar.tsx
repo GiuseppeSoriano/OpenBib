@@ -1,28 +1,31 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BookMarked, FolderOpen, LayoutDashboard, Search } from "lucide-react";
+import { FolderOpen, LayoutDashboard, LibraryBig, Search } from "lucide-react";
 
 const TABS = [
-  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", end: true },
+  { to: "/", icon: LayoutDashboard, labelKey: "nav.home", end: true },
   { to: "/search", icon: Search, labelKey: "nav.search", end: false },
-  { to: "/collections", icon: FolderOpen, labelKey: "nav.collections", end: true },
-  { to: "/library", icon: BookMarked, labelKey: "nav.library", end: false },
+  { to: "/library", icon: LibraryBig, labelKey: "nav.library", end: false },
+  { to: "/collections", icon: FolderOpen, labelKey: "nav.collections", end: false },
 ] as const;
 
 /** Bottom tab bar — the primary navigation on phones (<640px). */
 export default function MobileTabBar() {
   const { t } = useTranslation();
+  const location = useLocation();
 
   return (
-    <nav className="tabbar" aria-label="Primary">
+    <nav className="tabbar" aria-label={t("nav.primary")}>
       {TABS.map(({ to, icon: Icon, labelKey, end }) => (
         <NavLink
           key={to}
           to={to}
           end={end}
+          // From a search, Search reopens it without a duplicate history entry.
+          replace={(to === "/search" && location.pathname === "/search") || undefined}
           className={({ isActive }) => `tabbar-link ${isActive ? "tabbar-link--active" : ""}`}
         >
-          <Icon size={20} />
+          <Icon size={20} aria-hidden="true" />
           <span>{t(labelKey)}</span>
         </NavLink>
       ))}

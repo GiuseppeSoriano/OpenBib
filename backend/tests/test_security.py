@@ -110,7 +110,8 @@ async def test_oversized_chunked_body_and_hostile_request_id():
             "/api/v1/papers/search", params={"q": "test", "providers": "evil"}
         )
         assert invalid.status_code == 422
-        graph = await client.post("/api/v1/graph/expand", json={"from_keys": ["key"] * 21})
+        source = {"source_key": "hash:abc", "source_group_key": "group:abc"}
+        graph = await client.post("/api/v1/graph/related/top-up", json={"sources": [source] * 21})
         assert graph.status_code == 422
 
 

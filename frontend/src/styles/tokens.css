@@ -18,22 +18,43 @@
     /* Text — green-tinted ink */
     --color-text: #1a1e1d;
     --color-text-secondary: #5f6b67;
+    /* Body ink for running text under a title (authors, abstracts). */
+    --color-text-body: #3d4744;
+
+    /* Muted labels (small caps, counts, timestamps). Darker than the
+       mockup's #7b8682 so it keeps 4.5:1 on the page and sidebar grounds. */
+    --color-text-muted: #65706c;
 
     /* Lines */
     --color-border: #e0e6e3;
+    /* Control outlines (chips, inputs, secondary buttons) */
+    --color-border-strong: #c9d1ce;
+    /* Row separators: journal-style hairlines between list items */
+    --color-hairline: #e3e8e6;
+    /* The ink rule under a section heading */
+    --color-rule: #1a1e1d;
+
+    /* Shell grounds */
+    --color-sidebar: #fbfcfb;
+    /* Quiet hover on the page ground (nav items, quiet actions, options) */
+    --color-hover-quiet: #eef3f1;
+    /* Row hover for interactive lists and tables */
+    --color-row-hover: #fbfcfc;
 
     /* Accent — verdigris (patinated bronze) */
     --color-accent: #33695f;
     --color-accent-hover: #2a574f;
     --color-accent-soft: #e4efec;
     --color-on-accent: #ffffff;
+    /* Text on --color-accent-soft (active chips, nav items, options) */
+    --color-accent-strong: #1f4a42;
 
     /* Status — success is blue (green belongs to the accent) */
     --color-success: #46689b;
     --color-success-soft: #e8eef7;
     --color-danger: #b03a3a;
     --color-danger-soft: #f9eaea;
-    --color-warning: #9a6317;
+    --color-warning: #8f5b14; /* 5:1 on --color-warning-soft (badge text) */
     --color-warning-soft: #f7efdf;
 
     /* Foreground on a filled danger surface — never hardcode #fff:
@@ -43,17 +64,65 @@
     /* Scrim behind modals and side panels — tinted to the green ink */
     --color-overlay: rgba(18, 26, 23, 0.5);
 
+    /* Reading states: to read = warning, reading = blue, read = accent.
+       The plain token fills bars and dots; -soft/-text make the pill. */
+    --color-state-toread: var(--color-warning);
+    --color-state-toread-soft: var(--color-warning-soft);
+    --color-state-toread-text: #7a4d11;
+    --color-state-reading: var(--color-success);
+    --color-state-reading-soft: var(--color-success-soft);
+    --color-state-reading-text: #2f4e7a;
+    --color-state-read: var(--color-accent);
+    --color-state-read-soft: var(--color-accent-soft);
+    --color-state-read-text: var(--color-accent-strong);
+    --color-state-none: #c9d1ce;
+    /* Track behind a stacked progress bar */
+    --color-track: var(--color-hairline);
+
     /* Citation graph */
-    --graph-node: #a0a8a4;
-    --graph-node-seed: var(--color-accent);
-    --graph-node-saved: var(--color-success);
+    --graph-canvas: var(--color-bg);
+    /* Plain paper: 3.2:1 on the canvas, so the Library mark reads on it */
+    --graph-node: #858f8a;
+    --graph-node-pinned: var(--color-accent);
+    /* Library membership is a mark, not a fill: a centre dot punched
+       through the node in the canvas colour (3:1+ on both node fills). */
+    --graph-node-mark: var(--graph-canvas);
+    --graph-node-selected: var(--color-warning);
+    /* Soft halo outside the selected node's amber ring */
+    --graph-node-halo: color-mix(in srgb, var(--graph-node-selected) 18%, transparent);
+    /* Gap between a selected node and its amber selection ring */
+    --graph-node-gap: var(--graph-canvas);
     --graph-edge: #d6dcd8;
+    /* Floating legend pill over the canvas: opaque, so nothing shows through */
+    --graph-legend-bg: var(--color-surface);
 
     /* Typography — Fontsource registers the variable family under the
        "<Name> Variable" alias, so it must come first in the stack. */
     --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Source Serif Pro", Georgia, serif;
     --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+
+    /* Type scale (rem, so it follows the browser text size).
+       UI text is Plex Sans; --text-lg and up are serif headings and titles. */
+    --text-2xs: 0.71875rem; /* 11.5px — small-caps labels, kbd */
+    --text-xs: 0.75rem; /* 12px — counts, meta, table heads */
+    --text-sm: 0.8125rem; /* 13px — chips, secondary lines */
+    --text-md: 0.875rem; /* 14px — body UI, nav, buttons */
+    --text-base: 1rem; /* 16px — inputs on phones, large fields */
+    --text-lg: 1.1875rem; /* 19px — result and paper titles */
+    --text-xl: 1.25rem; /* 20px — section headings */
+    --text-2xl: 1.875rem; /* 30px — page titles */
+    --text-3xl: 2.125rem; /* 34px — dashboard greeting */
+    --leading-tight: 1.25;
+    --leading-snug: 1.35;
+    --tracking-caps: 0.06em;
+    --tracking-display: -0.015em;
+
+    /* Motion — subtle; zeroed under prefers-reduced-motion below. */
+    --duration-fast: 120ms;
+    --duration-base: 150ms;
+    --duration-slow: 180ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
     /* Spacing */
     --space-xs: 0.25rem;
@@ -76,10 +145,58 @@
 
     /* Focus */
     --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+    /* Rows inside a popover or a clipped box (menus, listboxes, a chip's
+       remove button): the ring is drawn inside, so no edge clips it. */
+    --focus-ring-inset: inset 0 0 0 2px var(--color-accent);
 
-    /* Layout */
-    --nav-height: 56px;
-    --bottomnav-height: 56px;
+    /* Icon sizes: one per role, so sibling labels start at the same x. */
+    --icon-btn: 15px; /* inside .btn */
+    --icon-row: 16px; /* nav rows, menu items, dialog close */
+
+    /* Layout — bar heights scale with the browser text size (56px at 16px). */
+    --nav-height: calc(2.25rem + 20px);
+    --bottomnav-height: calc(2.25rem + 20px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    /* The only document clearance for the fixed bottom tab bar (0 without it). */
+    --bottomnav-clearance: 0px;
+
+    /* Target sizes: --touch-target is the WCAG-friendly minimum; --control-min
+       is the dense desktop size that grows to it on touch screens. */
+    --touch-target: 44px;
+    --control-min: 34px;
+
+    /* App shell */
+    --sidebar-width: 248px;
+    /* Collapsed sidebar and the tablet icon rail */
+    --sidebar-rail-width: 64px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-fast: 0ms;
+      --duration-base: 0ms;
+      --duration-slow: 0ms;
+    }
+  }
+
+  /*
+   * Breakpoints — keep in sync with src/lib/breakpoints.ts:
+   *   @custom-media --phone (max-width: 639px);   bottom tab bar
+   *   @custom-media --compact (max-width: 639px), (max-height: 500px);
+   *   @custom-media --touch (max-width: 639px), (pointer: coarse), (max-height: 500px);
+   *   Panel bottom sheet: (max-width: 767px).
+   *   Sidebar icon rail: (max-width: 1023px) — applied by Layout as a class.
+   */
+  @media (max-width: 639px) {
+    :root {
+      --bottomnav-clearance: calc(var(--bottomnav-height) + var(--safe-area-bottom));
+    }
+  }
+
+  @media (max-width: 639px), (pointer: coarse), (max-height: 500px) {
+    :root {
+      --control-min: var(--touch-target);
+    }
   }
 
   [data-theme="dark"] {
@@ -91,13 +208,24 @@
 
     --color-text: #e9efec;
     --color-text-secondary: #96a49e;
+    --color-text-body: #c4cec9;
+
+    --color-text-muted: #7d8a85;
 
     --color-border: #2f3b37;
+    --color-border-strong: #33403c;
+    --color-hairline: #222c29;
+    --color-rule: #5a6863; /* mockup #56645f, lifted to 3:1 on the ground */
+
+    --color-sidebar: #0d1110;
+    --color-hover-quiet: #1b2422;
+    --color-row-hover: #141a18;
 
     --color-accent: #86b8ab;
     --color-accent-hover: #9fc9be;
     --color-accent-soft: #1d312c;
     --color-on-accent: #0c1f1a;
+    --color-accent-strong: #cfe6df;
 
     --color-success: #8aa8cf;
     --color-success-soft: #1b2735;
@@ -110,7 +238,14 @@
 
     --color-overlay: rgba(4, 8, 7, 0.62);
 
+    --color-state-toread-text: #e3c48a;
+    --color-state-reading-text: #a9c1e0;
+    --color-state-none: #3b4844;
+    --color-track: #26302d;
+
     --graph-node: #71807a;
+    --graph-node-pinned: var(--color-accent);
+    --graph-node-selected: var(--color-warning);
     --graph-edge: #35413c;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

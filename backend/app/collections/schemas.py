@@ -2,11 +2,11 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from app.papers.schemas import PaperMetadataRead
+from app.papers.schemas import PaperMetadataRead, StateRead, TagRead, clean_title_value
 
 
 class CollectionCreate(BaseModel):
@@ -28,6 +28,7 @@ class CollectionRead(BaseModel):
     description: str | None
     revision: int
     created_at: datetime
+    updated_at: datetime
     paper_count: int = 0
     is_owner: bool = False
     can_edit: bool = False
@@ -61,19 +62,23 @@ class ReadLinkRead(BaseModel):
 
 
 class PaperAdd(BaseModel):
-    paper_canonical_key: str = Field(max_length=512)
-
-
-class IdentifierImport(BaseModel):
-    dois: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=500
+    paper_canonical_key: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            "DOI, doi:…, https://doi.org/…, s2:… or a semanticscholar.org link, an arXiv ID"
+            " or link, pmid:…, pmcid:PMC…, or an existing hash: key"
+        ),
     )
+
+
+# Blank lines are allowed here and dropped by the import service.
+class IdentifierImport(BaseModel):
+    dois: list[Annotated[str, Field(max_length=512)]] = Field(default_factory=list, max_length=500)
 
 
 class KeyImport(BaseModel):
-    keys: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list, max_length=500
-    )
+    keys: list[Annotated[str, Field(max_length=512)]] = Field(default_factory=list, max_length=500)
 
 
 class CollectionPaperRead(BaseModel):
@@ -82,5 +87,34 @@ class CollectionPaperRead(BaseModel):
     position: int
     added_at: datetime
     paper: PaperMetadataRead | None = None
+    # False while the paper is stored as pending (providers unavailable).
+    resolved: bool
+    # The caller's own reading states and tags on this key, in the shapes of
+    # GET /papers/{key}/states and /tags, so the list needs no per-row
+    # requests. Set by the list endpoint for a signed-in caller only.
+    my_states: list[StateRead] | None = None
+    my_tags: list[TagRead] | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ImportLineResult(BaseModel):
+    line: int  # 1-based index within the request list
+    input: str
+    # ``unavailable``: not saved (the provider failed); the line can be retried.
+    status: Literal["added", "duplicate", "invalid", "not_found", "unresolved", "unavailable"]
+    canonical_key: str | None = None
+    title: str | None = None
+
+    _clean_title = field_validator("title", mode="before")(clean_title_value)
+
+
+class ImportResult(BaseModel):
+    added: int
+    duplicate: int
+    invalid: int
+    not_found: int
+    unresolved: int
+    total: int
+    skipped: int  # deprecated alias of ``duplicate``
+    results: list[ImportLineResult]

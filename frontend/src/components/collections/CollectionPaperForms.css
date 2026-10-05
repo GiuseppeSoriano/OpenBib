@@ -1,0 +1,109 @@
+@layer components {
+  /* ── Import ─────────────────────────────────────────────── */
+
+  .cd-import-label {
+    font-size: var(--text-sm);
+    font-weight: 500;
+  }
+
+  .cd-import-hint,
+  .cd-import-summary {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .cd-import-error {
+    font-size: var(--text-sm);
+    color: var(--color-danger);
+    overflow-wrap: anywhere;
+  }
+
+  .cd-import {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .cd-import-text {
+    resize: vertical;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+  }
+
+  .cd-import-invalid h4,
+  .cd-import-results-heading {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .cd-import-results-heading:focus {
+    outline: none;
+  }
+
+  .cd-import-invalid ul,
+  .cd-import-results {
+    list-style: none;
+    max-height: 14rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    font-size: var(--text-sm);
+  }
+  .cd-import-invalid ul:focus-visible,
+  .cd-import-results:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .cd-import-invalid ul {
+    margin-top: var(--space-xs);
+    color: var(--color-danger);
+    overflow-wrap: anywhere;
+  }
+
+  .cd-import-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    font-size: var(--text-sm);
+  }
+  .cd-import-progress progress {
+    width: 100%;
+    accent-color: var(--color-accent);
+  }
+
+  /* One report line per row: a coloured rule marks its outcome. */
+  .cd-import-result {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--space-sm);
+    padding: 6px var(--space-sm);
+    border-left: 2px solid var(--color-border-strong);
+    border-bottom: 1px solid var(--color-hairline);
+  }
+  .cd-import-result--ok {
+    border-left-color: var(--color-success);
+  }
+  .cd-import-result--warn {
+    border-left-color: var(--color-warning);
+  }
+  .cd-import-result--error {
+    border-left-color: var(--color-danger);
+  }
+
+  .cd-import-line {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .cd-import-input {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .cd-import-status {
+    font-weight: 600;
+  }
+  .cd-import-title {
+    flex-basis: 100%;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+}

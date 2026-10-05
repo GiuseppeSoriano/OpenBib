@@ -4,10 +4,9 @@ import { useTranslation } from "react-i18next";
 import type { AxiosError } from "axios";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
-import Logo from "@/components/ui/Logo";
+import { AuthShell } from "@/pages/AccountLifecyclePages";
 import { useLegalConfig } from "@/lib/legal";
 import type { RegistrationStatus } from "@/types";
-import "./AuthPage.css";
 
 export default function RegisterPage() {
   const { t, i18n } = useTranslation();
@@ -106,15 +105,14 @@ export default function RegisterPage() {
   const codeExpired = !!flow.otp_expires_at && Date.parse(flow.otp_expires_at) <= now;
   const step = stage === "profile" ? 3 : stage === "otp" ? 2 : 1;
 
-  return <div className="auth-page"><div className="auth-card card">
-    <div className="auth-header"><Logo size={44} className="auth-logo" />
-      <p className="registration-step">{t("registration.step", { step })}</p>
-      <h1>{t(`registration.${stage === "profile" ? "profileTitle" : stage === "otp" ? "otpTitle" : "emailTitle"}`)}</h1>
-      <p>{t(`registration.${stage === "profile" ? "profileHelp" : stage === "otp" ? "otpHelp" : "emailHelp"}`, { email: flow.email_masked })}</p>
-    </div>
+  return <AuthShell
+    eyebrow={t("registration.step", { step })}
+    title={t(`registration.${stage === "profile" ? "profileTitle" : stage === "otp" ? "otpTitle" : "emailTitle"}`)}
+    description={t(`registration.${stage === "profile" ? "profileHelp" : stage === "otp" ? "otpHelp" : "emailHelp"}`, { email: flow.email_masked })}
+  >
     {error && <div className="auth-error" role="alert">{error}</div>}
     {notice && <p className="auth-message" role="status">{notice}</p>}
-    {loading ? <p role="status">{t("auth.pleaseWait")}</p> : <>
+    {loading ? <p className="auth-message" role="status">{t("auth.pleaseWait")}</p> : <>
       {stage === "email" && <form className="auth-form" onSubmit={start}>
         <label>{t("auth.email")}<input className="input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus /></label>
         <p className="auth-help"><Link to="/privacy">{t("auth.privacy")}</Link></p>
@@ -135,12 +133,12 @@ export default function RegisterPage() {
         <label>{t("auth.confirmPassword")}<input className="input" type="password" autoComplete="new-password" value={passwordConfirmation} onChange={e => setPasswordConfirmation(e.target.value)} required minLength={8} maxLength={128} aria-invalid={passwordMismatch} aria-describedby={passwordMismatch ? "password-mismatch" : undefined} /></label>
         {passwordMismatch && <p id="password-mismatch" className="auth-error" role="alert">{t("auth.passwordMismatch")}</p>}
         <label className="auth-check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} required /><span>{t("auth.acceptLegal")} <Link to="/terms">{t("auth.terms")}</Link> {t("auth.acknowledgePrivacy")} <Link to="/privacy">{t("auth.privacy")}</Link></span></label>
-        {legal.isError && <p role="alert" className="auth-error">{t("registration.failed")} <button type="button" className="btn btn-secondary" onClick={() => void legal.refetch()}>{t("graph.retry")}</button></p>}
+        {legal.isError && <p role="alert" className="auth-error">{t("registration.failed")} <button type="button" className="btn btn-secondary" onClick={() => void legal.refetch()}>{t("common.retry")}</button></p>}
         <button className="btn btn-primary auth-submit" disabled={pending || !accepted || !legal.data || password !== passwordConfirmation}>{t("auth.createAccount")}</button>
       </form>}
-      {(stage === "expired" || stage === "locked") && <p role="alert" className="auth-message">{t(`registration.${stage}`)}</p>}
+      {(stage === "expired" || stage === "locked") && <p role="alert" className="auth-error">{t(`registration.${stage}`)}</p>}
       {stage !== "email" && <button type="button" className="btn-ghost registration-restart" disabled={pending} onClick={restart}>{t(stage === "otp" || stage === "profile" ? "registration.changeEmail" : "registration.restart")}</button>}
     </>}
     <p className="auth-alt">{t("auth.haveAccount")} <Link to="/login">{t("auth.signIn")}</Link></p>
-  </div></div>;
+  </AuthShell>;
 }

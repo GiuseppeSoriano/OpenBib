@@ -2,24 +2,32 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.collections.models import Collection
+from app.collections.models import Collection, CollectionMember, CollectionPaper
 from app.collections.service import add_paper as add_paper_to_collection
 from app.collections.service import get_user_stats
 from app.common.exceptions import ConflictError, NotFoundError
+from app.common.identifiers import synthetic_group_key
 from app.library import service as library_service
 from app.library.models import UserLibraryEntry, UserLibraryVersion
 from app.notes.models import Note
 from app.papers import service as paper_service
 from app.papers.models import CachedPaperMetadata, UserPaperState, UserPaperTag
+from app.providers.base import PaperMetadata
 from app.users.models import User
 
 pytestmark = pytest.mark.asyncio
+
+ON_POSTGRES = os.getenv("TEST_DB_URL", "").startswith("postgresql")
 
 
 async def _make_user(db, email="alice@example.com"):
@@ -98,8 +106,199 @@ async def test_delete_entry_blocked_when_version_in_collection(db):
     await _cache_paper(db, "doi:10.1/z", "group:z")
     await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(HTTPException) as exc_info:
         await library_service.delete_entry(db, user.id, "group:z")
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "entry_in_collections"
+    assert exc_info.value.detail["collections"] == [
+        {"id": str(coll.id), "name": "My Coll", "is_owner": True}
+    ]
+
+
+async def test_delete_conflict_lists_shared_collections_the_user_does_not_own(db):
+    owner = await _make_user(db, "owner@example.com")
+    editor = await _make_user(db, "editor@example.com")
+    shared = await _make_collection(db, owner.id, name="Shared")
+    read_only = await _make_collection(db, owner.id, name="Read only")
+    db.add_all(
+        [
+            CollectionMember(collection_id=shared.id, user_id=editor.id, role="editor"),
+            CollectionMember(collection_id=read_only.id, user_id=editor.id, role="viewer"),
+        ]
+    )
+    await _cache_paper(db, "doi:10.1/shared", "group:shared")
+    await add_paper_to_collection(db, shared.id, editor.id, "doi:10.1/shared")
+    db.add(CollectionPaper(collection_id=read_only.id, paper_canonical_key="doi:10.1/shared"))
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await library_service.delete_entry(db, editor.id, "group:shared")
+
+    # Only collections the user can detach from block; is_owner warns that
+    # detaching also removes the paper for the owner's collaborators.
+    assert exc_info.value.detail["collections"] == [
+        {"id": str(shared.id), "name": "Shared", "is_owner": False}
+    ]
+
+
+async def test_add_version_pins_the_stored_key_of_an_alias(db):
+    user = await _make_user(db)
+    s2_id = "d" * 40
+    await paper_service.cache_papers(
+        db,
+        [
+            PaperMetadata(
+                canonical_key=f"s2:{s2_id}",
+                paper_group_key="group:alias",
+                title="Alias",
+                doi="10.1/alias",
+                semantic_scholar_id=s2_id,
+                provider_source="semantic_scholar",
+            )
+        ],
+    )
+    await library_service.ensure_entry_and_version(db, user.id, "group:alias", f"s2:{s2_id}")
+
+    pin = await library_service.add_version(db, user.id, "group:alias", "doi:10.1/alias")
+
+    assert pin.paper_canonical_key == f"s2:{s2_id}"
+
+
+async def test_delete_entry_with_detach_removes_it_from_collections(db):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await _cache_paper(db, "doi:10.1/z", "group:z")
+    await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
+
+    await library_service.delete_entry(db, user.id, "group:z", detach=True)
+
+    assert (await db.get(UserLibraryEntry, (user.id, "group:z"))) is None
+    assert (await db.get(CollectionPaper, (coll.id, "doi:10.1/z"))) is None
+
+
+async def test_detach_locks_the_collections_it_removes_rows_from(db, engine):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await _cache_paper(db, "doi:10.1/z", "group:z")
+    await add_paper_to_collection(db, coll.id, user.id, "doi:10.1/z")
+    await db.commit()
+
+    await library_service.delete_entry(db, user.id, "group:z", detach=True)
+
+    assert (await db.get(CollectionPaper, (coll.id, "doi:10.1/z"))) is None
+    if ON_POSTGRES:
+        # Still held by the uncommitted test session, like every collection writer's lock.
+        async with AsyncSession(engine) as other:
+            with pytest.raises(DBAPIError):
+                await other.execute(
+                    text("SELECT id FROM collections WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": coll.id},
+                )
+            await other.rollback()
+
+
+async def test_detach_rechecks_edit_rights_under_the_collection_lock(db, monkeypatch):
+    owner = await _make_user(db, "owner@example.com")
+    editor = await _make_user(db, "editor@example.com")
+    shared = await _make_collection(db, owner.id, name="Shared")
+    db.add(CollectionMember(collection_id=shared.id, user_id=editor.id, role="editor"))
+    await _cache_paper(db, "doi:10.1/shared", "group:shared")
+    await add_paper_to_collection(db, shared.id, editor.id, "doi:10.1/shared")
+    lock = library_service._lock_collections
+
+    async def revoke_then_lock(session, collection_ids):
+        # The owner removes the editor between the first read and the lock.
+        await session.execute(delete(CollectionMember).where(CollectionMember.user_id == editor.id))
+        return await lock(session, collection_ids)
+
+    monkeypatch.setattr(library_service, "_lock_collections", revoke_then_lock)
+
+    await library_service.delete_entry(db, editor.id, "group:shared", detach=True)
+
+    # The owner's collection keeps the paper; only the editor's own entry is gone.
+    assert (await db.get(CollectionPaper, (shared.id, "doi:10.1/shared"))) is not None
+    assert (await db.get(UserLibraryEntry, (editor.id, "group:shared"))) is None
+
+
+async def test_unresolved_entry_outside_collections_can_be_deleted(db):
+    user = await _make_user(db)
+    coll = await _make_collection(db, user.id)
+    await add_paper_to_collection(db, coll.id, user.id, "10.9/pending")
+    from app.collections.service import remove_paper
+
+    await remove_paper(db, coll.id, user.id, "doi:10.9/pending")
+    group = synthetic_group_key("doi:10.9/pending")
+    assert (await db.get(UserLibraryEntry, (user.id, group))) is not None
+
+    await library_service.delete_entry(db, user.id, group)
+
+    assert (await db.get(UserLibraryEntry, (user.id, group))) is None
+    assert (await db.get(UserLibraryVersion, (user.id, "doi:10.9/pending"))) is None
+
+
+async def test_real_group_reanchors_a_synthetic_pin_with_its_tags_and_notes(db):
+    user = await _make_user(db)
+    synthetic = synthetic_group_key("doi:10.1/late")
+    await library_service.ensure_entry_and_version(db, user.id, synthetic, "doi:10.1/late")
+    await paper_service.add_tag(db, user.id, "doi:10.1/late", "later")
+    db.add(
+        Note(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            target_type="paper",
+            target_key="doi:10.1/late",
+            paper_group_key=None,
+            content="Read this",
+        )
+    )
+    await db.flush()
+
+    # Metadata arrives later; saving again under the real group must not
+    # leave a second, pin-less entry behind.
+    await _cache_paper(db, "doi:10.1/late", "group:late")
+    entry, pin = await library_service.ensure_entry_and_version(
+        db, user.id, "group:late", "doi:10.1/late", "openalex", authoritative_group=True
+    )
+
+    assert entry.paper_group_key == "group:late"
+    assert pin.paper_group_key == "group:late"
+    entries = (
+        (await db.execute(select(UserLibraryEntry).where(UserLibraryEntry.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    assert [e.paper_group_key for e in entries] == ["group:late"]
+    tags = (await db.execute(select(UserPaperTag).where(UserPaperTag.user_id == user.id))).scalars()
+    assert [(t.tag, t.paper_group_key) for t in tags] == [("later", "group:late")]
+    notes = (await db.execute(select(Note).where(Note.user_id == user.id))).scalars()
+    assert [n.paper_group_key for n in notes] == ["group:late"]
+
+
+async def test_non_authoritative_group_keeps_the_existing_pin(db):
+    user = await _make_user(db)
+    await library_service.ensure_entry_and_version(db, user.id, "group:first", "doi:10.1/keep")
+
+    entry, pin = await library_service.ensure_entry_and_version(
+        db, user.id, "group:client-guess", "doi:10.1/keep"
+    )
+
+    assert entry.paper_group_key == "group:first"
+    assert pin.paper_group_key == "group:first"
+    assert (await db.get(UserLibraryEntry, (user.id, "group:client-guess"))) is None
+
+
+async def test_reanchor_moves_only_the_version_when_other_pins_remain(db):
+    user = await _make_user(db)
+    await library_service.ensure_entry_and_version(db, user.id, "group:mixed", "doi:10.1/a")
+    await library_service.ensure_entry_and_version(db, user.id, "group:mixed", "doi:10.1/b")
+    await library_service.repin_primary(db, user.id, "group:mixed", "doi:10.1/b")
+
+    await library_service.reanchor_pin(db, user.id, "doi:10.1/b", "group:real")
+
+    old = await db.get(UserLibraryEntry, (user.id, "group:mixed"))
+    assert old is not None
+    assert old.primary_canonical_key == "doi:10.1/a"
+    assert (await db.get(UserLibraryEntry, (user.id, "group:real"))) is not None
 
 
 async def test_delete_entry_cascades_when_no_collections(db):
@@ -225,6 +424,25 @@ async def test_user_stats_includes_library_total(db):
     assert stats["distinct_papers"] == 2
 
 
+async def test_user_stats_count_versions_of_one_paper_once(db):
+    user = await _make_user(db, email="carol@example.com")
+    first = await _make_collection(db, user.id, name="First")
+    second = await _make_collection(db, user.id, name="Second")
+    await _cache_paper(db, "doi:10.1/v1", "group:versions")
+    await _cache_paper(db, "doi:10.1/v2", "group:versions")
+    await add_paper_to_collection(db, first.id, user.id, "doi:10.1/v1")
+    await add_paper_to_collection(db, second.id, user.id, "doi:10.1/v2")
+    # A legacy row without cached metadata falls back to its own key, once across collections.
+    db.add(CollectionPaper(collection_id=first.id, paper_canonical_key="hash:0123456789abcdef"))
+    db.add(CollectionPaper(collection_id=second.id, paper_canonical_key="hash:0123456789abcdef"))
+    await db.flush()
+
+    stats = await get_user_stats(db, user.id)
+    assert stats["total_collections"] == 2
+    assert stats["total_papers"] == 4
+    assert stats["distinct_papers"] == 2
+
+
 async def test_remove_paper_from_collection_keeps_library_entry(db):
     """Removing a paper from a collection must NOT touch the Library row."""
     from app.collections.service import remove_paper
@@ -305,8 +523,10 @@ async def test_library_pagination_is_stable_when_creation_times_match(db):
         )
     await db.flush()
     pages = [
-        await library_service.list_entries(db, user.id, page=page, size=25) for page in range(1, 6)
+        (await library_service.list_entries(db, user.id, page=page, size=25))[0]
+        for page in range(1, 6)
     ]
     keys = [entry["paper_group_key"] for page in pages for entry in page]
     assert keys == [f"group:{index:03}" for index in range(102)]
-    assert await library_service.list_entries(db, user.id, page=6, size=25) == []
+    entries, _ = await library_service.list_entries(db, user.id, page=6, size=25)
+    assert entries == []

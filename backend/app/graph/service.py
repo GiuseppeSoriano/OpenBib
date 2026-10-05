@@ -2,20 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
+import time
 import uuid
 from collections import deque
+from collections.abc import Awaitable
 from dataclasses import asdict
 
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.identifiers import DOI_RE
 from app.graph.models import PaperGraphEdge
-from app.graph.schemas import ExpandResponse, GraphEdge, GraphNode, GraphResponse
+from app.graph.schemas import GraphEdge, GraphNode, GraphResponse
 from app.papers import service as paper_service
 from app.papers.schemas import PaperMetadataRead
 from app.providers import cache as provider_cache
 from app.providers import registry
+from app.providers.base import PaperMetadata
+from app.providers.semantic_scholar import ProviderError
+
+logger = logging.getLogger(__name__)
 
 
 def _fallback_paper(canonical_key: str) -> PaperMetadataRead:
@@ -212,34 +223,28 @@ async def store_edges(db: AsyncSession, edges: list[dict]) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# Live citation pipeline: base graphs + one-level expansion.
+# Live citation pipeline: base graphs (related-paper ranges and top-ups live
+# in `app.graph.related`).
 #
 # Edges are `cited_by`, directed citing → cited (arrow at the cited paper, so
 # in-degree = citations received). Base graphs persist edges *among saved
-# papers* in `paper_graph_edges`; expansion fetches citing papers on the fly
-# (Redis-cached) and only persists edges between papers already saved.
+# papers* in `paper_graph_edges`; related ranges fetch citing papers on the fly
+# (Redis-cached) and only persist edges between papers already saved.
 # ─────────────────────────────────────────────────────────────
 
 CITED_BY = "cited_by"
+_STRONG_PREFIXES = ("doi:", "s2:", "arxiv:", "pmid:", "pmcid:")
+# Provider work for one base graph's edges (seed lookups, references) ends
+# after this long; the response then flags its edges as partial.
+_EDGE_BUDGET_SECONDS = 20.0
+_STOP_CODES = frozenset(
+    {"provider_rate_limited", "provider_not_configured", "provider_key_rejected"}
+)
 
 
 def _read_from_metadata(paper) -> PaperMetadataRead:
     """Provider PaperMetadata dataclass → API read schema (extra keys ignored)."""
     return PaperMetadataRead.model_validate(asdict(paper))
-
-
-def _node_from_read(paper: PaperMetadataRead, *, is_seed: bool = False) -> GraphNode:
-    """Single-version node built directly from freshly-fetched metadata."""
-    return GraphNode(
-        id=paper.paper_group_key,
-        label=paper.title,
-        type="paper",
-        paper_group_key=paper.paper_group_key,
-        version_count=1,
-        selected_version=paper,
-        versions=[paper],
-        is_seed=is_seed,
-    )
 
 
 async def _resolve_read(db: AsyncSession, canonical_key: str) -> PaperMetadataRead:
@@ -249,80 +254,142 @@ async def _resolve_read(db: AsyncSession, canonical_key: str) -> PaperMetadataRe
     return _fallback_paper(canonical_key)
 
 
-async def _resolve_graph_id(db: AsyncSession, paper: PaperMetadataRead) -> str | None:
-    if paper.semantic_scholar_id:
-        return paper.semantic_scholar_id
-    identifier = registry.paper_identifier(paper)
-    if identifier:
-        meta = await registry.lookup_by_id(identifier)
-        if meta is not None:
-            await paper_service.cache_papers(db, [meta])
+async def _within[T](call: Awaitable[T], deadline: float) -> T:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        if asyncio.iscoroutine(call):
+            call.close()
+        raise TimeoutError
+    return await asyncio.wait_for(call, timeout=remaining)
+
+
+def _stops(exc: BaseException) -> bool:
+    """Whether ``exc`` ends provider work for this graph: out of time, rate
+    limited (the adapter already backed off) or without a usable API key."""
+    return isinstance(exc, TimeoutError) or (
+        isinstance(exc, ProviderError) and exc.code in _STOP_CODES
+    )
+
+
+async def _lookup_seeds(
+    identifiers: list[str], deadline: float
+) -> tuple[list[PaperMetadata | None], Exception | None]:
+    """Records for ``identifiers`` in order (``None`` for a miss) and the
+    failure that left some unresolved, if any. Semantic Scholar rejects a
+    whole batch for one identifier it cannot read, so such a batch is split
+    in halves until that identifier is left out on its own."""
+    try:
+        return await _within(registry.papers_by_ids(identifiers), deadline), None
+    except ProviderError as exc:
+        if exc.code != "invalid_query":
+            return [None] * len(identifiers), exc
+        if len(identifiers) == 1:
+            return [None], None
+    except Exception as exc:
+        return [None] * len(identifiers), exc
+    mid = len(identifiers) // 2
+    head, failure = await _lookup_seeds(identifiers[:mid], deadline)
+    if failure is not None:
+        return head + [None] * (len(identifiers) - mid), failure
+    tail, failure = await _lookup_seeds(identifiers[mid:], deadline)
+    return head + tail, failure
+
+
+async def _resolve_graph_ids(
+    db: AsyncSession, papers: list[PaperMetadataRead], deadline: float
+) -> Exception | None:
+    """Give seeds without a Semantic Scholar paperId one, from batch lookups
+    by their DOI or other strong identifier (upserted; the stored record
+    keeps its key and group). Returns the failure that left some seeds
+    without one, if any."""
+    pending = [
+        (paper, identifier)
+        for paper in papers
+        if not paper.semantic_scholar_id and (identifier := registry.paper_identifier(paper))
+    ]
+    if not pending:
+        return None
+    found, failure = await _lookup_seeds([identifier for _, identifier in pending], deadline)
+    if failure is not None:
+        logger.warning("Seed lookup failed; graph edges may be missing", exc_info=failure)
+    hits = [
+        (paper, meta)
+        for (paper, _), meta in zip(pending, found, strict=True)
+        if meta is not None and meta.semantic_scholar_id
+    ]
+    if hits:
+        await paper_service.cache_papers(db, [meta for _, meta in hits])
+        for paper, meta in hits:
             paper.semantic_scholar_id = meta.semantic_scholar_id
-            return meta.semantic_scholar_id
-    return None
+    return failure
 
 
-async def fetch_related(
-    db: AsyncSession,
-    redis: aioredis.Redis | None,
-    paper: PaperMetadataRead,
-    *,
-    direction: str = "cited_by",
-    order: str = "cited_by_count",
-    limit: int = 25,
-) -> list[PaperMetadataRead]:
-    """Papers related to ``paper``, fully mapped. ``direction="cited_by"`` →
-    papers that cite it (citers); ``direction="cites"`` → papers it cites
-    (references). Redis-cached per (work, direction, order, limit); fetched
-    papers are upserted into the metadata cache so they resolve elsewhere."""
-    graph_id = await _resolve_graph_id(db, paper)
-    if not graph_id:
-        return []
-    query_type = "references" if direction == "cites" else "citations"
-    cache_id = f"{graph_id}|{direction}|{order}|{limit}"
-    if redis is not None:
-        cached = await provider_cache.cache_get(
-            redis, registry.CACHE_NAMESPACE, query_type, cache_id
-        )
+async def _references_one_by_one(
+    graph_ids: list[str], deadline: float
+) -> tuple[dict[str, list[str]], bool]:
+    """Reference paperIds paper by paper, until ``deadline`` or a failure no
+    later call would avoid; returns them with whether some are missing."""
+    fetched: dict[str, list[str]] = {}
+    partial = False
+    for graph_id in graph_ids:
+        try:
+            fetched[graph_id] = await _within(registry.get_reference_ids(graph_id), deadline)
+        except Exception as exc:
+            partial = True
+            if _stops(exc):
+                break
+            logger.warning("Reference lookup failed for a seed", exc_info=True)
+    return fetched, partial
+
+
+async def _reference_ids(
+    redis: aioredis.Redis | None, graph_ids: list[str], deadline: float, *, fetch: bool = True
+) -> tuple[dict[str, set[str]], bool]:
+    """Reference paperIds of each paper (the papers it cites): the Redis
+    cache, then (with ``fetch``) one batch call, else paper by paper until
+    ``deadline``. Returns them with whether some could not be fetched."""
+    refs: dict[str, set[str]] = {}
+    missing: list[str] = []
+    for graph_id in dict.fromkeys(graph_ids):
+        cached = None
+        if redis is not None:
+            with contextlib.suppress(RedisError):
+                cached = await provider_cache.cache_get(
+                    redis, registry.CACHE_NAMESPACE, "references", "ids:" + graph_id
+                )
         if cached is not None:
-            return [PaperMetadataRead.model_validate(item) for item in cached]
-    if direction == "cites":
-        papers = await registry.list_referenced_papers(graph_id, order=order, limit=limit)
-    else:
-        papers = await registry.list_citing_papers(graph_id, order=order, limit=limit)
-    if papers:
-        papers = await paper_service.cache_papers(db, papers)
-    reads = [_read_from_metadata(p) for p in papers]
-    if redis is not None:
-        await provider_cache.cache_set(
-            redis,
-            registry.CACHE_NAMESPACE,
-            query_type,
-            cache_id,
-            [r.model_dump(mode="json") for r in reads],
-        )
-    return reads
+            refs[graph_id] = set(cached)
+        else:
+            missing.append(graph_id)
+    if not missing:
+        return refs, False
+    if not fetch:
+        return refs, True
 
-
-async def _fetch_referenced_ids(
-    db: AsyncSession, redis: aioredis.Redis | None, paper: PaperMetadataRead
-) -> set[str]:
-    """Graph authority IDs referenced by ``paper`` (i.e. papers it cites), Redis-cached."""
-    graph_id = await _resolve_graph_id(db, paper)
-    if not graph_id:
-        return set()
-    if redis is not None:
-        cached = await provider_cache.cache_get(
-            redis, registry.CACHE_NAMESPACE, "references", "ids:" + graph_id
-        )
-        if cached is not None:
-            return set(cached)
-    ids = await registry.get_reference_ids(graph_id)
-    if redis is not None:
-        await provider_cache.cache_set(
-            redis, registry.CACHE_NAMESPACE, "references", "ids:" + graph_id, sorted(set(ids))
-        )
-    return set(ids)
+    partial = False
+    fetched: dict[str, list[str]] = {}
+    try:
+        fetched = await _within(registry.references_batch(missing), deadline)
+    except Exception as exc:
+        logger.warning("Batch reference lookup failed", exc_info=True)
+        if _stops(exc):
+            # No single call would get through either.
+            partial = True
+        else:
+            fetched, partial = await _references_one_by_one(missing, deadline)
+    # A paper the provider does not know has no references to link.
+    for graph_id, ids in fetched.items():
+        refs[graph_id] = set(ids)
+        if redis is not None:
+            with contextlib.suppress(RedisError):
+                await provider_cache.cache_set(
+                    redis,
+                    registry.CACHE_NAMESPACE,
+                    "references",
+                    "ids:" + graph_id,
+                    sorted(refs[graph_id]),
+                )
+    return refs, partial
 
 
 async def saved_canonical_keys(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
@@ -356,6 +423,29 @@ async def library_seed_keys(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
     return [row[0] for row in q.all()]
 
 
+async def _resolve_single_seed(db: AsyncSession, canonical_key: str) -> str:
+    """Resolve an uncached seed with a strong key (DOI, Semantic Scholar,
+    arXiv, PubMed, PubMed Central) once, so a graph opened from such a link
+    shows the paper instead of a node titled with the raw key."""
+    if not canonical_key.startswith(_STRONG_PREFIXES):
+        return canonical_key
+    row = await paper_service.get_cached_paper(db, canonical_key)
+    if row is not None:
+        return row.canonical_key
+    prefix, _, value = canonical_key.partition(":")
+    if prefix == "doi":
+        if not DOI_RE.fullmatch(value):
+            return canonical_key
+        # A graph needs the record only: no doi.org check for a miss.
+        lookup = await registry.resolve_doi(value, confirm_missing=False)
+    else:
+        lookup = await registry.resolve_id(canonical_key)
+    if lookup.paper is None:
+        return canonical_key
+    # The upsert may keep an older key for the same work (alias merge).
+    return (await paper_service.cache_papers(db, [lookup.paper]))[0].canonical_key
+
+
 async def build_base_graph(
     db: AsyncSession,
     redis: aioredis.Redis | None,
@@ -365,11 +455,16 @@ async def build_base_graph(
 ) -> GraphResponse:
     """Graph of a set of saved papers + the citation edges *among them*.
 
-    Edges come from each seed's the graph authority’s references intersected with
-    the seed set (complete and bounded). Intra-set edges are persisted so the
+    Edges come from each seed's references at Semantic Scholar intersected
+    with the seed set (complete and bounded): seeds without a paperId are
+    looked up in one batch, references come from the Redis cache, then one
+    batch call, else seed by seed within the edge budget (``edges_partial``
+    when it runs out or a lookup fails). Intra-set edges are persisted so the
     next open is fast.
     """
     seed_keys = list(dict.fromkeys(seed_keys))
+    if len(seed_keys) == 1:
+        seed_keys = [await _resolve_single_seed(db, seed_keys[0])]
     canonical_cache: dict[str, PaperMetadataRead] = {}
     group_cache: dict[str, list[PaperMetadataRead]] = {}
     nodes: dict[str, GraphNode] = {}
@@ -404,36 +499,47 @@ async def build_base_graph(
         return paper
 
     seed_papers = [await ensure_node(key) for key in seed_keys]
+    # Edges only link two seed groups: a one-group graph needs no provider call.
+    edge_seeds = seed_papers if len(nodes) > 1 else []
 
-    graph_to_group: dict[str, str] = {}
-    for paper in seed_papers:
-        graph_id = await _resolve_graph_id(db, paper)
-        if graph_id:
-            graph_to_group[graph_id] = paper.paper_group_key
+    # Seed lookups and references share one budget; what it cannot cover is
+    # reported as partial edges instead of failing the graph.
+    deadline = time.monotonic() + _EDGE_BUDGET_SECONDS
+    failure = await _resolve_graph_ids(db, edge_seeds, deadline) if edge_seeds else None
+    partial = failure is not None
+    graph_to_group = {
+        paper.semantic_scholar_id: paper.paper_group_key
+        for paper in edge_seeds
+        if paper.semantic_scholar_id
+    }
+    refs: dict[str, set[str]] = {}
+    if graph_to_group:
+        # After a rate limit or a key problem only cached references are read.
+        fetch = failure is None or not _stops(failure)
+        refs, refs_partial = await _reference_ids(
+            redis, list(graph_to_group), deadline, fetch=fetch
+        )
+        partial = partial or refs_partial
 
     edges: set[tuple[str, str, str]] = set()
-    edges_to_store: list[dict] = []
-    for paper in seed_papers:
-        if not paper.semantic_scholar_id:
-            continue
-        ref_ids = await _fetch_referenced_ids(db, redis, paper)
-        for ref_id in ref_ids:
+    edges_to_store: dict[tuple[str, str], dict] = {}
+    for paper in edge_seeds:
+        for ref_id in sorted(refs.get(paper.semantic_scholar_id or "", ())):
             cited_group = graph_to_group.get(ref_id)
             if cited_group is None or cited_group == paper.paper_group_key:
                 continue
             edges.add((paper.paper_group_key, cited_group, CITED_BY))
             cited_node = nodes.get(cited_group)
             if cited_node is not None:
-                edges_to_store.append(
-                    {
-                        "source_key": paper.canonical_key,
-                        "target_key": cited_node.selected_version.canonical_key,
-                        "relation_type": CITED_BY,
-                        "provider_source": registry.PRIMARY_PROVIDER,
-                    }
-                )
+                target = cited_node.selected_version.canonical_key
+                edges_to_store[(paper.canonical_key, target)] = {
+                    "source_key": paper.canonical_key,
+                    "target_key": target,
+                    "relation_type": CITED_BY,
+                    "provider_source": registry.PRIMARY_PROVIDER,
+                }
     if edges_to_store:
-        await store_edges(db, edges_to_store)
+        await store_edges(db, list(edges_to_store.values()))
 
     first = seed_papers[0] if seed_papers else None
     return GraphResponse(
@@ -441,72 +547,5 @@ async def build_base_graph(
         active_paper_group_key=first.paper_group_key if first else "",
         nodes=list(nodes.values()),
         edges=[GraphEdge(source=s, target=t, relation_type=r) for s, t, r in sorted(edges)],
-    )
-
-
-async def expand_graph(
-    db: AsyncSession,
-    redis: aioredis.Redis | None,
-    *,
-    from_keys: list[str],
-    focus_key: str | None = None,
-    existing_group_keys: list[str] | None = None,
-    direction: str = "cited_by",
-    order: str = "cited_by_count",
-    limit_per_node: int = 25,
-    saved_keys: set[str] | None = None,
-) -> ExpandResponse:
-    """Grow the graph by one citation level. ``direction="cited_by"`` adds papers
-    that *cite* the chosen nodes (edge citer → node); ``direction="cites"`` adds
-    papers they *reference* (edge node → reference). Edges are always stored
-    citing→cited (``relation_type="cited_by"``). Returns only new nodes plus the
-    edges (including edges onto nodes already on screen). Persists an edge only
-    when both endpoints are saved papers."""
-    existing = set(existing_group_keys or [])
-    saved = saved_keys or set()
-    targets = [focus_key] if focus_key else list(dict.fromkeys(from_keys))
-    cites = direction == "cites"
-
-    new_nodes: dict[str, GraphNode] = {}
-    edges: set[tuple[str, str, str]] = set()
-    edges_to_store: list[dict] = []
-
-    for from_key in targets:
-        if not from_key:
-            continue
-        from_paper = await _resolve_read(db, from_key)
-        from_group = from_paper.paper_group_key
-        related = await fetch_related(
-            db, redis, from_paper, direction=direction, order=order, limit=limit_per_node
-        )
-        for other in related:
-            ogroup = other.paper_group_key
-            if ogroup == from_group:
-                continue
-            # Always citing → cited. In "cites" mode the seed is the citer;
-            # in "cited_by" mode the discovered paper is the citer.
-            if cites:
-                src_group, tgt_group = from_group, ogroup
-                src_key, tgt_key = from_key, other.canonical_key
-            else:
-                src_group, tgt_group = ogroup, from_group
-                src_key, tgt_key = other.canonical_key, from_key
-            edges.add((src_group, tgt_group, CITED_BY))
-            if ogroup not in existing and ogroup not in new_nodes:
-                new_nodes[ogroup] = _node_from_read(other)
-            if src_key in saved and tgt_key in saved:
-                edges_to_store.append(
-                    {
-                        "source_key": src_key,
-                        "target_key": tgt_key,
-                        "relation_type": CITED_BY,
-                        "provider_source": registry.PRIMARY_PROVIDER,
-                    }
-                )
-    if edges_to_store:
-        await store_edges(db, edges_to_store)
-
-    return ExpandResponse(
-        nodes=list(new_nodes.values()),
-        edges=[GraphEdge(source=s, target=t, relation_type=r) for s, t, r in sorted(edges)],
+        edges_partial=partial,
     )

@@ -6,6 +6,7 @@ user's library. Do not record credentials or raw HTTP responses in test output.
 
 import os
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -13,7 +14,9 @@ from pydantic import SecretStr
 
 from app.config import Settings, settings
 from app.dependencies import get_db
+from app.graph import related
 from app.graph import service as graph_service
+from app.graph.schemas import RelatedRangeRequest
 from app.main import create_app
 from app.papers import service
 from app.providers import registry
@@ -82,36 +85,46 @@ async def test_live_titans_discovery_pipeline(db, live_provider):
     )
 
 
-async def test_live_titans_graph_pipeline(db, live_provider, monkeypatch, redis_backend):
+async def test_live_titans_graph_pipeline(db, live_provider, redis_backend):
     meta = await registry.lookup_by_id(S2_ID)
     meta = (await service.cache_papers(db, [meta]))[0]
     reference = None
     for direction in ("cites", "cited_by"):
-        # Force multi-page references; use normal production size for citations.
-        monkeypatch.setattr(
-            "app.providers.semantic_scholar.GRAPH_PAGE_SIZE", 100 if direction == "cites" else 1000
+        req = RelatedRangeRequest(
+            source_key=meta.canonical_key,
+            source_group_key=meta.paper_group_key,
+            direction=direction,
         )
-        graph = await graph_service.expand_graph(
-            db, redis_backend, from_keys=[meta.canonical_key], direction=direction, limit_per_node=5
-        )
-        assert graph.nodes and graph.edges
-        if direction == "cites":
-            reference = graph.nodes[0].selected_version
-        ids = [n.selected_version.semantic_scholar_id for n in graph.nodes]
+        source = await related.load_source(db, req.source_key, req.source_group_key)
+        # One request collects up to 4,000 records; ask again, as the client
+        # does, while the list is still being ranked.
+        for _ in range(3):
+            ranged = await related.related_range(db, redis_backend, req, source, set())
+            if ranged.reason != "ranking":
+                break
+        assert ranged.reason is None
+        # The total is exact once the ranked list fits one 1,000-entry chunk.
+        assert ranged.total_exact or ranged.scanned > 1000
+        assert ranged.nodes and ranged.edges and ranged.provider_total
+        counts = [n.selected_version.cited_by_count or 0 for n in ranged.nodes]
+        assert counts == sorted(counts, reverse=True)
+        ids = [n.selected_version.semantic_scholar_id for n in ranged.nodes]
         assert len(ids) == len(set(ids))
-    read = service.cached_paper_to_read(await service.get_cached_paper(db, meta.canonical_key))
-    refs = await graph_service._fetch_referenced_ids(db, redis_backend, read)
-    assert refs and reference.semantic_scholar_id in refs
-    # Reuse expansion metadata and ID cache as in normal application workflows.
+        if direction == "cites":
+            reference = ranged.nodes[0].selected_version
+    refs = await registry.references_batch([S2_ID])
+    assert reference.semantic_scholar_id in refs[S2_ID]
+    # Reuse range metadata and the reference-id cache as the application does.
     base = await graph_service.build_base_graph(
         db, redis_backend, [meta.canonical_key, reference.canonical_key]
     )
+    assert not base.edges_partial
     assert any(
         e.source == meta.paper_group_key and e.target == reference.paper_group_key
         for e in base.edges
     )
     print(
-        f"Titans: {len(refs)} unique reference IDs; paginated references, citations, both expansion directions and base graph edges passed."
+        f"Titans: {len(refs[S2_ID])} reference IDs; ranked citation and reference ranges and base graph edges passed."
     )
 
 
@@ -121,5 +134,28 @@ async def test_live_invalid_key(live_provider, monkeypatch):
     )
     with pytest.raises(ProviderError) as error:
         await registry.lookup_by_id(S2_ID)
-    assert error.value.status_code == 503 and "rejected" in error.value.detail
+    assert error.value.status_code == 503 and error.value.code == "provider_key_rejected"
     print("Live invalid-key rejection passed.")
+
+
+async def test_live_batch_bulk_and_related_paging(live_provider):
+    doi = "10.1109/tnn.2008.2005605"
+    found, missing = await registry.papers_by_ids(["DOI:" + doi, "DOI:10.9999/missing.x"])
+    assert found is not None and found.doi == doi and missing is None
+    resolved = await registry.resolve_dois([doi])
+    assert resolved[doi].status == "found"
+    refs = await registry.references_batch([found.semantic_scholar_id])
+    assert len(refs[found.semantic_scholar_id]) > 50
+    # "Attention Is All You Need" has far more than 10,000 citers.
+    (attention,) = await registry.papers_by_ids(["ARXIV:1706.03762"])
+    page = await registry.related_page(attention.semantic_scholar_id, "cited_by", offset=9000)
+    assert page.capped and page.exhausted and len(page.entries) > 900
+    assert all(entry[1].startswith(("doi:", "s2:")) for entry in page.entries)
+    batch = await registry.search_sorted("graph neural networks", sort="citations")
+    assert batch.total > 1000 and batch.token and len(batch.items) > 900
+    counts = [p.cited_by_count or 0 for p in batch.items]
+    assert counts[:50] == sorted(counts[:50], reverse=True)
+    recent = await registry.search_sorted("graph neural networks", sort="date")
+    today = datetime.now(UTC).date()
+    assert all(p.publication_date is None or p.publication_date <= today for p in recent.items)
+    print("Batch lookup, batch references, capped citation paging and bulk sorts passed.")

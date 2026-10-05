@@ -1,91 +1,289 @@
 @layer pages {
+  /* The page measures itself: the index moves above the content, and rows
+     stack, when the column is narrow (tablet rail, 200% text). */
   .settings {
+    container: settings / inline-size;
+    /* Theme previews depict each theme's own ground and side panel, so they
+       keep those values whichever theme is active. Values follow the approved
+       mockup (the dark side uses the surface tone so it reads at thumbnail
+       size); they move to theme-independent tokens in tokens.css later. */
+    --settings-preview-light-ground: #f8faf9;
+    --settings-preview-light-side: #fbfcfb;
+    --settings-preview-dark-ground: #101413;
+    --settings-preview-dark-side: #171f1d;
+  }
+
+  .settings-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2xl);
+    margin-top: 28px;
+  }
+
+  /* Section index: a hairline on the left marks the current section. */
+  .settings-index {
+    flex: 0 0 200px;
+    position: sticky;
+    top: calc(var(--nav-height) + var(--space-lg));
+  }
+  .settings-index-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    max-width: 560px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
-
-  .settings h1 {
-    font-family: var(--font-serif);
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -0.01em;
-    margin-bottom: var(--space-xs);
-  }
-
-  .settings-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-  }
-
-  .settings-section h2 {
+  .settings-index-link {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    font-size: 0.95rem;
-    font-weight: 600;
+    min-height: var(--control-min);
+    padding: 6px 12px;
+    border-left: 2px solid transparent;
+    color: var(--color-text-secondary);
+    font-size: var(--text-md);
+    line-height: var(--leading-snug);
+    text-decoration: none;
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .settings-index-link:hover {
+    color: var(--color-text);
+    border-left-color: var(--color-border-strong);
+    text-decoration: none;
+  }
+  .settings-index-link[aria-current="true"] {
+    border-left-color: var(--color-accent);
+    color: var(--color-text);
+    font-weight: 500;
+  }
+  .settings-index-link--danger,
+  .settings-index-link--danger:hover,
+  .settings-index-link--danger[aria-current="true"] {
+    color: var(--color-danger);
+  }
+  .settings-index-link:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
+  .settings-content {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  @container settings (max-width: 44em) {
+    .settings-layout {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--space-lg);
+    }
+    /* The index becomes a scrolling row of tabs-like links. The scroller
+       clips, so the hairline is drawn inside it (the links' 2px underline
+       paints over it), the focus ring is inset, and a thin scrollbar shows
+       that later entries are off-screen. */
+    .settings-index {
+      position: static;
+      flex: none;
+    }
+    .settings-index-list {
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+      box-shadow: inset 0 -1px 0 var(--color-hairline);
+    }
+    .settings-index-link {
+      white-space: nowrap;
+      border-left: 0;
+      border-bottom: 2px solid transparent;
+    }
+    .settings-index-link:hover {
+      border-bottom-color: var(--color-border-strong);
+    }
+    .settings-index-link[aria-current="true"] {
+      border-bottom-color: var(--color-accent);
+    }
+    .settings-index-link:focus-visible {
+      box-shadow: inset 0 0 0 2px var(--color-accent);
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    }
+  }
+
+  /* Sections: a serif heading over the ink rule (ui/SectionHeading). */
+  .settings-section {
+    scroll-margin-top: calc(var(--nav-height) + var(--space-lg));
+  }
+  .settings-section--danger .section-heading-title {
+    color: var(--color-danger);
+  }
+  .settings-section-description {
+    padding-top: var(--space-md);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+  }
+  /* Deep-linked sections (#zotero, #your-data) take focus programmatically. */
+  .settings-section:focus,
+  .settings-row:focus {
+    outline: none;
+  }
+  /* An offset outline, clear of the label and the controls, which sit
+     flush with the target's edges (the phone gutter is 16px, so 6px fits). */
+  .settings-section:focus-visible,
+  .settings-row:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+    outline-offset: 6px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Rows: label and description left, the control right; they stack when
+     the column cannot hold both at a readable width. */
+  .settings-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+    align-items: start;
+    gap: var(--space-md) var(--space-xl);
+    padding: 20px 0;
+    border-bottom: 1px solid var(--color-hairline);
+    scroll-margin-top: calc(var(--nav-height) + var(--space-lg));
+  }
+  .settings-row-text {
+    min-width: 0;
+  }
+  .settings-row-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--text-md);
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .settings-row-icon {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+  }
+  .settings-row-description {
+    margin-top: 4px;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .settings-row-control {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    padding-top: var(--space-md);
+  }
+
+  .settings-value {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-sm);
+    min-height: var(--control-min);
+    font-size: var(--text-md);
+  }
+  .settings-email {
+    overflow-wrap: anywhere;
+  }
+  .settings-verified {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    color: var(--color-accent);
+    white-space: nowrap;
+  }
+  .settings-status {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
   .settings-field {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    font-size: 0.84rem;
+    font-size: var(--text-sm);
     font-weight: 500;
   }
-
-  .settings-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-  }
-
-  .settings-label {
-    font-size: 0.84rem;
-    font-weight: 500;
-    min-width: 70px;
-  }
-
-  .settings-saved {
-    font-size: 0.84rem;
-    color: var(--color-success);
-  }
-
   .settings-hint {
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: 1.5;
+    /* A bare URL (zotero.org/settings/keys) wraps at large text sizes. */
+    overflow-wrap: anywhere;
   }
-
   .settings-self-start {
     align-self: flex-start;
   }
+  .settings-external {
+    display: inline;
+    margin-left: 2px;
+    vertical-align: -1px;
+  }
 
+  .settings-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm) var(--space-md);
+  }
   .settings-zotero-status {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    font-size: 0.85rem;
+    min-width: 0;
+    font-size: var(--text-md);
   }
   .settings-zotero-status svg {
+    flex-shrink: 0;
     color: var(--color-success);
   }
   .settings-zotero-status code {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
   }
 
-  .settings-zotero-form {
+  /* A quiet margin note, not a boxed alert. */
+  .settings-notice {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-xs);
+    margin-top: var(--space-md);
+    padding: 2px 0 2px var(--space-md);
+    border-left: 2px solid var(--color-warning);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--color-text);
   }
-
-  .settings-danger h2 {
-    color: var(--color-danger);
+  p.settings-notice {
+    display: block;
+  }
+  .settings-notice a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    align-self: flex-start;
   }
 
   .settings-danger-btn {
@@ -96,5 +294,216 @@
   .settings-danger-btn:hover:not(:disabled) {
     background: var(--color-danger-soft);
     border-color: var(--color-danger);
+  }
+
+  /* Theme: preview cards in a radio group. */
+  .settings-theme-cards {
+    display: grid;
+    /* Three across as in the mockup; they wrap only when a card would be
+       narrower than 4rem (200% text in a phone-width column). */
+    grid-template-columns: repeat(auto-fit, minmax(min(4rem, 100%), 1fr));
+    gap: 10px;
+  }
+  .settings-theme-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-height: var(--control-min);
+    padding: var(--space-sm);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    text-align: center;
+    cursor: pointer;
+    transition:
+      border-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+  }
+  .settings-theme-card:hover {
+    border-color: var(--color-text-muted);
+  }
+  /* Selected: a 2px accent outline (border plus inset ring, no layout shift). */
+  .settings-theme-card[aria-checked="true"] {
+    border-color: var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--color-accent);
+  }
+  .settings-theme-card:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .settings-theme-card[aria-checked="true"]:focus-visible {
+    box-shadow:
+      inset 0 0 0 1px var(--color-accent),
+      var(--focus-ring);
+  }
+  .settings-theme-preview {
+    display: block;
+    height: 54px;
+    border-radius: calc(var(--radius-sm) - 2px);
+    border: 1px solid var(--color-hairline);
+  }
+  .settings-theme-preview--light {
+    background: linear-gradient(
+      90deg,
+      var(--settings-preview-light-side) 30%,
+      var(--settings-preview-light-ground) 30%
+    );
+  }
+  .settings-theme-preview--dark {
+    background: linear-gradient(
+      90deg,
+      var(--settings-preview-dark-side) 30%,
+      var(--settings-preview-dark-ground) 30%
+    );
+  }
+  .settings-theme-preview--system {
+    background: linear-gradient(
+      135deg,
+      var(--settings-preview-light-ground) 50%,
+      var(--settings-preview-dark-ground) 50%
+    );
+  }
+
+  .settings-language {
+    align-self: flex-start;
+  }
+
+  /* Phones: the page's own title bar replaces the app bar. It bleeds over
+     the container's phone padding (--space-lg top, --space-md sides). */
+  .settings-mobile-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    /* The back button's focus ring keeps clear of the title. */
+    gap: var(--space-sm);
+    min-height: 56px;
+    margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-md)) var(--space-md);
+    padding: 0 var(--space-md);
+    padding-left: max(var(--space-md), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-md), env(safe-area-inset-right, 0px));
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-sidebar);
+  }
+  .settings--drilled .settings-mobile-header {
+    padding-left: max(var(--space-xs), env(safe-area-inset-left, 0px));
+  }
+  .settings-mobile-title {
+    min-width: 0;
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    line-height: var(--leading-tight);
+    overflow-wrap: anywhere;
+  }
+  .settings-back {
+    flex-shrink: 0;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    color: var(--color-text);
+  }
+  /* The title bar names the open section; its heading stays for assistive
+     technology (the section's accessible name) but is not shown twice. */
+  .settings--drilled .settings-section > .section-heading {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .settings--drilled .settings-section-description {
+    padding-top: 0;
+  }
+
+  /* Phone index: the account, then a drill-in list under the ink rule. */
+  .settings-account {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: var(--space-xs) var(--space-xs) 18px;
+  }
+  .settings-avatar {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-size: 1.0625rem;
+    font-weight: 600;
+  }
+  .settings-account-text {
+    min-width: 0;
+  }
+  .settings-account-name {
+    font-size: var(--text-base);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .settings-account-email {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px var(--space-sm);
+    margin-top: 2px;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .settings-drill-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--color-rule);
+  }
+  .settings-drill-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 56px;
+    padding: var(--space-sm) var(--space-xs);
+    border-bottom: 1px solid var(--color-hairline);
+    color: var(--color-text);
+    font-size: 0.9375rem;
+    text-decoration: none;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  .settings-drill-item:hover,
+  .settings-drill-item:active {
+    background: var(--color-hover-quiet);
+    color: var(--color-text);
+    text-decoration: none;
+  }
+  .settings-drill-item:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+    border-radius: var(--radius-sm);
+  }
+  /* At large text the hint wraps first: the label (a short section name)
+     keeps whole words, "Integrazioni" never splits mid-word. */
+  .settings-drill-label {
+    flex: 1 1 auto;
+    min-width: min-content;
+  }
+  .settings-drill-item--danger .settings-drill-label {
+    color: var(--color-danger);
+  }
+  .settings-drill-hint {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    text-align: right;
+  }
+  .settings-drill-chevron {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
   }
 }

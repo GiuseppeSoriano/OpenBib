@@ -1,0 +1,80 @@
+@layer components {
+  .library-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .library-filters-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .library-filters-search {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 36rem;
+  }
+
+  /* The chips' and buttons' height: one 34px rhythm down the toolbar. */
+  .library-filters-search .input {
+    min-height: var(--control-min);
+    padding-left: calc(var(--space-md) + 1.375rem);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* The clear button replaces the browser's own, which not every engine draws. */
+  .library-filters-search .input:has(+ .library-filters-clear) {
+    padding-right: calc(var(--control-min) + var(--space-xs));
+  }
+  .library-filters-search .input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  .library-filters-clear {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    min-width: var(--control-min);
+    min-height: var(--control-min);
+    padding: 0;
+  }
+
+  .library-filters-search-icon {
+    position: absolute;
+    left: var(--space-md);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    pointer-events: none;
+  }
+
+  .library-filters-panel[hidden] {
+    display: none;
+  }
+
+  /* Long tag and collection lists scroll inside the popover. */
+  .library-filters-popover {
+    max-height: min(20rem, 60vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .library-filters-active {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-xs);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  @media (max-width: 639px), (max-height: 500px) {
+    .library-filters-search {
+      max-width: none;
+    }
+  }
+}

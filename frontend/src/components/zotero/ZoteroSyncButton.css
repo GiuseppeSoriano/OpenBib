@@ -1,0 +1,15 @@
+@layer components {
+  .zotero-connect {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-sm);
+  }
+
+  .zotero-hint {
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+    max-width: 34ch;
+  }
+}

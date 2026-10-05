@@ -167,6 +167,6 @@ The MVP targets < 100 users, but the architecture enables future scaling:
 | **Configuration** | All configuration via environment variables (12-factor app). `.env` file for local development. |
 | **Local development** | Single `docker compose up` starts the entire stack. Hot-reload enabled for both backend and frontend. |
 | **Production readiness** | Dockerfile uses multi-stage builds. Non-root container user. No dev dependencies in production image. |
-| **Backup** | PostgreSQL data persisted on Docker volume. Backup script included for `pg_dump`. |
+| **Backup** | PostgreSQL data persisted on Docker volume. Opt-in `backup` compose profile (scheduled, verified `pg_dump` with optional encryption, local copies only; retention `BACKUP_RETENTION_DAYS`, default 30, which keeps a dump up to about 32 days, so set 28 to meet the 30-day maximum above) and restore runbook in [Backups](../Operations/Backups.md). |
 
 Current implemented sharing contract: [Collection sharing](../Architecture/CollectionSharing.md).

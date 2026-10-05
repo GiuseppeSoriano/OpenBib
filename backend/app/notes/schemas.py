@@ -4,7 +4,9 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.common.identifiers import normalize_paper_key
 
 
 class TargetType(str, Enum):
@@ -17,6 +19,12 @@ class NoteCreate(BaseModel):
     target_type: TargetType
     target_key: str = Field(max_length=512)
     content: str = Field(min_length=1, max_length=50000)
+
+    @model_validator(mode="after")
+    def normalize_paper_target(self):
+        if self.target_type == TargetType.paper:
+            self.target_key = normalize_paper_key(self.target_key)
+        return self
 
 
 class NoteUpdate(BaseModel):

@@ -9,6 +9,7 @@ from httpx import Response
 
 from app.auth.service import hash_password
 from app.common.exceptions import ConflictError
+from app.papers.models import CachedPaperMetadata
 from app.papers.service import cache_papers
 from app.providers.base import Author, PaperMetadata
 from app.users.models import User
@@ -271,3 +272,16 @@ async def test_failures_are_reported_not_raised(db):
     messages = {f.paper_canonical_key: f.message for f in report.failures}
     assert messages["doi:10.4/ok"] == "Rejected by Zotero"
     assert "No cached metadata" in messages["hash:nometadata"]
+
+
+def test_item_payload_uses_plain_text_title_and_abstract():
+    row = CachedPaperMetadata(
+        canonical_key="doi:10.9/markup",
+        paper_group_key="group:markup",
+        title="Odor <i>coding</i>",
+        abstract="<h4>Background</h4>Old &amp; raw.",
+        paper_type="journal-article",
+    )
+    item = zotero_service.item_from_cached(row, "COLL1")
+    assert item["title"] == "Odor coding"
+    assert item["abstractNote"] == "Background: Old & raw."

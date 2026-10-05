@@ -5,56 +5,86 @@
     gap: var(--space-lg);
   }
 
-  .library-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--space-md);
+  .library-header h1:focus {
+    outline: none;
+  }
+  .library-header h1:focus-visible {
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
   }
 
-  .library-header h1 {
-    font-family: var(--font-serif);
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -0.01em;
-  }
-
-  .library-subtitle {
-    font-size: 0.85rem;
+  .library-count {
+    margin-bottom: calc(-1 * var(--space-sm));
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    max-width: 560px;
-    margin-top: var(--space-xs);
+  }
+  /* The status region stays rendered (and announced) while empty: cancel the
+     flex gap it would add instead of hiding it. */
+  .library-count:empty {
+    margin-block: calc(-1 * var(--space-lg)) 0;
   }
 
-  .library-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
+  .library-list[hidden] {
+    display: none;
   }
 
-  .library-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+  .library-row {
+    padding-block: 18px;
   }
 
   .library-entry-tags {
+    list-style: none;
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-xs);
     margin-top: var(--space-xs);
   }
 
+  /* Delete sits apart from the other row actions, at the far end. */
   .library-delete {
     margin-left: auto;
   }
-  .library-delete:hover {
+  .library-delete:hover:not(:disabled) {
     color: var(--color-danger);
     background: var(--color-danger-soft);
   }
 
-  .library-entry-fallback {
-    padding: var(--space-md) var(--space-lg);
+  .library-blocking {
+    list-style: none;
+    margin-bottom: var(--space-md);
+    border-top: 1px solid var(--color-hairline);
+    font-size: var(--text-md);
+  }
+  .library-blocking li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--color-hairline);
+    overflow-wrap: anywhere;
+  }
+  .library-blocking a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .library-blocking-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border-left: 3px solid var(--color-warning);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--color-warning-soft);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .library-blocking-warning svg {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--color-warning);
   }
 }

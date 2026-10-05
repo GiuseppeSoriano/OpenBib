@@ -1,0 +1,89 @@
+@layer components {
+  /* A paper whose details are missing: a row marked by a dashed warning rule
+     instead of a boxed card, its recovery actions quiet like the others. */
+  .unresolved-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: 2px 0 2px 14px;
+    border: 0;
+    border-left: 2px dashed var(--color-warning);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .unresolved-card .paper-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-lg);
+    font-style: italic;
+    font-weight: 600;
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+  }
+  .unresolved-card .paper-title-btn:hover {
+    color: var(--color-accent);
+  }
+
+  .unresolved-card .paper-identifier {
+    font-size: var(--text-md);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .unresolved-card .paper-identifier-link {
+    display: inline;
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .unresolved-card .paper-identifier-link svg {
+    display: inline;
+    margin-left: 3px;
+    vertical-align: -1px;
+  }
+
+  .unresolved-explanation,
+  .unresolved-card .paper-unresolved-status {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    max-width: 70ch;
+  }
+
+  .unresolved-card .paper-field-error {
+    font-size: var(--text-sm);
+    color: var(--color-danger);
+  }
+
+  .unresolved-card .paper-fix-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+    max-width: 40rem;
+  }
+  .unresolved-card .paper-fix-form label {
+    font-size: var(--text-sm);
+    font-weight: 500;
+  }
+  .unresolved-card .paper-fix-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+  .unresolved-card .paper-fix-row .input {
+    flex: 1 1 14rem;
+    min-width: 0;
+  }
+  .unresolved-card .paper-fix-form .input[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+
+  /* Quiet actions start flush with the text above them. */
+  .unresolved-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    margin: var(--space-xs) 0 0 -8px;
+  }
+}

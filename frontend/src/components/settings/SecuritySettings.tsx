@@ -6,6 +6,7 @@ import type { AxiosError } from "axios";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { changeSession } from "@/lib/session";
+import SettingsSection from "./SettingsSection";
 import "./SecuritySettings.css";
 
 type SecurityAction = "email" | "password" | "sessions";
@@ -13,7 +14,6 @@ type SecurityAction = "email" | "password" | "sessions";
 export default function SecuritySettings() {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const headingId = useId();
   const [action, setAction] = useState<SecurityAction | null>(null);
   const [notice, setNotice] = useState("");
   const lastAction = useRef<SecurityAction | null>(null);
@@ -36,11 +36,7 @@ export default function SecuritySettings() {
   ];
 
   return (
-    <section className="card settings-security" aria-labelledby={headingId}>
-      <header className="settings-security-header">
-        <h2 id={headingId}>{t("settings.security")}</h2>
-        <p className="settings-hint">{t("settings.securityDescription")}</p>
-      </header>
+    <SettingsSection id="security" title={t("settings.security")} description={t("settings.securityDescription")}>
       {notice && <p className="settings-security-notice" role="status">{notice}</p>}
       {action ? (
         <SecurityEditor
@@ -53,7 +49,7 @@ export default function SecuritySettings() {
         <dl className="settings-security-list">
           {rows.map(({ key, icon: Icon, title, description, button }) => (
             <div className="settings-security-row" key={key}>
-              <dt><Icon size={18} aria-hidden="true" />{title}</dt>
+              <dt><Icon size={16} aria-hidden="true" />{title}</dt>
               <dd className="settings-security-description">{description}
                 {key === "email" && user?.email_verified && (
                   <span className="settings-security-verified"><CheckCircle2 size={13} aria-hidden="true" />{t("settings.emailVerified")}</span>
@@ -66,7 +62,7 @@ export default function SecuritySettings() {
           ))}
         </dl>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 

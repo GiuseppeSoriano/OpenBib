@@ -34,3 +34,49 @@ export function renderWithProviders(ui: ReactElement, { route = "/" }: RenderOpt
     </QueryClientProvider>,
   );
 }
+
+type MediaListener = (event: MediaQueryListEvent) => void;
+
+const originalMatchMedia = window.matchMedia;
+
+/**
+ * Replace `window.matchMedia` so `matches(query)` decides every query.
+ * `set()` swaps the predicate and notifies listeners whose result changed
+ * (a live resize). Undo it with `restoreMatchMedia()` in an `afterEach`.
+ */
+export function mockMatchMedia(matches: (query: string) => boolean) {
+  let predicate = matches;
+  const lists: { query: string; matches: boolean; listeners: Set<MediaListener> }[] = [];
+  window.matchMedia = (query: string) => {
+    const entry = { query, matches: predicate(query), listeners: new Set<MediaListener>() };
+    lists.push(entry);
+    const list = {
+      get matches() {
+        return predicate(query);
+      },
+      media: query,
+      onchange: null,
+      addListener: (listener: MediaListener) => entry.listeners.add(listener),
+      removeListener: (listener: MediaListener) => entry.listeners.delete(listener),
+      addEventListener: (_type: string, listener: MediaListener) => entry.listeners.add(listener),
+      removeEventListener: (_type: string, listener: MediaListener) => entry.listeners.delete(listener),
+      dispatchEvent: () => false,
+    };
+    return list as unknown as MediaQueryList;
+  };
+  return {
+    set(next: (query: string) => boolean) {
+      predicate = next;
+      for (const entry of lists) {
+        const now = predicate(entry.query);
+        if (now === entry.matches) continue;
+        entry.matches = now;
+        for (const listener of entry.listeners) listener({ matches: now, media: entry.query } as MediaQueryListEvent);
+      }
+    },
+  };
+}
+
+export function restoreMatchMedia() {
+  window.matchMedia = originalMatchMedia;
+}

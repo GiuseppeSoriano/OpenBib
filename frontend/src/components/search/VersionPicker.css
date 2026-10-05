@@ -1,0 +1,16 @@
+@layer components {
+  .version-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+  }
+
+  /* Scoped so it outranks the base .pill padding regardless of load order. */
+  .version-picker .pill--sm {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.6rem;
+    min-height: var(--control-min);
+    text-align: left;
+  }
+}
