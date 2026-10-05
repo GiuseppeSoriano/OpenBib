@@ -1,0 +1,6 @@
+# gitleaks false positives (generic-api-key), reviewed: not secrets.
+# test_collection_papers_hydrated.py: a variable named token holding a read-link token the test creates.
+# check_migrations.py: KEY_REPAIR_FROM is an Alembic revision id.
+d901d05c9c0f860a28b98b03f141062ea06af833:backend/tests/test_collection_papers_hydrated.py:generic-api-key:156
+d901d05c9c0f860a28b98b03f141062ea06af833:backend/tests/test_collection_papers_hydrated.py:generic-api-key:165
+69558bb1f417c6665aaf434b6463997b515ea036:backend/scripts/check_migrations.py:generic-api-key:128
