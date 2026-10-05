@@ -22,9 +22,9 @@ from app.common.exceptions import InvalidIdentifierError
 # DOIs are messy and test fixtures use short forms such as ``10.1/x``.
 DOI_RE = re.compile(r"^10\.\d+(?:\.\d+)*/\S+$")
 
-# Whitespace (``\s`` includes NBSP) plus the zero-width characters that ride
-# along with copy/paste.
-_EDGE_RE = re.compile(r"^[\s\u200b\u200c\u200d\u2060\ufeff]+|[\s\u200b\u200c\u200d\u2060\ufeff]+$")
+# Zero-width characters that ride along with copy/paste; whitespace
+# (``str.isspace``, which includes NBSP) is stripped as well.
+_ZERO_WIDTH = "\u200b\u200c\u200d\u2060\ufeff"
 _PREFIX_RE = re.compile(
     r"^(?:https?://(?:dx\.|www\.)?doi\.org/|(?:dx\.|www\.)?doi\.org/|doi:\s*|doi\s+)",
     re.IGNORECASE,
@@ -55,7 +55,13 @@ STRONG_PREFIXES = ("s2:", "arxiv:", "pmid:", "pmcid:")
 
 
 def _strip_edges(value: str) -> str:
-    return _EDGE_RE.sub("", value)
+    # str.strip, not a trailing ``[...]+$`` regex: that one backtracks
+    # quadratically on long inner runs of whitespace (user input).
+    previous = None
+    while previous != value:
+        previous = value
+        value = value.strip().strip(_ZERO_WIDTH)
+    return value
 
 
 def strip_doi_prefixes(value: str, *, decode: bool = False) -> str:

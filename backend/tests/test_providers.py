@@ -405,3 +405,17 @@ def test_semantic_scholar_pmcid_is_stored_in_key_form():
 def test_identity_doi_normalization_matches_doi_input(raw):
     assert identity.normalize_doi(raw) == "10.1/x"
     assert semantic_scholar.s2_identifier("doi:" + raw) == "DOI:10.1/x"
+
+
+def test_crossref_pdf_needs_a_creative_commons_licence_host():
+    pdf = [{"URL": "https://pub.example/a.pdf", "content-type": "application/pdf"}]
+    ok = crossref._map_work(_crossref_work(license=CC_BY, link=pdf))
+    assert ok.pdf_url == "https://pub.example/a.pdf"
+    # A licence URL that only mentions creativecommons.org is not a CC licence.
+    for url in (
+        "https://evil.example/?creativecommons.org",
+        "https://creativecommons.org.evil.example/licenses/by/4.0/",
+        "http://[bad",
+    ):
+        spoofed = crossref._map_work(_crossref_work(license=[{"URL": url}], link=pdf))
+        assert spoofed.pdf_url is None, url

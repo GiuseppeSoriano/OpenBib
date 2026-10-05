@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import ClassVar
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -55,11 +55,21 @@ def _params() -> dict:
     return p
 
 
+def _is_creative_commons(url: str | None) -> bool:
+    """True when the licence URL's host is creativecommons.org, not merely a
+    URL that mentions it somewhere."""
+    try:
+        host = (urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "creativecommons.org" or host.endswith(".creativecommons.org")
+
+
 def _pdf_link(raw: dict) -> str | None:
     """A PDF link only when it is openly licensed and meant for readers:
     publisher text-mining feeds and paywalled PDFs are not full text for users."""
     licenses = raw.get("license") or []
-    if not any("creativecommons.org" in (lic.get("URL") or "").lower() for lic in licenses):
+    if not any(_is_creative_commons(lic.get("URL")) for lic in licenses):
         return None
     for link in raw.get("link") or []:
         if (link.get("content-type") or "").lower() != "application/pdf":

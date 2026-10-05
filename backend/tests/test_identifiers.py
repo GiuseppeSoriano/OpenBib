@@ -174,3 +174,10 @@ def test_strong_keys_pass_through_normalization():
     assert normalize_paper_key("openalex:W123") == "openalex:W123"
     for _raw, _kind, key in STRONG:
         assert normalize_paper_key(key) == key
+
+
+def test_edge_stripping_is_linear_on_long_inner_whitespace():
+    # A trailing-whitespace regex backtracks quadratically here; str.strip does not.
+    noisy = "10.1/x" + " \t" * 50_000 + "y"
+    assert strip_doi_prefixes(noisy) == noisy
+    assert strip_doi_prefixes("​  doi:10.1/X ﻿\t") == "10.1/X"
