@@ -3,12 +3,48 @@ updates:
   - package-ecosystem: uv
     directory: /backend
     schedule: { interval: weekly }
+    open-pull-requests-limit: 3
+    # Restrict routine version bumps, not security updates requiring a newer major.
+    allow:
+      - dependency-name: "*"
+        update-types: [version-update:semver-minor, version-update:semver-patch]
+    groups:
+      python-maintenance:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /frontend
     schedule: { interval: weekly }
+    open-pull-requests-limit: 3
+    allow:
+      - dependency-name: "*"
+        update-types: [version-update:semver-minor, version-update:semver-patch]
+    groups:
+      react-family:
+        patterns: [react, react-dom, "@types/react", "@types/react-dom"]
+        update-types: [minor, patch]
+      frontend-tooling:
+        patterns: [vite, vitest, "@vitejs/*", "@vitest/*", eslint, "@eslint/*", "eslint-plugin-*", typescript-eslint, "@typescript-eslint/*"]
+        update-types: [minor, patch]
+      frontend-maintenance:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: docker
     directories: [/backend, /frontend]
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
+    # Keep the reviewed Python and Node release lines; continue digest/patch refreshes.
+    allow:
+      - dependency-name: "*"
+        update-types: [version-update:semver-patch]
+    groups:
+      application-images:
+        patterns: ["*"]
+        update-types: [patch]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        patterns: ["*"]
