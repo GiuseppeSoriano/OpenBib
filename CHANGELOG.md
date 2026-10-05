@@ -25,7 +25,7 @@ Resolves the ten confirmed findings (F01–F10) and eight improvement proposals 
 
 ### Fixed and improved
 
-- **F01, DOI input.** Bare DOIs, `doi:`/`DOI:` prefixes, doi.org links, `s2:` keys and Semantic Scholar links, arXiv IDs and links, `pmid:` and `pmcid:` all normalize to one key before deduplication, and a paper already cached under another alias is added under its stored key: one record, no duplicates. The add form explains the accepted forms, validates input, and shows inline errors with a retry countdown.
+- **F01, DOI input.** Bare DOIs, `doi:`/`DOI:` prefixes, doi.org links, `s2:` keys and Semantic Scholar links, arXiv IDs and links, `pmid:` and `pmcid:` all normalize to one key before deduplication, and a paper already cached under another alias is added under its stored key: one record, no duplicates. Import DOIs explains the accepted forms, validates every line before sending, and reports per-line errors with a retry countdown.
 - **F02, unresolved records.** Unresolved Library and collection cards show their identifier with Retry, Fix identifier and Remove/Delete. `POST /library/resolve` retries or corrects a record. Deleting a Library entry still used by collections lists them and can remove it from them (`?detach=true`).
 - **F03, mobile footer.** The fixed tab bar reserves its height and the safe-area inset after the footer, so footer links and final actions stay reachable.
 - **F04, graph controls.** On desktop the controls sit in a bottom bar that takes real space instead of covering the canvas. Phones and short landscape screens get a "Graph controls" sheet and a one-line selection summary.
@@ -43,6 +43,9 @@ Resolves the ten confirmed findings (F01–F10) and eight improvement proposals 
 - **S06, onboarding and wording.** A "Get started" path for new users, explained dashboard statistics, a visible search heading, and copy without internal terms.
 - **S07, full-text links.** "Download PDF" appears only for direct PDF links, repository landing pages read "Full text / Repository", and the Semantic Scholar page is a separate "View on Semantic Scholar" link.
 - **S08, recovery.** Settings has Zotero and "Your data" sections with export help and a notice when the instance keeps no backups; privacy, terms and the Library link to the export, and the dashboard reminds users to export when there are no backups. The optional backup profile, with a tested restore runbook, is documented.
+- **Redesign.** An editorial, academic look in light and dark: a left sidebar shell with a command palette (Ctrl/⌘ K), serif headings and hairline lists, a new dashboard, landing page and settings layout, and a full-canvas citation graph page with its own header. Sibling controls share one style (sizes, radii, icons, focus rings), checked by layout contract tests.
+- **Collections.** Papers are added from Search ("Add papers"); the collection page gains a filter bar like the Library's (text, reading state, tag, sort, kept in the URL), and Import DOIs and Zotero sit in a "More" menu.
+- **Graph.** Library membership is a centre mark instead of a colour, the legend is collapsible, labels avoid crossing other papers, and a lone seed opens at a readable zoom.
 - Also fixed: the remove-saved-version route was unreachable; saving a pending paper again could create a second Library entry; the Library list stopped at 100 entries; provider failures in the graph were cached as "no related papers"; several controls had incorrect accessible labels.
 
 ## Unreleased — public-release hardening
