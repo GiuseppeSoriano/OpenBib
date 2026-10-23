@@ -117,12 +117,12 @@ interface CanvasView {
 
 /**
  * A 2D context that records each label line filled (with the place its
- * label was moved to) and each line stroked as a halo, in paint order.
- * Every line measures `width` px. Without a `view`, every place counts as
- * on the canvas.
+ * label was moved to and its colour) and each line stroked as a halo, in
+ * paint order. Every line measures `width` px. Without a `view`, every
+ * place counts as on the canvas.
  */
 function labelRecorder(width = 200, view?: CanvasView) {
-  const fills: { text: string; x: number; y: number; at: Point }[] = [];
+  const fills: { text: string; x: number; y: number; at: Point; color: string }[] = [];
   const halos: string[] = [];
   let at: Point = [0, 0];
   const ctx = {
@@ -135,7 +135,7 @@ function labelRecorder(width = 200, view?: CanvasView) {
       at = [x, y];
     },
     strokeText: (text: string) => halos.push(text),
-    fillText: (text: string, x: number, y: number) => fills.push({ text, x, y, at }),
+    fillText: (text: string, x: number, y: number) => fills.push({ text, x, y, at, color: ctx.fillStyle }),
     measureText: () => ({ width }),
     ...(view && { canvas: view.canvas, getTransform: () => view.transform }),
   };
@@ -709,10 +709,11 @@ describe("CitationGraph", () => {
       // Then the canvas-coloured gap between the fill and the ring.
       expect(strokes[2]).toEqual({ style: "#f8faf9", alpha: 1 });
       engine.props.nodeCanvasObject(data.nodes[1], ctx, 1);
-      // Labels come after every node: the selection's first, in its amber.
+      // Labels come after every node: the selection's over the others, in
+      // its amber.
       expect(labels).toEqual([]);
       engine.props.onRenderFramePost(ctx, 1);
-      expect(labels).toEqual(["#7a4d11", "#1a1e1d"]);
+      expect(labels).toEqual(["#1a1e1d", "#7a4d11"]);
       // The selected node keeps its own fill inside the ring, like the others.
       expect(fills).toEqual(["#a0a8a4", "#a0a8a4"]);
       expect(ctx.globalAlpha).toBe(1);
@@ -804,32 +805,33 @@ describe("CitationGraph", () => {
       fillText: vi.fn((label: string) => labels.push(label)),
       measureText: vi.fn(() => ({ width: 60 })),
     };
-    // Zoomed out: the selection and the pin only.
+    // Zoomed out: the pin and the selection only, the selection's painted
+    // over the others.
     engine.props.onRenderFramePost(ctx, 1);
-    expect(labels).toEqual(["Title s", "Title p"]);
+    expect(labels).toEqual(["Title p", "Title s"]);
 
     // A hovered paper joins them at any zoom, painted last, on top.
     labels.length = 0;
     act(() => engine.props.onNodeHover(data.nodes[2]));
     engine.props.onRenderFramePost(ctx, 1);
-    expect(labels).toEqual(["Title s", "Title p", "Title c"]);
+    expect(labels).toEqual(["Title p", "Title s", "Title c"]);
     act(() => engine.props.onNodeHover(null));
 
     // Zoomed in: the others too, most cited first; "a" would overlap "b".
     labels.length = 0;
     engine.props.onRenderFramePost(ctx, 2);
-    expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+    expect(labels).toEqual(["Title p", "Title b", "Title c", "Title s"]);
 
     // Hovered, "a" shows its label after all, and the one of "b" gives way
     // to it until the pointer moves on.
     labels.length = 0;
     act(() => engine.props.onNodeHover(data.nodes[0]));
     engine.props.onRenderFramePost(ctx, 2);
-    expect(labels).toEqual(["Title s", "Title p", "Title c", "Title a"]);
+    expect(labels).toEqual(["Title p", "Title c", "Title s", "Title a"]);
     labels.length = 0;
     act(() => engine.props.onNodeHover(null));
     engine.props.onRenderFramePost(ctx, 2);
-    expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+    expect(labels).toEqual(["Title p", "Title b", "Title c", "Title s"]);
   });
 
   it("spells a hovered paper's cut title out on up to three lines, on top, and leaves a title that fits as it is", () => {
@@ -980,9 +982,9 @@ describe("CitationGraph", () => {
       return recorder.fills;
     };
     const before = frame();
-    expect(before.map((line) => line.text)).toEqual(["Title s", truncateLabel(LONG_TITLE), "Title o"]);
+    expect(before.map((line) => line.text)).toEqual([truncateLabel(LONG_TITLE), "Title o", "Title s"]);
     // The selection's label sits below its paper.
-    expect(before[0]!.at[1]).toBeGreaterThan(15);
+    expect(before[2]!.at[1]).toBeGreaterThan(15);
 
     act(() => engine.props.onNodeHover(h));
     const hovered = frame();
@@ -995,6 +997,162 @@ describe("CitationGraph", () => {
     expect(frame()).toEqual(before);
     // Hovering only repaints.
     expect(engine.reheat).not.toHaveBeenCalled();
+  });
+
+  it("spells the selected paper's cut title out on up to three lines without a hover, and keeps it through a hover elsewhere", () => {
+    const style = document.documentElement.style;
+    style.setProperty("--color-state-toread-text", "#7a4d11");
+    style.setProperty("--color-text", "#1a1e1d");
+    try {
+      // Far apart, both with a title too long for one line: "s" is selected.
+      const s = titled(forceNode("s", 0, 0), LONG_TITLE);
+      const o = titled(forceNode("o", 0, 200), LONG_TITLE);
+      render(
+        <CitationGraph
+          data={{ nodes: [s, o], links: [] }}
+          selectedId="s"
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />,
+      );
+      const frame = () => {
+        const recorder = labelRecorder();
+        engine.props.onRenderFramePost(recorder.ctx, 2);
+        return recorder;
+      };
+
+      // Nothing hovered: the selection's title is spelled out whole, below
+      // its paper (clear of its ring), a line apart, over its halo, in its
+      // amber, and painted over the other label, which stays cut short.
+      const idle = frame();
+      expect(idle.fills.map((line) => line.text)).toEqual([truncateLabel(LONG_TITLE), ...LONG_TITLE_LINES]);
+      expect(idle.fills[0]!.color).toBe("#1a1e1d");
+      const lines = idle.fills.slice(1);
+      expect(lines.map((line) => line.y)).toEqual([0, 15, 30]);
+      for (const line of lines) {
+        expect(line.at).toEqual([0, PAPER_RADIUS + 5]);
+        expect(line.color).toBe("#7a4d11");
+      }
+      expect(idle.halos).toEqual(LONG_TITLE_LINES);
+
+      // Hovering the other paper spells its title out as well, on top; the
+      // selection's stays as it was.
+      act(() => engine.props.onNodeHover(o));
+      const hovered = frame().fills;
+      expect(hovered.map((line) => line.text)).toEqual([...LONG_TITLE_LINES, ...LONG_TITLE_LINES]);
+      expect(hovered.slice(0, 3)).toEqual(lines);
+      for (const line of hovered.slice(3)) {
+        expect(line.at).toEqual([0, 200 + PAPER_RADIUS + 1.5]);
+        expect(line.color).toBe("#1a1e1d");
+      }
+
+      // Once the hover ends, the selection's title is still spelled out.
+      act(() => engine.props.onNodeHover(null));
+      const after = frame();
+      expect(after.fills).toEqual(idle.fills);
+      expect(after.halos).toEqual(idle.halos);
+
+      // Hovering the selection itself changes nothing: its title is drawn
+      // once, where it was, in its amber.
+      act(() => engine.props.onNodeHover(s));
+      const same = frame();
+      expect(same.fills).toEqual(idle.fills);
+      expect(same.halos).toEqual(idle.halos);
+    } finally {
+      style.removeProperty("--color-state-toread-text");
+      style.removeProperty("--color-text");
+    }
+  });
+
+  it("moves the selection's spelled-out title aside while a hovered label would cross its lower lines", () => {
+    // At zoom 2 a label line is 7.5 units tall. Below "s", the first line
+    // of the selection's title clears the label of "h"; its second and
+    // third lines would cross it.
+    const s = titled(forceNode("s", 0, 0), LONG_TITLE);
+    const h = forceNode("h", 60, 14);
+    render(
+      <CitationGraph
+        data={{ nodes: [s, h], links: [] }}
+        selectedId="s"
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const below = PAPER_RADIUS + 5;
+    // Unhovered, the label of "h" gives way to the selection's lines.
+    const before = frame();
+    expect(before.map((line) => [line.text, line.at])).toEqual(LONG_TITLE_LINES.map((text) => [text, [0, below]]));
+
+    // Hovered, "h" is labelled, and the selection's title moves above its
+    // paper, whole, its last line where a one-line label above would go.
+    act(() => engine.props.onNodeHover(h));
+    const hovered = frame();
+    expect(hovered.map((line) => line.text)).toEqual([...LONG_TITLE_LINES, "Title h"]);
+    const [left, top] = hovered[0]!.at;
+    expect(left).toBe(0);
+    expect(top + 3 * 7.5).toBeCloseTo(-below);
+    for (const line of hovered.slice(0, 3)) expect(line.at).toEqual([left, top]);
+
+    // The hover over, it goes back below its paper.
+    act(() => engine.props.onNodeHover(null));
+    expect(frame()).toEqual(before);
+  });
+
+  it("keeps the selection's spelled-out title through a hover above it when no side is free of circles", () => {
+    // At zoom 2, with lines 100 px wide (50 units), a label line is 7.5
+    // units tall. Circles sit below, left and right of "s", so its title
+    // only has room above it; "h", above that, labels itself right there.
+    const s = titled(forceNode("s", 0, 0), LONG_TITLE);
+    const h = forceNode("h", 0, -40);
+    const nodes = [s, h, forceNode("b", 0, 14), forceNode("l", -60, 0), forceNode("r", 60, 0)];
+    render(
+      <CitationGraph
+        data={{ nodes, links: [] }}
+        selectedId="s"
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder(100);
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const gap = PAPER_RADIUS + 5;
+
+    // Unhovered, the title grows up from above "s", and the label of "h"
+    // gives way to it.
+    const before = frame();
+    expect(before.map((line) => line.text)).toEqual(["Title b", "Title l", "Title r", ...LONG_TITLE_LINES]);
+    for (const line of before.slice(3)) {
+      expect(line.at[0]).toBe(0);
+      expect(line.at[1]).toBeCloseTo(-gap - 3 * 7.5);
+    }
+
+    // Hovered, "h" is labelled below its paper, where the title above "s"
+    // would go. The title moves to the first side clear of that label (the
+    // right, across the circle of "r", whose label gives way) instead of
+    // being left out.
+    act(() => engine.props.onNodeHover(h));
+    const hovered = frame();
+    expect(hovered.map((line) => line.text)).toEqual(["Title b", "Title l", ...LONG_TITLE_LINES, "Title h"]);
+    for (const line of hovered.slice(2, 5)) {
+      expect(line.at[0]).toBeCloseTo(gap + 25);
+      expect(line.at[1]).toBeCloseTo(-7.5 / 2);
+    }
+    expect(hovered[5]!.at[1]).toBeCloseTo(-40 + PAPER_RADIUS + 1.5);
+
+    // The hover over, it is back above "s".
+    act(() => engine.props.onNodeHover(null));
+    expect(frame()).toEqual(before);
   });
 
   it("takes a touch for no hover: the touched paper's label and links stay as they are", () => {
@@ -1124,13 +1282,17 @@ describe("CitationGraph", () => {
     engine.props.onRenderFramePost(ctx, 2);
     expect(labels).not.toContain("Title n");
 
-    // ...but the selection is always labelled, below it.
+    // ...but the selection is always labelled, below it (painted over the
+    // others' labels, last).
     labels.length = 0;
     ctx.translate.mockClear();
     view.rerender(<CitationGraph {...props} data={boxed} selectedId="n" />);
     engine.props.onRenderFramePost(ctx, 2);
-    expect(labels[0]).toBe("Title n");
-    expect(ctx.translate.mock.calls[0]![1]).toBeGreaterThan(0);
+    expect(labels[labels.length - 1]).toBe("Title n");
+    expect(labels.filter((label) => label === "Title n")).toHaveLength(1);
+    const selection = ctx.translate.mock.calls[ctx.translate.mock.calls.length - 1]!;
+    expect(selection[0]).toBe(0);
+    expect(selection[1]).toBeGreaterThan(0);
   });
 
   it("moves a crossing selection label to a free side that stays on the canvas", () => {
@@ -1158,8 +1320,9 @@ describe("CitationGraph", () => {
       measureText: vi.fn(() => ({ width: 60 })),
     };
     engine.props.onRenderFramePost(ctx, 2);
-    expect(labels[0]).toBe("Title n");
-    expect(ctx.translate.mock.calls[0]![0]).toBeLessThan(100);
+    // The selection's label is painted last, over the others.
+    expect(labels[labels.length - 1]).toBe("Title n");
+    expect(ctx.translate.mock.calls[ctx.translate.mock.calls.length - 1]![0]).toBeLessThan(100);
   });
 
   it("skips pinned labels that would overlap one already drawn, so a fully pinned collection stays legible", () => {
@@ -1195,8 +1358,9 @@ describe("CitationGraph", () => {
       measureText: vi.fn(() => ({ width: 60 })),
     };
     engine.props.onRenderFramePost(ctx, 1);
-    // The selection always; then only the pins whose labels find free room.
-    expect(labels[0]).toBe("Title s");
+    // The selection always (painted last, over the pins); then only the pins
+    // whose labels find free room.
+    expect(labels[labels.length - 1]).toBe("Title s");
     expect(labels).toContain("Title far");
     expect(labels.length).toBeLessThan(5);
   });

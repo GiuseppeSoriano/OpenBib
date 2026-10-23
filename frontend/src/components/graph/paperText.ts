@@ -68,14 +68,15 @@ export function truncateLabel(text: string, max: number = LABEL_MAX): string {
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
-/** A hovered paper's canvas label spells its title out on up to this many lines. */
+/** A hovered or selected paper's canvas label spells its title out on up to this many lines. */
 export const LABEL_MAX_LINES = 3;
 
 /**
  * A title broken at its spaces onto lines of at most `max` characters (a
- * word longer than a line is split), for the hovered paper's label. A title
- * that fits one line comes back whole, as its only line, exactly as
- * truncateLabel gives it; past `lines` lines, the last one ends in "…".
+ * word longer than a line is split), for the hovered or selected paper's
+ * label. A title that fits one line comes back whole, as its only line,
+ * exactly as truncateLabel gives it; past `lines` lines, the last one ends
+ * in "…".
  */
 export function wrapLabel(text: string, max: number = LABEL_MAX, lines: number = LABEL_MAX_LINES): string[] {
   const clean = text.replace(/\s+/g, " ").trim();

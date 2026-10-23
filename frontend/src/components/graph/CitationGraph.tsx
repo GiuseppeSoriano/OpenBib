@@ -642,12 +642,14 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   // title that would cross one below its paper moves above, right or left
   // of it, to the first free side; a pin's with no free side is skipped too
   // (the list and a hover still name it), the hover's never.
-  // The hovered paper's title is placed first and painted last, on top:
-  // where one line would cut it, it is spelled out whole on up to three
-  // lines, grown from the side its one line takes (above the paper, up from
-  // it), or from another side where the canvas's edge would cut it. Every
-  // other label keeps clear of it, the selection's included: that one moves
-  // aside, or is left out only until the hover ends.
+  // The hovered paper's title is placed first and painted last, on top;
+  // the selected paper's, as if always hovered, is placed next and painted
+  // just under it. Where one line would cut either, it is spelled out whole
+  // on up to three lines, grown from the side its one line takes (above the
+  // paper, up from it), or from another side where the canvas's edge would
+  // cut it. Every other label keeps clear of them; the selection's keeps
+  // clear of the hovered one: it moves aside, or is left out only until the
+  // hover ends.
   const drawLabels = useCallback(
     (ctx: CanvasRenderingContext2D, globalScale: number) => {
       const px = 1 / globalScale;
@@ -689,7 +691,8 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       ctx.lineJoin = "round";
       for (const { node, rank: level } of queue) {
         const title = nodeTitle(node.node, t);
-        const lines = level === 0 ? wrapLabel(title) : [truncateLabel(title)];
+        // The hovered and the selected paper spell out a shortened title.
+        const lines = level <= 1 ? wrapLabel(title) : [truncateLabel(title)];
         const expanded = lines.length > 1;
         const x = node.x ?? 0;
         const y = node.y ?? 0;
@@ -720,13 +723,12 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
           { line: right, full: right },
           { line: left, full: left },
         ];
-        // The first line alone picks the side, so a hovered title grows from
-        // where its one line goes (over the circles its other lines cross);
-        // the whole label has to stay on the canvas, though.
-        const free = (slot: Slot) => {
-          const box = boxAt(slot.line, 1);
-          return !hitsNode(box, node) && clear(box);
-        };
+        // Among the circles, the first line alone picks the side, so a
+        // spelled-out title grows from where its one line goes (over the
+        // circles its other lines cross); the whole label has to stay clear
+        // of the labels placed before it (for the selection's, the hovered
+        // one's) and on the canvas, though.
+        const free = (slot: Slot) => !hitsNode(boxAt(slot.line, 1), node) && clear(boxAt(slot.full));
         const onCanvas = (slot: Slot) => onScreen(boxAt(slot.full));
         // An always-labelled paper whose title would cross a circle (or
         // another label) below it takes the first free room above, to the
@@ -734,11 +736,18 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         // A side that runs off the canvas is only taken by a pin, and only
         // when no side on screen is free. A spelled-out title also leaves the
         // room below where the canvas's edge would cut its lines, for a side
-        // on screen, across a circle if it must.
+        // on screen, across a circle if it must: the first one clear of the
+        // labels placed before it (so the selection's makes way for the
+        // hovered one's rather than vanish), else the first one on screen.
         const place =
           level < 3 && !(free(below) && (!expanded || onCanvas(below)))
             ? sides.find((side) => free(side) && onCanvas(side)) ??
-              (level === 2 ? sides.find(free) : expanded ? sides.find(onCanvas) : undefined) ??
+              (level === 2
+                ? sides.find(free)
+                : expanded
+                  ? [...sides, below].find((side) => onCanvas(side) && clear(boxAt(side.full))) ??
+                    sides.find(onCanvas)
+                  : undefined) ??
               below
             : below;
         const [labelX, labelY] = place.full;
@@ -748,8 +757,9 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         drawn.push(box);
         placed.push({ lines, x: labelX, y: labelY, halo: level < 3, selected, hovered: level === 0 });
       }
-      // The hovered label last, over everything else.
-      placed.sort((a, b) => Number(a.hovered) - Number(b.hovered));
+      // The selected label over the others, the hovered one over everything.
+      const layer = (label: { selected: boolean; hovered: boolean }) => (label.hovered ? 2 : label.selected ? 1 : 0);
+      placed.sort((a, b) => layer(a) - layer(b));
       for (const label of placed) {
         ctx.save();
         ctx.translate(label.x, label.y);
