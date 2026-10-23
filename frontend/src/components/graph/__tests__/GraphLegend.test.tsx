@@ -59,6 +59,35 @@ describe("GraphLegend", () => {
     setItem.mockRestore();
   });
 
+  it("draws the direction swatch as the canvas draws a link, in the pill and the sheet alike", () => {
+    for (const variant of ["overlay", "inline"] as const) {
+      const { container, unmount } = render(<GraphLegend variant={variant} />);
+      const glyph = container.querySelector("svg.legend-arrow")!;
+      expect(glyph).toHaveAttribute("aria-hidden", "true");
+      const line = glyph.querySelector("line")!;
+      const [x1, x2] = [Number(line.getAttribute("x1")), Number(line.getAttribute("x2"))];
+      // M tip, then the two base corners.
+      const [tipX, tipY, baseX, y1, , y2] = glyph.querySelector("path")!.getAttribute("d")!.match(/[\d.]+/g)!.map(Number) as [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      // One arrowhead halfway along the line, pointing at its cited end,
+      // as large as the canvas's (7 long, 6 wide).
+      expect((tipX + baseX) / 2).toBeCloseTo((x1 + x2) / 2);
+      expect(tipX - baseX).toBe(7);
+      expect(y2 - y1).toBe(6);
+      expect(tipY).toBe(Number(line.getAttribute("y1")));
+      expect(glyph.querySelectorAll("path")).toHaveLength(1);
+      // Colours come from the tokens in graph.css, never inline.
+      expect(glyph.querySelector("[style], [fill], [stroke]")).toBeNull();
+      unmount();
+    }
+  });
+
   it("keeps the sheet's inline legend as a plain list with the pinning hint", () => {
     render(<GraphLegend variant="inline" />);
 

@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import CitationGraph, { type CitationGraphHandle } from "@/components/graph/CitationGraph";
 import { truncateLabel } from "@/components/graph/paperText";
-import type { ForceGraphData, ForceNode } from "@/components/graph/mergeGraph";
+import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import type { GraphNode, PaperMetadata } from "@/types";
 
@@ -80,6 +80,40 @@ function forceNode(id: string, x: number, y: number): ForceNode {
   };
   return { id, node, x, y };
 }
+
+/** A resolved link, as the engine hands it to the painter. */
+function forceLink(source: ForceNode, target: ForceNode): ForceLink {
+  return { source, target, relation_type: "cites" };
+}
+
+type Point = [number, number];
+
+/** A 2D context that records each stroked and filled path with its paint. */
+function linkRecorder() {
+  let path: Point[] = [];
+  const strokes: { points: Point[]; color: string; width: number }[] = [];
+  const fills: { points: Point[]; color: string }[] = [];
+  const ctx = {
+    strokeStyle: "",
+    fillStyle: "",
+    lineWidth: 0,
+    beginPath: () => {
+      path = [];
+    },
+    moveTo: (x: number, y: number) => path.push([x, y]),
+    lineTo: (x: number, y: number) => path.push([x, y]),
+    closePath: () => undefined,
+    stroke: () => strokes.push({ points: path, color: ctx.strokeStyle, width: ctx.lineWidth }),
+    fill: () => fills.push({ points: path, color: ctx.fillStyle }),
+  };
+  return { ctx, strokes, fills };
+}
+
+const distance = ([ax, ay]: Point, [bx, by]: Point) => Math.hypot(bx - ax, by - ay);
+const midpoint = ([ax, ay]: Point, [bx, by]: Point): Point => [(ax + bx) / 2, (ay + by) / 2];
+
+/** Radius of the test papers (3 citations), in graph units. */
+const PAPER_RADIUS = 4 + 10 * (Math.log10(4) / 5);
 
 /** Lets a requestAnimationFrame callback (focusNode measures on one) run. */
 function nextFrame() {
@@ -273,6 +307,184 @@ describe("CitationGraph", () => {
         style.removeProperty(name);
       }
     }
+  });
+
+  it("draws each link itself: a line between the circles and one arrowhead halfway, the same on screen at every zoom", () => {
+    const a = forceNode("a", 0, 0);
+    const b = forceNode("b", 120, 160);
+    render(
+      <CitationGraph
+        data={{ nodes: [a, b], links: [] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    // The engine draws neither its own arrows nor a visible line of its own.
+    expect(engine.props.linkDirectionalArrowLength).toBeUndefined();
+    expect(engine.props.linkDirectionalArrowRelPos).toBeUndefined();
+    expect(engine.props.linkColor(forceLink(a, b))).toBe("rgba(0,0,0,0)");
+
+    // "a" cites "b".
+    const cites = forceLink(a, b);
+    for (const scale of [0.5, 1, 3]) {
+      const { ctx, strokes, fills } = linkRecorder();
+      engine.props.linkCanvasObject(cites, ctx, scale);
+      expect(strokes).toHaveLength(1);
+      expect(fills).toHaveLength(1);
+
+      // A 1px line, held 2px clear of both circles (screen px).
+      const [start, end] = strokes[0]!.points as [Point, Point];
+      expect(strokes[0]!.width * scale).toBeCloseTo(1);
+      expect((distance([0, 0], start) - PAPER_RADIUS) * scale).toBeCloseTo(2);
+      expect((distance(end, [120, 160]) - PAPER_RADIUS) * scale).toBeCloseTo(2);
+
+      // One arrowhead, 7px long and 6px wide, centred on the line's
+      // midpoint (its tip 3.5px past it), pointing at the cited paper.
+      const [tip, left, right] = fills[0]!.points as [Point, Point, Point];
+      const base = midpoint(left, right);
+      const length = distance(base, tip);
+      expect(length * scale).toBeCloseTo(7);
+      expect(distance(left, right) * scale).toBeCloseTo(6);
+      expect(midpoint(base, tip)[0]).toBeCloseTo(midpoint(start, end)[0]);
+      expect(midpoint(base, tip)[1]).toBeCloseTo(midpoint(start, end)[1]);
+      expect((tip[0] - base[0]) / length).toBeCloseTo(0.6);
+      expect((tip[1] - base[1]) / length).toBeCloseTo(0.8);
+    }
+
+    // The other way round, the arrowhead points back at "a".
+    const { ctx, fills } = linkRecorder();
+    engine.props.linkCanvasObject(forceLink(b, a), ctx, 1);
+    const [tip, left, right] = fills[0]!.points as [Point, Point, Point];
+    const base = midpoint(left, right);
+    expect(tip[0]).toBeLessThan(base[0]);
+    expect(tip[1]).toBeLessThan(base[1]);
+  });
+
+  it("keeps only the line on a link too short on screen for its arrowhead, and draws nothing between touching papers", () => {
+    const a = forceNode("a", 0, 0);
+    const near = forceNode("near", 20, 0);
+    const touching = forceNode("touching", 8, 0);
+    render(
+      <CitationGraph
+        data={{ nodes: [a, near, touching], links: [] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    // About 6px between the circles at 1x: the line only.
+    let paint = linkRecorder();
+    engine.props.linkCanvasObject(forceLink(a, near), paint.ctx, 1);
+    expect(paint.strokes).toHaveLength(1);
+    expect(paint.fills).toHaveLength(0);
+
+    // Zoomed in, the same link has room for it.
+    paint = linkRecorder();
+    engine.props.linkCanvasObject(forceLink(a, near), paint.ctx, 4);
+    expect(paint.fills).toHaveLength(1);
+
+    paint = linkRecorder();
+    engine.props.linkCanvasObject(forceLink(a, touching), paint.ctx, 1);
+    expect(paint.strokes).toHaveLength(0);
+    expect(paint.fills).toHaveLength(0);
+
+    // Endpoints the engine has not resolved yet are skipped, not drawn.
+    paint = linkRecorder();
+    engine.props.linkCanvasObject({ source: "a", target: "near", relation_type: "cites" }, paint.ctx, 1);
+    expect(paint.strokes).toHaveLength(0);
+  });
+
+  it("shades the hovered or selected paper's links darker, on top, at the same width and arrow size, without re-heating", () => {
+    const style = document.documentElement.style;
+    style.setProperty("--graph-edge", "#bac2be");
+    style.setProperty("--graph-edge-arrow", "#858f8b");
+    style.setProperty("--graph-edge-active", "#4f5a56");
+    try {
+      // Three papers on an equilateral triangle: every link is as long.
+      const a = forceNode("a", 0, 0);
+      const b = forceNode("b", 200, 0);
+      const c = forceNode("c", 100, 173.2);
+      const ab = forceLink(a, b);
+      const ca = forceLink(c, a);
+      const bc = forceLink(b, c);
+      const data: ForceGraphData = { nodes: [a, b, c], links: [ab, ca, bc] };
+      const graph = (selectedId: string | null) => (
+        <CitationGraph
+          data={data}
+          selectedId={selectedId}
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />
+      );
+      const view = render(graph(null));
+      const paintAll = () =>
+        data.links.map((link) => {
+          const { ctx, strokes, fills } = linkRecorder();
+          engine.props.linkCanvasObject(link, ctx, 2);
+          const [tip, left, right] = fills[0]!.points as [Point, Point, Point];
+          return {
+            mode: engine.props.linkCanvasObjectMode(link),
+            line: strokes[0]!.color,
+            arrow: fills[0]!.color,
+            width: strokes[0]!.width,
+            arrowSize: [distance(midpoint(left, right), tip), distance(left, right)],
+          };
+        });
+
+      // Nothing focused: every link in the quiet shades, in the engine's
+      // first pass.
+      let links = paintAll();
+      for (const link of links) {
+        expect(link).toMatchObject({ mode: "replace", line: "#bac2be", arrow: "#858f8b" });
+      }
+      const { width, arrowSize } = links[0]!;
+
+      // The selection's links ("a" cites "b", "c" cites "a") turn the
+      // active shade, line and arrowhead alike, and are drawn after the
+      // others so they sit on top. Width and arrow size never change.
+      const painter = engine.props.linkCanvasObject;
+      view.rerender(graph("a"));
+      expect(engine.props.linkCanvasObject).not.toBe(painter);
+      expect(engine.props.graphData).toBe(data);
+      links = paintAll();
+      expect(links.map((link) => link.mode)).toEqual(["after", "after", "replace"]);
+      expect(links.map((link) => link.line)).toEqual(["#4f5a56", "#4f5a56", "#bac2be"]);
+      expect(links.map((link) => link.arrow)).toEqual(["#4f5a56", "#4f5a56", "#858f8b"]);
+      for (const link of links) {
+        expect(link.width).toBe(width);
+        expect(link.arrowSize[0]).toBeCloseTo(arrowSize[0]!);
+        expect(link.arrowSize[1]).toBeCloseTo(arrowSize[1]!);
+      }
+
+      // A hovered paper takes the focus from the selection while hovered.
+      act(() => engine.props.onNodeHover(c));
+      links = paintAll();
+      expect(links.map((link) => link.mode)).toEqual(["replace", "after", "after"]);
+      expect(links.map((link) => link.line)).toEqual(["#bac2be", "#4f5a56", "#4f5a56"]);
+      act(() => engine.props.onNodeHover(null));
+      expect(paintAll().map((link) => link.mode)).toEqual(["after", "after", "replace"]);
+
+      // Focus only repaints: the layout is never re-heated.
+      expect(engine.reheat).not.toHaveBeenCalled();
+    } finally {
+      style.removeProperty("--graph-edge");
+      style.removeProperty("--graph-edge-arrow");
+      style.removeProperty("--graph-edge-active");
+    }
+  });
+
+  it("leaves links out of pointer picking: no link hover, tooltip or click", () => {
+    setup();
+    const ctx = { beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), fill: vi.fn() };
+    engine.props.linkPointerAreaPaint(forceLink(forceNode("a", 0, 0), forceNode("b", 100, 0)), "#000001", ctx, 1);
+    for (const draw of Object.values(ctx)) expect(draw).not.toHaveBeenCalled();
+    expect(engine.props.onLinkHover).toBeUndefined();
+    expect(engine.props.onLinkClick).toBeUndefined();
+    expect(engine.props.linkLabel).toBeUndefined();
   });
 
   it("records the rounded view on the container after a zoom", () => {

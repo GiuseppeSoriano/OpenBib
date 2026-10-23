@@ -80,6 +80,11 @@ const NON_TEXT: [string, string][] = [
   // The Library mark, punched through either node fill.
   ["--graph-node-mark", "--graph-node"],
   ["--graph-node-mark", "--graph-node-pinned"],
+  // A link's arrowhead carries its direction, quiet or focused, on the
+  // canvas and on the legend's swatch.
+  ["--graph-edge-arrow", "--graph-canvas"],
+  ["--graph-edge-active", "--graph-canvas"],
+  ["--graph-edge-arrow", "--graph-legend-bg"],
 ];
 
 describe.each([
@@ -100,6 +105,21 @@ describe.each([
   // lightness floor keeps it visible without relying on hue alone.
   it("keeps pinned and plain graph nodes apart by at least 1.8:1", () => {
     expect(contrast(colors["--graph-node-pinned"]!, colors["--graph-node"]!)).toBeGreaterThanOrEqual(1.8);
+  });
+
+  // Only the shade sets the focused paper's links apart (same width, same
+  // arrowhead): clearly off the quiet line and arrowhead, and further from
+  // the canvas than either, so focus always reads as stronger.
+  it("sets the focused paper's links clearly apart from the others by shade alone", () => {
+    const canvas = colors["--graph-canvas"]!;
+    const active = colors["--graph-edge-active"]!;
+    const line = colors["--graph-edge"]!;
+    const arrow = colors["--graph-edge-arrow"]!;
+    expect(contrast(active, line)).toBeGreaterThanOrEqual(3);
+    expect(contrast(active, arrow)).toBeGreaterThanOrEqual(1.5);
+    expect(contrast(active, canvas)).toBeGreaterThan(contrast(arrow, canvas));
+    // The quiet line stays under its own arrowhead.
+    expect(contrast(arrow, canvas)).toBeGreaterThan(contrast(line, canvas));
   });
 });
 

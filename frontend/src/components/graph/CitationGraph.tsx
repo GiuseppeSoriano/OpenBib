@@ -9,7 +9,7 @@ import {
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { forceCollide } from "d3-force-3d";
 import { useTranslation } from "react-i18next";
-import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
+import { endpointId, type ForceGraphData, type ForceLink, type ForceNode } from "@/components/graph/mergeGraph";
 import { markRadius, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
 import { nodeTitle, truncateLabel } from "@/components/graph/paperText";
 import { centreFor, freeArea, type Rect } from "@/components/graph/viewGeometry";
@@ -61,7 +61,12 @@ interface CitationGraphProps {
 }
 
 interface ThemeStyle extends NodeStyleColors {
+  /** --graph-edge: a link's line. */
   edge: string;
+  /** --graph-edge-arrow: a link's arrowhead. */
+  edgeArrow: string;
+  /** --graph-edge-active: the focused paper's links, line and arrowhead. */
+  edgeActive: string;
   label: string;
   /** The selected paper's label (the amber of the selection ring, as text). */
   selectedLabel: string;
@@ -94,7 +99,9 @@ function readThemeColors(): ThemeStyle {
     mark: cssVar("--graph-node-mark") || canvas,
     selected: cssVar("--graph-node-selected") || cssVar("--color-warning") || "#8f5b14",
     background: cssVar("--graph-node-gap") || canvas,
-    edge: cssVar("--graph-edge") || "#d6dcd8",
+    edge: cssVar("--graph-edge") || "#bac2be",
+    edgeArrow: cssVar("--graph-edge-arrow") || "#858f8b",
+    edgeActive: cssVar("--graph-edge-active") || "#4f5a56",
     label: cssVar("--color-text") || "#1a1e1d",
     selectedLabel: cssVar("--color-state-toread-text") || "#7a4d11",
     canvas,
@@ -116,6 +123,25 @@ const AUTO_FIT_DELAY = 900;
 /** Pointer travel (px) that counts as the user panning or dragging. */
 const DRAG_SLOP = 4;
 
+// Links, in screen px at every zoom: a 1px line held 2px clear of both
+// circles, with one arrowhead (7 long, 6 wide) halfway along it, its tip
+// 3.5px past the midpoint so the head sits centred on it. A link shorter
+// than ARROW_MIN_SEGMENT between its circles keeps only the line.
+const LINK_WIDTH = 1;
+const LINK_GAP = 2;
+const ARROW_LENGTH = 7;
+const ARROW_HALF_WIDTH = 3;
+const ARROW_TIP_OFFSET = 3.5;
+const ARROW_MIN_SEGMENT = 18;
+
+/**
+ * The engine's own line for the links it paints before ours (the focused
+ * paper's, see linkMode): transparent, so only the drawn link shows.
+ */
+const ENGINE_LINK_COLOR = () => "rgba(0,0,0,0)";
+/** Links are not pointer targets: no hover, no tooltip, no click. */
+const NO_LINK_POINTER_AREA = () => undefined;
+
 interface Box {
   x: number;
   y: number;
@@ -133,6 +159,61 @@ function radiusOf(node: ForceNode): number {
 
 function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/** Whether a link touches the focused paper (none when nothing is focused). */
+function touchesFocus(link: ForceLink, focusId: string | null): boolean {
+  return focusId !== null && (endpointId(link.source) === focusId || endpointId(link.target) === focusId);
+}
+
+/**
+ * One citation link, from the citing paper (source) to the cited one
+ * (target): a straight line between the two circles' edges and a filled
+ * arrowhead halfway along it, pointing at the cited paper. Sizes are in
+ * screen px (divided by the zoom), so they hold at every zoom.
+ */
+function paintLink(
+  ctx: CanvasRenderingContext2D,
+  source: ForceNode,
+  target: ForceNode,
+  globalScale: number,
+  line: string,
+  arrow: string,
+) {
+  const ax = source.x;
+  const ay = source.y;
+  const bx = target.x;
+  const by = target.y;
+  if (ax === undefined || ay === undefined || bx === undefined || by === undefined) return;
+  const px = 1 / globalScale;
+  const length = Math.hypot(bx - ax, by - ay);
+  // Distances along the link, from the citing paper's centre.
+  const start = radiusOf(source) + LINK_GAP * px;
+  const end = length - radiusOf(target) - LINK_GAP * px;
+  // Circles touching or overlapping: nothing shows between them.
+  if (end <= start) return;
+  const ux = (bx - ax) / length;
+  const uy = (by - ay) / length;
+  ctx.beginPath();
+  ctx.moveTo(ax + ux * start, ay + uy * start);
+  ctx.lineTo(ax + ux * end, ay + uy * end);
+  ctx.strokeStyle = line;
+  ctx.lineWidth = LINK_WIDTH * px;
+  ctx.stroke();
+  if ((end - start) * globalScale < ARROW_MIN_SEGMENT) return;
+  const tip = (start + end) / 2 + ARROW_TIP_OFFSET * px;
+  const tipX = ax + ux * tip;
+  const tipY = ay + uy * tip;
+  const baseX = tipX - ux * ARROW_LENGTH * px;
+  const baseY = tipY - uy * ARROW_LENGTH * px;
+  const half = ARROW_HALF_WIDTH * px;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(baseX - uy * half, baseY + ux * half);
+  ctx.lineTo(baseX + uy * half, baseY - ux * half);
+  ctx.closePath();
+  ctx.fillStyle = arrow;
+  ctx.fill();
 }
 
 /** Whether a circle (a node, with some clearance) reaches into a label's box. */
@@ -463,6 +544,34 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     [colors, payloadRevision, pinnedIds, savedGroupKeys, selectedId],
   );
 
+  // Links are drawn here, not by the engine. The focused paper (the hovered
+  // one, else the selection) has its links in the active shade, at the same
+  // width and arrow size as the rest: they go in the engine's "after" pass,
+  // so they sit on top of the others. Like a hover, a new selection only
+  // repaints (the painters are not graph data, so the layout never re-heats).
+  const linkMode = useCallback(
+    (link: ForceLink) => (touchesFocus(link, hoveredRef.current ?? selectedId) ? "after" : "replace"),
+    [selectedId],
+  );
+
+  const drawLink = useCallback(
+    (link: ForceLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const { source, target } = link;
+      // The engine resolves string endpoints to its nodes once it has the data.
+      if (typeof source !== "object" || typeof target !== "object") return;
+      const active = touchesFocus(link, hoveredRef.current ?? selectedId);
+      paintLink(
+        ctx,
+        source,
+        target,
+        globalScale,
+        active ? colors.edgeActive : colors.edge,
+        active ? colors.edgeActive : colors.edgeArrow,
+      );
+    },
+    [colors, selectedId],
+  );
+
   // Titles (serif, like every paper title), drawn after every node so they
   // sit on top. The selected and hovered papers are always labelled, over a
   // halo so they read across edges (the selection's in its amber). Pinned
@@ -632,10 +741,10 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
           ctx.fillStyle = color;
           ctx.fill();
         }}
-        linkColor={() => colors.edge}
-        linkWidth={1}
-        linkDirectionalArrowLength={4}
-        linkDirectionalArrowRelPos={1}
+        linkCanvasObject={drawLink}
+        linkCanvasObjectMode={linkMode}
+        linkColor={ENGINE_LINK_COLOR}
+        linkPointerAreaPaint={NO_LINK_POINTER_AREA}
         linkCurvature={0}
         d3AlphaDecay={0.028}
         d3VelocityDecay={0.35}

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Graph titles.** Related-range nodes no longer show a raw `doi:`/`s2:` key when Semantic Scholar rate-limits or times out the detail lookup. The lookup gets its own budget and retries; nodes still missing details come back with `details_pending: true` (and the response with `details_incomplete`, `retry_after`), are never cached, and the graph re-fetches them in the background, showing "Loading title…" meanwhile. Requests the client abandons are cancelled instead of queuing provider calls.
+- **Graph links.** Each citation link is a thin line with one small arrowhead halfway along it, pointing from the citing paper to the cited one, at the same size at every zoom. The hovered paper's links (else the selected paper's) switch to a stronger shade at the same width; the legend shows the new link. Links no longer capture the pointer, so clicking on one clears the selection like a click on the background.
 - **Dashboard.** Titles in Continue reading and Recently saved open the paper's details on the dashboard instead of moving to the Library.
 - **Sidebar search** stays on one line at any width, zoom or text size; the shortcut hint hides first when space is short.
 - Dependencies: vitest 4.1.12, certifi 2026.10.23 and npm lockfile fixes for new advisories.

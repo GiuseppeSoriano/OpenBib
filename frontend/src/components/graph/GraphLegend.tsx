@@ -43,9 +43,11 @@ export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
         <span className="legend-dot legend-dot--selected" aria-hidden="true" /> {t("graph.legendSelected")}
       </li>
       <li>
+        {/* The canvas's link: a line with its arrowhead (7 long, 6 wide)
+            centred halfway, pointing at the cited paper. */}
         <svg className="legend-arrow" viewBox="0 0 22 10" aria-hidden="true" focusable="false">
-          <line x1="1" y1="5" x2="15" y2="5" />
-          <path d="M14 1.5 21 5 14 8.5Z" />
+          <line x1="1" y1="5" x2="21" y2="5" />
+          <path d="M14.5 5 7.5 2 7.5 8Z" />
         </svg>{" "}
         {t("graph.legendEdge")}
       </li>

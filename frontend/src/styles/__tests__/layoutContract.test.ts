@@ -508,5 +508,11 @@ describe("layout contract", () => {
       expect(declarations(graphHeaderCss, ".graph-summary-range")).toContain("white-space: nowrap;");
       expect(declarations(indexCss, ".sheet-submit")).toContain("width: 100%;");
     });
+
+    it("draws the legend's link swatch in the canvas's own link colours, from tokens", () => {
+      expect(declarations(graphHeaderCss, ".legend-arrow line")).toContain("stroke: var(--graph-edge);");
+      expect(declarations(graphHeaderCss, ".legend-arrow path")).toContain("fill: var(--graph-edge-arrow);");
+      expect(declarations(graphHeaderCss, ".legend-arrow")).not.toContain("color:");
+    });
   });
 });

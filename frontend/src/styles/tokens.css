@@ -92,7 +92,16 @@
     --graph-node-halo: color-mix(in srgb, var(--graph-node-selected) 18%, transparent);
     /* Gap between a selected node and its amber selection ring */
     --graph-node-gap: var(--graph-canvas);
-    --graph-edge: #d6dcd8;
+    /* Citation links: a quiet 1px line with a small arrowhead halfway,
+       pointing from the citing paper to the cited one. The arrowhead keeps
+       3:1 on the canvas; the line stays under it. */
+    --graph-edge: #bac2be;
+    --graph-edge-arrow: #858f8b;
+    /* The focused paper's links (hovered, else selected): the same line
+       and arrowhead, in a stronger shade only. */
+    --graph-edge-active: #4f5a56;
+    /* The landing page's motif keeps the lighter edge it was drawn with */
+    --graph-motif-edge: #d6dcd8;
     /* Floating legend pill over the canvas: opaque, so nothing shows through */
     --graph-legend-bg: var(--color-surface);
 
@@ -246,7 +255,10 @@
     --graph-node: #71807a;
     --graph-node-pinned: var(--color-accent);
     --graph-node-selected: var(--color-warning);
-    --graph-edge: #35413c;
+    --graph-edge: #46524d;
+    --graph-edge-arrow: #7a8681;
+    --graph-edge-active: #a9b6b1;
+    --graph-motif-edge: #35413c;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
