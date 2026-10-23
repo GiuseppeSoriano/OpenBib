@@ -2,7 +2,7 @@ import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Pin } from "lucide-react";
 import VersionPicker from "@/components/search/VersionPicker";
-import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
+import { isUnresolved, nodeTitle, paperDoi } from "@/components/graph/paperText";
 import type { GraphNode, PaperMetadata } from "@/types";
 
 interface PinToggleProps {
@@ -64,7 +64,7 @@ export default function GraphNodePopup({
   const titleId = useId();
   const paper = node.selected_version;
   const unresolved = isUnresolved(paper);
-  const title = paperTitle(paper, t);
+  const title = nodeTitle(node, t);
   const doi = paperDoi(paper);
   const meta = [
     paper.venue,

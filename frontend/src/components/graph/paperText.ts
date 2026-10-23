@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { PaperMetadata } from "@/types";
+import type { GraphNode, PaperMetadata } from "@/types";
 
 /** Canvas labels stop at about this many characters (the list and popup keep the full title). */
 export const LABEL_MAX = 48;
@@ -19,6 +19,48 @@ export function paperDoi(paper: PaperMetadata): string | null {
 export function paperTitle(paper: PaperMetadata, t: TFunction): string {
   if (isUnresolved(paper) || !paper.title?.trim()) return t("graph.detailsUnavailable");
   return paper.title;
+}
+
+/**
+ * The graph catalog's client-side mark on a node whose pending details no
+ * background refresh will bring (never sent by the server).
+ */
+export interface DetailsMark {
+  detailsUnavailable?: boolean;
+}
+
+/**
+ * Whether a version carries a related list's data only: the server's
+ * placeholder for a record it could not fetch has its key as its title.
+ */
+export function isListDataOnly(paper: PaperMetadata): boolean {
+  return !isUnresolved(paper) && paper.title === paper.canonical_key;
+}
+
+/** A node whose selected version still waits for its details. */
+export function hasPendingDetails(node: GraphNode): boolean {
+  return !!node.details_pending;
+}
+
+export type DetailsStatus = "loading" | "unavailable";
+
+/**
+ * Where the title of a node's version stands: "loading" while a refresh may
+ * still bring it, "unavailable" once none will; null when it is known.
+ */
+export function detailsStatus(node: GraphNode & DetailsMark, paper: PaperMetadata = node.selected_version): DetailsStatus | null {
+  if (!isListDataOnly(paper)) return null;
+  return node.details_pending && !node.detailsUnavailable ? "loading" : "unavailable";
+}
+
+/**
+ * Display title of a graph node (or of one of its versions): a neutral
+ * placeholder while its details are pending, never a raw key.
+ */
+export function nodeTitle(node: GraphNode, t: TFunction, paper: PaperMetadata = node.selected_version): string {
+  const status = detailsStatus(node, paper);
+  if (status) return t(status === "loading" ? "graph.titleLoading" : "graph.titleUnavailable");
+  return paperTitle(paper, t);
 }
 
 export function truncateLabel(text: string, max: number = LABEL_MAX): string {

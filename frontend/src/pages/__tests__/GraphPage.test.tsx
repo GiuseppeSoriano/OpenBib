@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Link, Routes, Route } from "react-router-dom";
 import GraphPage from "@/pages/GraphPage";
+import { papers } from "@/lib/api";
 import { mockMatchMedia, renderWithProviders, restoreMatchMedia } from "@/test/utils";
-import type { GraphNode, GraphResponse, PaperMetadata, RelatedRangeRequest, RelatedRangeResponse } from "@/types";
+import type { GraphNode, GraphResponse, PaperDetail, PaperMetadata, RelatedRangeRequest, RelatedRangeResponse } from "@/types";
 
 // The canvas engine cannot run in jsdom — replace it with a stub that
 // records its props (click, drag) and counts mounts.
@@ -687,6 +688,63 @@ describe("GraphPage (desktop)", () => {
     const popup = screen.getByTestId("graph-node-popup");
     expect(within(popup).getByRole("heading", { level: 2, name: "Details unavailable" })).toBeInTheDocument();
     expect(screen.queryByText(/abc123/)).toBeNull();
+  });
+
+  it("shows a placeholder for a paper served without details, then its title once View details loads it", async () => {
+    const key = "doi:10.1049/iet-qtc.2020.0006";
+    const listData = paper(key, "group:pending", key, {
+      authors: [],
+      venue: null,
+      provider_source: "semantic_scholar",
+      provider_sources: ["semantic_scholar"],
+    });
+    api.related.mockImplementation((body: RelatedRangeRequest) => {
+      const pending: GraphNode = { ...node(listData), label: null, details_pending: true };
+      return Promise.resolve({
+        ...rangeResponse(body, { total: 1 }),
+        nodes: [pending],
+        edges: [{ source: pending.id, target: body.source_group_key, relation_type: "cited_by" }],
+        group_keys: [pending.id],
+      });
+    });
+    const record: PaperDetail = {
+      ...paper(key, "group:pending", "Modeling and Designing Routing Protocols in Quantum Networks", { cited_by_count: 3 }),
+      versions: [],
+    };
+    vi.mocked(papers.getDetail).mockResolvedValue(record);
+    renderGraph();
+    await ready();
+    const list = selectSeed();
+    fireEvent.click(within(ranges()).getByRole("button", { name: /^1–30 — not loaded yet/ }));
+
+    // Nothing will bring its details (the server did not say to ask again).
+    const row = await within(list).findByRole("button", { name: /^Title unavailable/ });
+    expect(within(list).queryByText(key)).toBeNull();
+    fireEvent.click(row);
+    const popup = screen.getByTestId("graph-node-popup");
+    expect(within(popup).getByRole("heading", { level: 2, name: "Title unavailable" })).toBeInTheDocument();
+    const canvasNode = forceNode("group:pending");
+    expect(canvasNode.node.details_pending).toBe(true);
+    const graphData = engine.props.graphData;
+    const drawNode = engine.props.nodeCanvasObject;
+
+    fireEvent.click(within(popup).getByRole("button", { name: "View details" }));
+    expect(papers.getDetail).toHaveBeenCalledWith(key);
+    expect(
+      await within(list).findByRole("button", { name: /^Modeling and Designing Routing Protocols in Quantum Networks/ }),
+    ).toBeInTheDocument();
+    expect(within(screen.getByTestId("graph-node-popup")).getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Modeling and Designing Routing Protocols in Quantum Networks",
+    );
+    // The canvas node takes the record too, keeping its place and size. The
+    // engine keeps its data (a new one would re-heat the whole layout) and
+    // only gets a new painter, which repaints the canvas.
+    expect(forceNode("group:pending")).toBe(canvasNode);
+    expect(canvasNode.node.selected_version.title).toBe("Modeling and Designing Routing Protocols in Quantum Networks");
+    expect(canvasNode.node.selected_version.cited_by_count).toBe(10);
+    expect(engine.props.graphData).toBe(graphData);
+    expect(engine.props.nodeCanvasObject).not.toBe(drawNode);
+    expect(papers.getDetail).toHaveBeenCalledTimes(1);
   });
 
   it("resets pins when the page is mounted again (pins are session-only)", async () => {

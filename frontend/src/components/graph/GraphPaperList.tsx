@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 import { PinToggle } from "@/components/graph/GraphNodePopup";
 import { graphDotClass } from "@/components/graph/nodeStyle";
-import { paperTitle } from "@/components/graph/paperText";
+import { detailsStatus, nodeTitle, paperTitle } from "@/components/graph/paperText";
 import type { GraphNode } from "@/types";
 
 interface GraphPaperListProps {
@@ -82,7 +82,9 @@ export default function GraphPaperList({
       const node = byId.get(nodeId);
       if (!node || placed.has(nodeId)) return [];
       placed.add(nodeId);
-      return needle && !fold(paperTitle(node.selected_version, t)).includes(needle) ? [] : [node];
+      // Only a known title can match (never the placeholder of a pending one).
+      const known = detailsStatus(node) ? "" : paperTitle(node.selected_version, t);
+      return needle && !fold(known).includes(needle) ? [] : [node];
     });
 
   const rangeLabel = currentRange
@@ -215,7 +217,7 @@ export default function GraphPaperList({
             </h3>
             <ul className="graph-list">
               {section.nodes.map((node) => {
-                const title = paperTitle(node.selected_version, t);
+                const title = nodeTitle(node, t);
                 const parts = meta(node);
                 return (
                   <li key={node.id} className="graph-list-row">

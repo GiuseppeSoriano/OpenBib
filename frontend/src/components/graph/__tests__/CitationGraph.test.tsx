@@ -312,6 +312,71 @@ describe("CitationGraph", () => {
     expect(ctx.fillText).toHaveBeenCalledWith(label, expect.any(Number), expect.any(Number));
   });
 
+  it("labels a node still without details with a placeholder, never its key, on the canvas and on hover", () => {
+    const { data } = setup();
+    const [pending, given] = data.nodes as [ForceNode, ForceNode];
+    const listData = (item: ForceNode, mark: object) => {
+      const key = `doi:10.1049/iet-qtc.2020.000${item.id}`;
+      const version = { ...item.node.selected_version, canonical_key: key, title: key };
+      item.node = { ...item.node, selected_version: version, versions: [version], details_pending: true, ...mark };
+    };
+    listData(pending, {});
+    listData(given, { detailsUnavailable: true });
+    const labels: string[] = [];
+    const ctx = {
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((label: string) => labels.push(label)),
+      measureText: vi.fn(() => ({ width: 40 })),
+    };
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toContain("Loading title…");
+    // Once no refresh will bring it, the label says so.
+    listData(pending, { detailsUnavailable: true });
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toContain("Title unavailable");
+    expect(labels.some((label) => label.includes("doi:"))).toBe(false);
+    listData(pending, { detailsUnavailable: false });
+    expect(engine.props.nodeLabel(pending)).toBe("<span>Loading title…</span>");
+    expect(engine.props.nodeLabel(given)).toBe("<span>Title unavailable</span>");
+  });
+
+  it("repaints on a payload revision without handing the engine new data", () => {
+    const data: ForceGraphData = { nodes: [forceNode("a", 10, 20)], links: [] };
+    const graph = (payloadRevision: number) => (
+      <ThemeProvider>
+        <CitationGraph
+          data={data}
+          payloadRevision={payloadRevision}
+          selectedId={null}
+          ariaLabel="Citation graph"
+          onNodeClick={vi.fn()}
+          onBackgroundClick={vi.fn()}
+        />
+      </ThemeProvider>
+    );
+    const { rerender } = render(graph(0));
+    const painter = engine.props.nodeCanvasObject;
+    rerender(graph(0));
+    expect(engine.props.nodeCanvasObject).toBe(painter);
+
+    // A title arrived in place: the engine gets a new painter (a repaint),
+    // never new graph data (which would re-heat the layout).
+    data.nodes[0]!.node = { ...data.nodes[0]!.node, label: "Arrived", selected_version: paper("a", "Arrived") };
+    rerender(graph(1));
+    expect(engine.props.graphData).toBe(data);
+    expect(engine.props.nodeCanvasObject).not.toBe(painter);
+    expect(engine.props.nodeLabel(data.nodes[0])).toBe("<span>Arrived</span>");
+  });
+
   it("keeps the selected node's fill, rings it with a soft halo and labels it in the theme's amber", () => {
     const style = document.documentElement.style;
     style.setProperty("--graph-canvas", "#f8faf9");

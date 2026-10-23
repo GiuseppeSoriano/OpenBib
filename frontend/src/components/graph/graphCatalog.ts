@@ -1,10 +1,27 @@
 import { linkKey, mergeGraph, pruneGraph, type ForceGraphData } from "@/components/graph/mergeGraph";
 import { visibleEdgeKeys, visibleNodeIds, type ExplorationState } from "@/components/graph/graphExploration";
-import type { GraphEdge, GraphNode } from "@/types";
+import { hasPendingDetails, isListDataOnly, type DetailsMark } from "@/components/graph/paperText";
+import type { GraphEdge, GraphNode, PaperDetail, PaperMetadata } from "@/types";
+
+/** A node as the catalog keeps it: the server's payload plus client marks. */
+export type CatalogNode = GraphNode & DetailsMark;
 
 function isRicher(incoming: GraphNode, existing: GraphNode): boolean {
+  // Full details beat list data only, whatever the version counts.
+  const pending = hasPendingDetails(existing);
+  if (pending !== hasPendingDetails(incoming)) return pending;
   if (incoming.version_count !== existing.version_count) return incoming.version_count > existing.version_count;
   return existing.selected_version.provider_source === "unknown" && incoming.selected_version.provider_source !== "unknown";
+}
+
+/** `incoming` in place of `existing`: the seed flag and the selected version stay. */
+function replacement(incoming: GraphNode, existing: GraphNode): GraphNode {
+  const selectedKey = existing.selected_version.canonical_key;
+  return {
+    ...incoming,
+    is_seed: existing.is_seed || incoming.is_seed,
+    selected_version: incoming.versions.find((version) => version.canonical_key === selectedKey) ?? incoming.selected_version,
+  };
 }
 
 /**
@@ -13,7 +30,7 @@ function isRicher(incoming: GraphNode, existing: GraphNode): boolean {
  * payloads so a node that leaves the canvas can come back unchanged.
  */
 export class GraphCatalog {
-  readonly nodes = new Map<string, GraphNode>();
+  readonly nodes = new Map<string, CatalogNode>();
   readonly edges = new Map<string, GraphEdge>();
 
   reset(): void {
@@ -22,10 +39,12 @@ export class GraphCatalog {
   }
 
   /**
-   * An existing node is replaced only by a richer record (more versions, or
-   * resolved where it was not), so a multi-version base node never degrades
-   * to the single-version record a related range returns. The replacement
-   * keeps the seed flag and the version the user had selected.
+   * An existing node is replaced only by a richer record (full details where
+   * it had list data only, more versions, or resolved where it was not), so
+   * a multi-version base node never degrades to the single-version record a
+   * related range returns, and a node whose details were pending takes them
+   * as soon as any response brings them. The replacement keeps the seed flag
+   * and the version the user had selected (positions and pins live outside).
    */
   add(data: { nodes: GraphNode[]; edges: GraphEdge[] }): void {
     for (const node of data.nodes) {
@@ -33,12 +52,7 @@ export class GraphCatalog {
       if (!existing) {
         this.nodes.set(node.id, node);
       } else if (isRicher(node, existing)) {
-        const selectedKey = existing.selected_version.canonical_key;
-        this.nodes.set(node.id, {
-          ...node,
-          is_seed: existing.is_seed || node.is_seed,
-          selected_version: node.versions.find((version) => version.canonical_key === selectedKey) ?? node.selected_version,
-        });
+        this.nodes.set(node.id, replacement(node, existing));
       }
     }
     for (const edge of data.edges) {
@@ -47,7 +61,84 @@ export class GraphCatalog {
     }
   }
 
-  getNode(id: string): GraphNode | undefined {
+  /**
+   * Payloads of a background details refresh: a node already here whose
+   * details are pending takes the incoming one when it has them. Nothing
+   * else changes (no new node or edge). Returns whether a node changed.
+   */
+  mergeDetails(nodes: readonly GraphNode[]): boolean {
+    let changed = false;
+    for (const node of nodes) {
+      const existing = this.nodes.get(node.id);
+      if (existing && hasPendingDetails(existing) && !hasPendingDetails(node)) {
+        this.nodes.set(node.id, replacement(node, existing));
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Whether the node is here and its selected version still waits for details. */
+  hasPendingDetails(id: string): boolean {
+    const node = this.nodes.get(id);
+    return !!node && hasPendingDetails(node);
+  }
+
+  /**
+   * Mark pending nodes whose details no refresh will bring (or clear the
+   * mark when a new refresh starts). Returns whether a node changed.
+   */
+  markDetailsUnavailable(ids: Iterable<string>, unavailable: boolean): boolean {
+    let changed = false;
+    for (const id of ids) {
+      const node = this.nodes.get(id);
+      if (!node || !hasPendingDetails(node) || !!node.detailsUnavailable === unavailable) continue;
+      const marked: CatalogNode = { ...node, detailsUnavailable: unavailable };
+      this.nodes.set(id, marked);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * The full record of `canonicalKey` arrived (the details panel fetched
+   * it): every pending node's list-data version of that key takes it. The
+   * node keeps its ranking count (its size). Returns whether a node changed.
+   */
+  patchDetails(canonicalKey: string, detail: PaperDetail): boolean {
+    // The record alone: its group's versions are the node's business.
+    const { versions: groupVersions, ...record } = detail;
+    void groupVersions;
+    const stale = (version: PaperMetadata) => version.canonical_key === canonicalKey && isListDataOnly(version);
+    let changed = false;
+    for (const [id, node] of this.nodes) {
+      const pending = node.versions.find(stale) ?? (stale(node.selected_version) ? node.selected_version : undefined);
+      if (!hasPendingDetails(node) || !pending) continue;
+      // The node's key and group stay (the record may be stored under older
+      // ones), and so does the ranking count that sizes the node.
+      const full: PaperMetadata = {
+        ...record,
+        canonical_key: pending.canonical_key,
+        paper_group_key: pending.paper_group_key,
+        cited_by_count: pending.cited_by_count ?? record.cited_by_count,
+      };
+      const swap = (version: PaperMetadata) => (stale(version) ? full : version);
+      const selected = swap(node.selected_version);
+      const patched: CatalogNode = {
+        ...node,
+        label: selected.title,
+        selected_version: selected,
+        versions: node.versions.map(swap),
+        details_pending: false,
+        detailsUnavailable: false,
+      };
+      this.nodes.set(id, patched);
+      changed = true;
+    }
+    return changed;
+  }
+
+  getNode(id: string): CatalogNode | undefined {
     return this.nodes.get(id);
   }
 
@@ -66,12 +157,20 @@ export class GraphCatalog {
   }
 }
 
+/** Whether swapping `next` in for `current` leaves the layout as it is (same node size). */
+function sameLayout(current: GraphNode, next: GraphNode): boolean {
+  return (current.selected_version.cited_by_count ?? null) === (next.selected_version.cited_by_count ?? null);
+}
+
 /**
  * Bring the force-graph data in line with the exploration state: prune what
  * is no longer visible, then merge what became visible (spawned around
  * `anchorId` when it has no positioned edge partner). Surviving node objects
  * keep their identity (positions, pins) and pick up the catalog's payload.
- * Returns `prev` itself when nothing changed.
+ * Returns `prev` itself when nothing changed, and also when only payloads
+ * changed without touching the layout (details arriving for a node): they
+ * are swapped into the existing node objects, so the engine keeps its data
+ * (a new one re-heats the whole simulation) and only needs a repaint.
  */
 export function syncForceData(
   prev: ForceGraphData,
@@ -87,12 +186,18 @@ export function syncForceData(
     }),
   );
 
-  const unchanged =
+  const sameMembers =
     prev.nodes.length === keepIds.size &&
     prev.links.length === keepLinks.size &&
-    prev.nodes.every((node) => keepIds.has(node.id) && catalog.nodes.get(node.id) === node.node) &&
+    prev.nodes.every((node) => keepIds.has(node.id)) &&
     prev.links.every((link) => keepLinks.has(linkKey(link)));
-  if (unchanged) return prev;
+  if (sameMembers && prev.nodes.every((forceNode) => sameLayout(forceNode.node, catalog.nodes.get(forceNode.id)!))) {
+    for (const forceNode of prev.nodes) {
+      const node = catalog.nodes.get(forceNode.id)!;
+      if (forceNode.node !== node) forceNode.node = node;
+    }
+    return prev;
+  }
 
   const pruned = pruneGraph(prev, keepIds, keepLinks);
   const presentNodes = new Set<string>();

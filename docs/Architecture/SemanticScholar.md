@@ -303,6 +303,31 @@ a paper's citers or references, ordered by citation count or by recency
    (`exclude_group_keys`). Only the served papers are hydrated: the database
    first, then one batch lookup. A served paper's stored group that is pinned
    is dropped.
+6. The batch lookup always gets at least 10 s, however much of the request
+   the scan used. A rate-limited or failed lookup is tried again only within
+   those first 10 s (at most two lookups, each with the client's own
+   retries): about half of Semantic Scholar's answers are 429s, whatever the
+   spacing, but a lookup that keeps failing returns list data within about
+   10 s instead of holding the request and the shared pacing.
+   A paper still without its record is served from list data only: its node
+   is `details_pending` (no `label`; the version's title is its key) and it
+   is never stored. When the lookup failed, the response sets
+   `details_incomplete` (plus `retry_after` when rate limited). The UI then
+   shows "Loading title…", re-sends the same request in the background at
+   most twice, merging only node payloads, and shows "Title unavailable" if
+   the record never comes. Background refreshes never compete with the
+   user: one at a time, never while a request of the user's is in flight (a
+   new one aborts a refresh in flight, which waits its turn), only for the
+   two most recent responses and for nodes still on the canvas, and never
+   after OpenBib's own rate limit (429) answered one. A refresh changes no
+   layout: the canvas only repaints the new titles. A paper the batch
+   answers with `null` is pending but not incomplete. "View details" also
+   completes the node.
+7. A request whose client disconnects (paging on, switching direction, a
+   refresh stepping aside) stops its provider calls at once and ends with
+   499, so abandoned requests never queue behind the shared pacing ahead of
+   the one the user waits for. A top-up ends only once every source's task
+   has stopped.
 
 `POST /graph/related/top-up` ("Expand pinned nodes") brings each pinned
 source's branch up to the range size over the same ranked lists. A source

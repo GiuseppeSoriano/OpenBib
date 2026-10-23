@@ -18,6 +18,10 @@ class GraphNode(BaseModel):
     selected_version: PaperMetadataRead
     versions: list[PaperMetadataRead] = []
     is_seed: bool = False
+    # The provider's record of the selected version could not be fetched: it
+    # carries the related list's data only (no title: ``label`` is None and
+    # the version's title is its canonical key). Never cached or stored.
+    details_pending: bool = False
 
     _clean_label = field_validator("label", mode="before")(clean_title_value)
 
@@ -104,6 +108,11 @@ class RelatedRangeResponse(BaseModel):
     snapshot_id: str | None
     # "ranking": the list is still being collected and ranked (no nodes yet).
     reason: Literal["no_provider_id", "ranking"] | None = None
+    # Some nodes are ``details_pending`` because fetching their records failed
+    # (rate limit or time budget): the same request may complete them later,
+    # after ``retry_after`` seconds when the provider rate limited it.
+    details_incomplete: bool = False
+    retry_after: int | None = None
 
 
 class TopUpSource(BaseModel):
@@ -145,3 +154,6 @@ class TopUpResponse(BaseModel):
     sources: list[TopUpSourceResult]
     range_size: int
     max_results: int
+    # As in ``RelatedRangeResponse``.
+    details_incomplete: bool = False
+    retry_after: int | None = None

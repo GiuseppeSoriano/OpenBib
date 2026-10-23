@@ -2540,13 +2540,26 @@ def list_sections(s: Session) -> dict:
 RANGE_BOUNDS = "__range_bounds__"
 
 
-def expected_range(data: dict) -> list[str]:
+# A raw canonical key shown as a title (the bug a pending node's list data used to cause).
+RAW_KEY_TITLE = re.compile(r"^(doi|s2|arxiv|pmid|pmcid|hash|group):")
+
+
+def expected_range(data: dict) -> list[str | None]:
+    """Normalised titles of the response's range, in order. ``None`` stands for a node served
+    ``details_pending``: its response title is only its key, and the list shows a placeholder
+    ("Loading title…") or the title a background refresh brought since."""
     by_id = {n["id"]: n for n in data.get("nodes", [])}
     return [
-        norm_title(by_id[g]["selected_version"].get("title") or "")
+        None
+        if by_id[g].get("details_pending")
+        else norm_title(by_id[g]["selected_version"].get("title") or "")
         for g in data.get("group_keys", [])
         if g in by_id
     ]
+
+
+def _row_matches(seen: str, want: str | None) -> bool:
+    return not RAW_KEY_TITLE.match(seen) if want is None else seen == want
 
 
 def compare_range(r: Result, s: Session, data: dict, label: str):
@@ -2554,6 +2567,15 @@ def compare_range(r: Result, s: Session, data: dict, label: str):
     pinned = {norm_title(t) for t in sections.get("Pinned", [])}
     visible = [norm_title(t) for t in sections.get("Current range", [])]
     expected = [t for t in expected_range(data) if t not in pinned]
+    raw_keys = [
+        t
+        for rows in sections.values()
+        if isinstance(rows, list)
+        for t in rows
+        if RAW_KEY_TITLE.match(norm_title(t))
+    ]
+    if raw_keys:
+        r.failures.append(f"{label}: Papers list shows raw keys as titles: {raw_keys[:3]}")
     r.info[label] = {
         "range": [data.get("range_start"), data.get("range_end")],
         "visible": len(visible),
@@ -2566,9 +2588,11 @@ def compare_range(r: Result, s: Session, data: dict, label: str):
             r.failures.append(
                 f"{label}: Current range heading bounds {sections.get(RANGE_BOUNDS)!r} != {want!r}"
             )
-    if visible != expected:
+    if len(visible) != len(expected) or not all(map(_row_matches, visible, expected)):
         diff = [
-            (i, a, b) for i, (a, b) in enumerate(zip(visible, expected, strict=False)) if a != b
+            (i, a, b)
+            for i, (a, b) in enumerate(zip(visible, expected, strict=False))
+            if not _row_matches(a, b)
         ][:3]
         r.failures.append(
             f"{label}: Current range ({len(visible)}) != response group_keys "

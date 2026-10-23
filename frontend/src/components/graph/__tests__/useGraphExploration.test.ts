@@ -7,6 +7,7 @@ import { useGraphExploration } from "@/components/graph/useGraphExploration";
 import type {
   GraphNode,
   GraphResponse,
+  PaperDetail,
   PaperMetadata,
   RelatedRangeRequest,
   RelatedRangeResponse,
@@ -560,5 +561,242 @@ describe("useGraphExploration ranking and provider limits", () => {
     await act(async () => calls[1]!.reply.resolve(topUpFor(calls[1]!.body)));
     expect(result.current.state.expand).toBeNull();
     expect(result.current.state.notice).toBeNull();
+  });
+});
+
+/** A node served with list data only (its title is its key). */
+function pendingNode(id: string): GraphNode {
+  const item = node(id);
+  const version = { ...item.selected_version, title: item.selected_version.canonical_key };
+  return { ...item, label: null, selected_version: version, versions: [version], details_pending: true };
+}
+
+function incompleteRange(body: RelatedRangeRequest, keys: string[], retryAfter: number | null = null): RelatedRangeResponse {
+  return { ...rangeFor(body, keys), nodes: keys.map(pendingNode), details_incomplete: true, retry_after: retryAfter };
+}
+
+describe("useGraphExploration details refresh", () => {
+  it("re-requests a range served without details and merges only the payloads", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a", "b"])));
+    expect(catalog.getNode("a")!.details_pending).toBe(true);
+    const loaded = result.current.state;
+    const revision = result.current.catalogRevision;
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    // The same request (same body) on its own signal, in the background.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body).toEqual(calls[0]!.body);
+    expect(result.current.state.pending).toBeNull();
+    // It serves different groups now: only payloads already here are taken.
+    await act(async () => calls[1]!.reply.resolve(rangeFor(calls[1]!.body, ["a", "b", "c"])));
+
+    expect(catalog.getNode("a")!.selected_version.title).toBe("a");
+    expect(catalog.getNode("b")!.details_pending).toBeFalsy();
+    expect(catalog.getNode("c")).toBeUndefined();
+    expect(result.current.state).toBe(loaded);
+    expect(result.current.catalogRevision).toBeGreaterThan(revision);
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("holds a due refresh until the user's own request settles", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"], 2)));
+    // The user explores from "a" (still on the canvas) before it is due.
+    act(() => result.current.select("a"));
+    act(() => result.current.loadRange({ index: 0 }));
+    const userRequest = calls[1]!;
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(calls).toHaveLength(2);
+    expect(userRequest.signal?.aborted).toBe(false);
+
+    await act(async () => userRequest.reply.resolve(rangeFor(userRequest.body, ["b"])));
+    const loaded = result.current.state;
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(calls).toHaveLength(3);
+    const refresh = calls[2]!;
+    expect(refresh.body).toEqual(calls[0]!.body);
+    await act(async () => refresh.reply.resolve(rangeFor(refresh.body, ["a"])));
+    expect(catalog.getNode("a")!.details_pending).toBeFalsy();
+    expect(result.current.state).toBe(loaded);
+    expect(currentBranch(result.current.state, "a")!.memberIds).toEqual(["b"]);
+  });
+
+  it("makes a refresh in flight step aside for a new user request, keeping its attempt", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"])));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    const refresh = calls[1]!;
+    expect(refresh.body).toEqual(calls[0]!.body);
+
+    act(() => result.current.select("a"));
+    act(() => result.current.loadRange({ index: 0 }));
+    const userRequest = calls[2]!;
+    // The refresh is aborted (the server stops its provider calls), the user's request is not.
+    expect(refresh.signal?.aborted).toBe(true);
+    expect(userRequest.signal?.aborted).toBe(false);
+    // A late answer to the aborted refresh is ignored.
+    await act(async () => refresh.reply.resolve(rangeFor(refresh.body, ["a"])));
+    expect(catalog.getNode("a")!.details_pending).toBe(true);
+
+    await act(async () => userRequest.reply.resolve(rangeFor(userRequest.body, ["b"])));
+    // Both attempts are still to come.
+    for (const attempt of [3, 4]) {
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(calls).toHaveLength(attempt + 1);
+      expect(calls[attempt]!.body).toEqual(calls[0]!.body);
+      await act(async () => calls[attempt]!.reply.resolve(incompleteRange(calls[attempt]!.body, ["a"])));
+    }
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(calls).toHaveLength(5);
+    expect(catalog.getNode("a")!.detailsUnavailable).toBe(true);
+  });
+
+  it("drops the refresh of a range the user paged away from", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"])));
+    act(() => result.current.loadRange({ index: 1 }));
+    await act(async () => calls[1]!.reply.resolve(rangeFor(calls[1]!.body, ["b"])));
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(calls).toHaveLength(2);
+    expect(catalog.getNode("a")!.detailsUnavailable).toBe(true);
+  });
+
+  it("gives up rather than spend the user's own rate limit", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"])));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await act(async () => calls[1]!.reply.reject(httpError(429, { "retry-after": "3" })));
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(calls).toHaveLength(2);
+    expect(catalog.getNode("a")!.detailsUnavailable).toBe(true);
+    // The user's exploration shows no error for a background request.
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("refreshes a top-up served without details", async () => {
+    vi.useFakeTimers();
+    const calls = queueTopUp();
+    const { result, catalog } = setup(["a"]);
+    act(() => result.current.expandPinned());
+    const response = topUpFor(calls[0]!.body);
+    await act(async () =>
+      calls[0]!.reply.resolve({ ...response, nodes: response.nodes.map((item) => pendingNode(item.id)), details_incomplete: true }),
+    );
+    expect(catalog.getNode("a-n")!.details_pending).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body).toEqual(calls[0]!.body);
+    await act(async () => calls[1]!.reply.resolve(topUpFor(calls[1]!.body)));
+    expect(catalog.getNode("a-n")!.details_pending).toBeFalsy();
+    expect(result.current.state.expand).toBeNull();
+  });
+
+  it("cancels refreshes on a new base graph and on unmount", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const catalog = new GraphCatalog();
+    let graphBase = base(["s"]);
+    const { result, rerender, unmount } = renderHook(() => useGraphExploration(graphBase, catalog));
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"])));
+
+    graphBase = base(["t"]);
+    rerender();
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(calls).toHaveLength(1);
+
+    act(() => result.current.select("t"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[1]!.reply.resolve(incompleteRange(calls[1]!.body, ["b"])));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(calls).toHaveLength(3);
+    unmount();
+    expect(calls[2]!.signal?.aborted).toBe(true);
+  });
+
+  it("marks nodes unavailable when the refreshes give up", async () => {
+    vi.useFakeTimers();
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve(incompleteRange(calls[0]!.body, ["a"])));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await act(async () => calls[attempt]!.reply.resolve(incompleteRange(calls[attempt]!.body, ["a"])));
+    }
+    expect(calls).toHaveLength(3);
+    expect(catalog.getNode("a")!.detailsUnavailable).toBe(true);
+  });
+
+  it("takes the details panel's record for a node still without details", async () => {
+    const calls = queueRelated();
+    const { result, catalog } = setup();
+    act(() => result.current.select("s"));
+    act(() => result.current.loadRange({ index: 0 }));
+    await act(async () => calls[0]!.reply.resolve({ ...rangeFor(calls[0]!.body, ["a"]), nodes: [pendingNode("a")] }));
+    const revision = result.current.catalogRevision;
+    const record = { ...node("a").selected_version, title: "Full title", versions: [] } as unknown as PaperDetail;
+
+    act(() => result.current.paperDetailsLoaded("doi:10.1/a", record));
+
+    expect(catalog.getNode("a")!.selected_version.title).toBe("Full title");
+    expect(catalog.getNode("a")!.details_pending).toBe(false);
+    expect(result.current.catalogRevision).toBe(revision + 1);
+    act(() => result.current.paperDetailsLoaded("doi:10.1/a", record));
+    expect(result.current.catalogRevision).toBe(revision + 1);
   });
 });

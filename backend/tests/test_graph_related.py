@@ -668,29 +668,271 @@ async def test_hydration_uses_the_db_first_then_one_batch(db, redis_backend, fak
     assert p1.selected_version.cited_by_count == 99_999
     stored = await db.get(CachedPaperMetadata, "doi:10.1/p1")
     assert (stored.paper_group_key, stored.semantic_scholar_id) == ("group:p1", "p1")
-    # A paper Semantic Scholar no longer returns keeps its list data, unsaved.
+    # A paper Semantic Scholar no longer returns (a null row) keeps its list
+    # data, unsaved, and is flagged: no title to show. Asking again would not
+    # help, so the response is not incomplete.
     minimal = p2.selected_version
-    assert (p2.label, minimal.abstract, minimal.semantic_scholar_id) == ("doi:10.1/p2", None, "p2")
+    assert (p2.label, p2.details_pending) == (None, True)
+    assert (minimal.abstract, minimal.semantic_scholar_id) == (None, "p2")
     assert (minimal.provider_source, minimal.provider_sources) == (
         "semantic_scholar",
         ["semantic_scholar"],
     )
     assert minimal.abstract_url == "https://www.semanticscholar.org/paper/p2"
     assert minimal.publication_date == date.fromordinal(DAY0 + 2)
+    assert not (p0.details_pending or p1.details_pending)
+    assert (res.details_incomplete, res.retry_after) == (False, None)
     assert await db.get(CachedPaperMetadata, "doi:10.1/p2") is None
 
     await _range(db, redis_backend)
     assert fake.id_calls == [["p1", "p2"], ["p2"]]
 
 
-async def test_hydration_failure_serves_list_data(db, redis_backend, fake, seeds):
+async def test_a_rate_limited_hydration_flags_its_nodes(db, redis_backend, fake, seeds):
     fake.add(SEED_ID, 2)
-    fake.fail_ids = ProviderError("provider_rate_limited", "busy", retry_after=5)
+    fake.fail_ids = ProviderError("provider_rate_limited", "busy", retry_after=30)
 
     res = await _range(db, redis_backend)
 
-    assert [node.label for node in res.nodes] == ["doi:10.1/p0", "doi:10.1/p1"]
+    # The batch was tried again while the budget allowed, then the range is
+    # served from list data: flagged, never labelled with a key, never stored.
+    assert len(fake.id_calls) == related._HYDRATE_LOOKUPS
+    assert [(node.label, node.details_pending) for node in res.nodes] == [(None, True)] * 2
+    assert res.group_keys == _groups(range(2))
+    assert (res.details_incomplete, res.retry_after) == (True, related._DETAILS_RETRY_AFTER)
     assert await db.get(CachedPaperMetadata, "doi:10.1/p0") is None
+    assert await db.get(CachedPaperMetadata, "doi:10.1/p1") is None
+
+    # Asking again later completes them.
+    fake.fail_ids = None
+    res = await _range(db, redis_backend)
+
+    assert [(node.label, node.details_pending) for node in res.nodes] == [
+        ("Paper p0", False),
+        ("Paper p1", False),
+    ]
+    assert (res.details_incomplete, res.retry_after) == (False, None)
+
+
+async def test_a_batch_rate_limited_once_is_tried_again(
+    db, redis_backend, fake, seeds, monkeypatch
+):
+    fake.add(SEED_ID, 2)
+    original = fake.papers_by_ids
+    failures = [ProviderError("provider_rate_limited", "busy", retry_after=30)]
+
+    async def flaky(ids):
+        if failures:
+            fake.id_calls.append(list(ids))
+            raise failures.pop()
+        return await original(ids)
+
+    monkeypatch.setattr(registry, "papers_by_ids", flaky)
+
+    res = await _range(db, redis_backend)
+
+    assert fake.id_calls == [["p0", "p1"], ["p0", "p1"]]
+    assert [node.label for node in res.nodes] == ["Paper p0", "Paper p1"]
+    assert not res.details_incomplete
+
+
+async def test_a_hydration_out_of_time_flags_its_nodes(db, redis_backend, fake, seeds, monkeypatch):
+    fake.add(SEED_ID, 2)
+    monkeypatch.setattr(related, "_HYDRATE_MIN_SECONDS", 0.05)
+
+    async def slow(ids):
+        fake.id_calls.append(list(ids))
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(registry, "papers_by_ids", slow)
+    entries = [_entry(0), _entry(1)]
+
+    hydration = await related.hydrate(db, entries, deadline=time.monotonic())
+
+    assert fake.id_calls == [["p0", "p1"]]
+    assert hydration.pending == {"p0", "p1"}
+    assert (hydration.incomplete, hydration.retry_after) == (True, None)
+    assert hydration.reads["p0"].title == "doi:10.1/p0"
+    assert await db.get(CachedPaperMetadata, "doi:10.1/p0") is None
+
+
+async def test_hydration_gets_its_minimum_budget_after_a_long_scan(
+    db, redis_backend, fake, seeds, monkeypatch
+):
+    # The scan spent the whole request budget: the lookup still gets its
+    # minimum time instead of failing at once.
+    monkeypatch.setattr(related, "_HYDRATE_MIN_SECONDS", 1.0)
+    entries = [_entry(2), _entry(3)]
+    for entry in entries:
+        fake.served[entry[0]] = entry
+    original = fake.papers_by_ids
+
+    async def queued(ids):
+        await asyncio.sleep(0.3)  # waiting behind the provider's pacing
+        return await original(ids)
+
+    monkeypatch.setattr(registry, "papers_by_ids", queued)
+    spent = time.monotonic() - 5
+
+    hydration = await related.hydrate(db, entries, deadline=spent)
+
+    assert hydration.pending == set()
+    assert not hydration.incomplete
+    assert [hydration.reads[e[0]].title for e in entries] == ["Paper p2", "Paper p3"]
+
+
+async def test_an_unconfigured_provider_is_not_retried(db, redis_backend, fake, seeds):
+    fake.add(SEED_ID, 2)
+    fake.fail_ids = ProviderError("provider_not_configured", "no key")
+
+    res = await _range(db, redis_backend)
+
+    assert len(fake.id_calls) == 1
+    assert all(node.details_pending for node in res.nodes)
+    # Nothing a later request could fix: the nodes stay without details.
+    assert (res.details_incomplete, res.retry_after) == (False, None)
+
+
+async def test_top_up_flags_nodes_whose_details_failed(db, redis_backend, fake, seeds):
+    fake.add(SEED_ID, 40)
+    db.add(_cached("doi:10.1/p0", "group:p0", "Cached P0", semantic_scholar_id="p0"))
+    await db.flush()
+    fake.fail_ids = ProviderError("provider_rate_limited", "busy", retry_after=30)
+
+    res = await _top_up(db, redis_backend, [_seed_source()], target_per_source=3)
+
+    assert res.sources[0].added_group_keys == _groups(range(3))
+    pending = {node.id: (node.label, node.details_pending) for node in res.nodes}
+    assert pending == {
+        "group:p0": ("Cached P0", False),
+        "group:p1": (None, True),
+        "group:p2": (None, True),
+    }
+    assert (res.details_incomplete, res.retry_after) == (True, related._DETAILS_RETRY_AFTER)
+    assert await db.get(CachedPaperMetadata, "doi:10.1/p1") is None
+
+
+async def test_a_client_that_went_away_stops_provider_calls(
+    db, redis_backend, fake, seeds, monkeypatch
+):
+    fake.add(SEED_ID, 3)
+    gone = asyncio.Event()
+    queued = asyncio.Event()
+    cancelled = []
+
+    async def receive():
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def stuck(ids):
+        # Queued behind the shared pacing for a response nobody will read.
+        queued.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.append(list(ids))
+            raise
+
+    monkeypatch.setattr(registry, "papers_by_ids", stuck)
+
+    async def leave():
+        await queued.wait()
+        gone.set()
+
+    started = time.monotonic()
+    with pytest.raises(related.ClientGoneError):
+        async with related.watch_client(receive):
+            await asyncio.gather(_range(db, redis_backend), leave())
+
+    assert cancelled == [["p0", "p1", "p2"]]
+    assert time.monotonic() - started < 5
+    # Once the disconnect is seen, a provider call does not even start.
+    async with related.watch_client(receive):
+        await asyncio.sleep(0.01)
+        with pytest.raises(related.ClientGoneError):
+            await _range(db, redis_backend)
+    assert len(cancelled) == 1
+
+
+async def test_watching_a_client_that_stays_changes_nothing(db, redis_backend, fake, seeds):
+    fake.add(SEED_ID, 3)
+    never = asyncio.Event()
+
+    async def receive():
+        await never.wait()
+        return {"type": "http.disconnect"}
+
+    async with related.watch_client(receive):
+        res = await _range(db, redis_backend)
+
+    assert [node.label for node in res.nodes] == ["Paper p0", "Paper p1", "Paper p2"]
+    assert related._client_gone.get() is None
+
+
+async def test_a_top_up_whose_client_left_ends_after_every_source_stopped(
+    db, redis_backend, fake, seeds, monkeypatch
+):
+    monkeypatch.setattr(settings, "graph_related_topup_concurrency", 2)
+    fake.add(SEED_ID, 5)
+    fake.slow[SEED_ID] = 30  # the first source waits on the provider
+    fake.add(SEED2_ID, 5, lambda i: _entry(i, "q"))  # the second ranks its list
+    gone = asyncio.Event()
+    ranked = []
+    stored_keys = related._stored_keys
+
+    async def receive():
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def ranking(session, entries):
+        gone.set()  # the client leaves while the second source is in the DB
+        await asyncio.sleep(0.2)
+        result = await stored_keys(session, entries)
+        ranked.append(len(entries))
+        return result
+
+    monkeypatch.setattr(related, "_stored_keys", ranking)
+    before = asyncio.all_tasks()
+    started = time.monotonic()
+    with pytest.raises(related.ClientGoneError):
+        async with related.watch_client(receive):
+            await _top_up(
+                db, redis_backend, [_seed_source(), _seed_source(key=SEED2, group=SEED2_GROUP)]
+            )
+
+    # The first source's call stopped at once; the request ended only after
+    # the second source's work on its session did, and no task outlives it.
+    assert time.monotonic() - started < 5
+    assert ranked == [5]
+    assert [task for task in asyncio.all_tasks() - before if not task.done()] == []
+    assert fake.id_calls == []
+
+
+async def test_a_failing_hydration_stops_retrying_after_its_window(
+    db, redis_backend, fake, seeds, monkeypatch
+):
+    # However much of the deadline is left (an instant scan leaves most of
+    # it), a failing lookup is tried again only within the first
+    # ``_HYDRATE_MIN_SECONDS``: the client's background refresh does the rest.
+    monkeypatch.setattr(related, "_HYDRATE_MIN_SECONDS", 1.0)
+    monkeypatch.setattr(related, "_HYDRATE_RETRY_SECONDS", 0.6)
+    monkeypatch.setattr(related, "_HYDRATE_LOOKUPS", 5)
+
+    async def rate_limited(ids):
+        fake.id_calls.append(list(ids))
+        await asyncio.sleep(0.3)  # the provider's paced, backed-off attempts
+        raise ProviderError("provider_rate_limited", "busy", retry_after=30)
+
+    monkeypatch.setattr(registry, "papers_by_ids", rate_limited)
+    entries = [_entry(0), _entry(1)]
+
+    started = time.monotonic()
+    hydration = await related.hydrate(db, entries, deadline=started + 25)
+
+    assert fake.id_calls == [["p0", "p1"], ["p0", "p1"]]
+    assert time.monotonic() - started < 2
+    assert hydration.pending == {"p0", "p1"}
+    assert (hydration.incomplete, hydration.retry_after) == (True, related._DETAILS_RETRY_AFTER)
 
 
 async def test_rows_stored_by_a_concurrent_request_do_not_fail_the_range(

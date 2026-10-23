@@ -205,4 +205,22 @@ describe("GraphPaperList", () => {
     expect(within(list).getByRole("status")).toHaveTextContent("No papers on the graph yet.");
     expect(within(list).queryByRole("searchbox")).toBeNull();
   });
+
+  it("lists a node still without details under a placeholder title, never its key", () => {
+    const listData = (id: string, mark: object = {}): GraphNode => {
+      const base = graphNode(id, `doi:10.1/${id}`, "2020", 19);
+      const version = { ...base.selected_version, canonical_key: `doi:10.1/${id}` };
+      return { ...base, label: null, selected_version: version, versions: [version], details_pending: true, ...mark };
+    };
+    const { list } = setup({ nodes: [...NODES, listData("p"), listData("q", { detailsUnavailable: true })], currentRangeIds: ["p", "q"] });
+    const titles = rows(list).map((row) => row.querySelector(".graph-list-name")!.textContent);
+    expect(titles).toContain("Loading title…");
+    expect(titles).toContain("Title unavailable");
+    expect(list.textContent).not.toContain("doi:10.1/");
+    expect(screen.getByRole("button", { name: "Pin “Loading title…”" })).toBeInTheDocument();
+
+    // A placeholder is not a title: filtering never matches it.
+    fireEvent.change(within(list).getByRole("searchbox"), { target: { value: "loading" } });
+    expect(rows(list)).toHaveLength(0);
+  });
 });

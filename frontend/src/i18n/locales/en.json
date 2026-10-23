@@ -538,6 +538,8 @@
     "tooManySeeds": "Graphs are limited to 200 papers. Open a smaller collection or a single paper.",
     "notAvailable": "This graph isn’t available.",
     "detailsUnavailable": "Details unavailable",
+    "titleLoading": "Loading title…",
+    "titleUnavailable": "Title unavailable",
     "canvasLabel": "Citation graph with {{nodes, number}} papers and {{edges, number}} links. Use the paper list to explore with a keyboard or screen reader.",
     "canvasLabelSeed": "Citation graph of “{{title}}” with {{nodes, number}} papers and {{edges, number}} links. Use the paper list to explore with a keyboard or screen reader."
   },

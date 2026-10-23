@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { isCancel } from "axios";
 import { graph as graphApi } from "@/lib/api";
 import { apiErrorCode, apiErrorDetail, apiStatus, retryAfterSeconds } from "@/lib/apiError";
+import { DetailsRefresher } from "@/components/graph/detailsRefresh";
 import type { GraphCatalog } from "@/components/graph/graphCatalog";
 import {
   buildRangeRequest,
@@ -14,6 +15,7 @@ import {
   modeSwitchAutoLoad,
   planTopUp,
   TOPUP_CHUNK,
+  visibleNodeIds,
   type ErrorKind,
   type ExplorationAction,
   type ExplorationState,
@@ -23,7 +25,7 @@ import {
   type RangeRequestSpec,
   type TopUpRequestSpec,
 } from "@/components/graph/graphExploration";
-import type { CitingOrder, GraphResponse, RelationDirection } from "@/types";
+import type { CitingOrder, GraphResponse, PaperDetail, RelationDirection } from "@/types";
 
 export interface GraphExploration {
   state: ExplorationState;
@@ -46,6 +48,8 @@ export interface GraphExploration {
   continueRanking(): void;
   dismissNotice(): void;
   versionChanged(groupId: string, canonicalKey: string): void;
+  /** The details panel loaded `canonicalKey`: a node still without its details takes them. */
+  paperDetailsLoaded(canonicalKey: string, detail: PaperDetail): void;
 }
 
 export function errorKind(err: unknown): ErrorKind {
@@ -109,13 +113,27 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
       if (before && stateRef.current.pending !== before) abort();
     };
 
+    const catalogChanged = () => setCatalogRevision((revision) => revision + 1);
+
     const addToCatalog = (data: Parameters<GraphCatalog["add"]>[0]) => {
       catalog.add(data);
-      setCatalogRevision((revision) => revision + 1);
+      catalogChanged();
     };
+
+    // Completes, in the background, nodes a response served without their
+    // details; it only ever touches catalog payloads, and always gives way
+    // to the user's own requests.
+    const refresher = new DetailsRefresher(catalog, catalogChanged, {
+      retryAfterOf,
+      // OpenBib's own limit: another refresh would only spend the user's budget.
+      stopsOn: (err) => apiStatus(err) === 429,
+      isBusy: () => stateRef.current.pending !== null || stateRef.current.expand?.phase === "paused",
+      visibleIds: () => visibleNodeIds(stateRef.current),
+    });
 
     const nextSignal = () => {
       abort();
+      refresher.yieldToForeground();
       const controller = new AbortController();
       controllerRef.current = controller;
       return controller.signal;
@@ -180,6 +198,9 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
             return;
           }
           addToCatalog(response);
+          refresher.track(`range:${JSON.stringify(body)}`, response, (refreshSignal) =>
+            graphApi.related(body, { signal: refreshSignal }),
+          );
           dispatch({ type: "rangeLoaded", id: pending.id, response });
         },
         (err: unknown) => fail(pending.id, err),
@@ -200,6 +221,9 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         (response) => {
           if (!isPending(pending.id)) return;
           addToCatalog(response);
+          refresher.track(`topup:${JSON.stringify(body)}`, response, (refreshSignal) =>
+            graphApi.topUp(body, { signal: refreshSignal }),
+          );
           dispatch({ type: "topUpLoaded", id: pending.id, response, now: Date.now() });
           pump();
         },
@@ -222,8 +246,14 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
       dispatch,
       abort,
       pump,
+      /** Stop every request, background refreshes included (leaving the page). */
+      stop() {
+        abort();
+        refresher.cancel();
+      },
       reset(next: GraphResponse) {
         abort();
+        refresher.cancel();
         catalog.reset();
         addToCatalog(next);
         dispatch({ type: "baseLoaded", base: next });
@@ -231,9 +261,10 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
       /** Drop the whole exploration (the base was withdrawn, e.g. lost access). */
       clear() {
         abort();
+        refresher.cancel();
         if (stateRef.current.baseIds.size === 0) return;
         catalog.reset();
-        setCatalogRevision((revision) => revision + 1);
+        catalogChanged();
         const next = initialExplorationState(stateRef.current.mode);
         stateRef.current = next;
         setState(next);
@@ -318,8 +349,11 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
         dispatch({ type: "dismissNotice" });
       },
       versionChanged(groupId: string, canonicalKey: string) {
-        if (catalog.selectVersion(groupId, canonicalKey)) setCatalogRevision((revision) => revision + 1);
+        if (catalog.selectVersion(groupId, canonicalKey)) catalogChanged();
         dispatchDropping({ type: "versionChanged", groupId, canonicalKey });
+      },
+      paperDetailsLoaded(canonicalKey: string, detail: PaperDetail) {
+        if (catalog.patchDetails(canonicalKey, detail)) catalogChanged();
       },
     };
   }, [catalog]);
@@ -340,7 +374,7 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
     return () => window.clearTimeout(timer);
   }, [resumeAt, actions]);
 
-  useEffect(() => () => actions.abort(), [actions]);
+  useEffect(() => () => actions.stop(), [actions]);
 
   return {
     state,
@@ -359,5 +393,6 @@ export function useGraphExploration(base: GraphResponse | undefined, catalog: Gr
     continueRanking: actions.continueRanking,
     dismissNotice: actions.dismissNotice,
     versionChanged: actions.versionChanged,
+    paperDetailsLoaded: actions.paperDetailsLoaded,
   };
 }

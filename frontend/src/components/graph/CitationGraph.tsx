@@ -11,7 +11,7 @@ import { forceCollide } from "d3-force-3d";
 import { useTranslation } from "react-i18next";
 import type { ForceGraphData, ForceLink, ForceNode } from "@/components/graph/mergeGraph";
 import { markRadius, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
-import { paperTitle, truncateLabel } from "@/components/graph/paperText";
+import { nodeTitle, truncateLabel } from "@/components/graph/paperText";
 import { centreFor, freeArea, type Rect } from "@/components/graph/viewGeometry";
 
 export interface CitationGraphHandle {
@@ -32,6 +32,11 @@ export interface CitationGraphHandle {
 
 interface CitationGraphProps {
   data: ForceGraphData;
+  /**
+   * Changes whenever node payloads may have changed in place (a title that
+   * arrived): the canvas repaints without the new data a re-heat needs.
+   */
+  payloadRevision?: number;
   selectedId: string | null;
   /** paper_group_keys saved in the user's library. */
   savedGroupKeys?: ReadonlySet<string>;
@@ -146,6 +151,7 @@ function circleHits(cx: number, cy: number, r: number, box: Box): boolean {
 const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(function CitationGraph(
   {
     data,
+    payloadRevision = 0,
     selectedId,
     savedGroupKeys = EMPTY_IDS,
     pinnedIds = EMPTY_IDS,
@@ -390,8 +396,12 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     }
   }, [data]);
 
+  // A new drawNode makes the engine repaint (without re-heating): it also
+  // changes with the payload revision, so titles swapped into the existing
+  // node objects show on the next frame even once the layout has settled.
   const drawNode = useCallback(
     (node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      void payloadRevision;
       const x = node.x ?? 0;
       const y = node.y ?? 0;
       const r = radiusOf(node);
@@ -450,7 +460,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         ctx.stroke();
       }
     },
-    [colors, pinnedIds, savedGroupKeys, selectedId],
+    [colors, payloadRevision, pinnedIds, savedGroupKeys, selectedId],
   );
 
   // Titles (serif, like every paper title), drawn after every node so they
@@ -505,7 +515,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       ctx.textBaseline = "top";
       ctx.lineJoin = "round";
       for (const { node, rank: level } of queue) {
-        const label = truncateLabel(paperTitle(node.node.selected_version, t));
+        const label = truncateLabel(nodeTitle(node.node, t));
         const x = node.x ?? 0;
         const y = node.y ?? 0;
         const r = radiusOf(node);
@@ -614,7 +624,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         backgroundColor="rgba(0,0,0,0)"
         nodeId="id"
         nodeVal={(node: ForceNode) => radiusOf(node) ** 2 / 4}
-        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = paperTitle(node.node.selected_version, t); return label.outerHTML; }}
+        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = nodeTitle(node.node, t); return label.outerHTML; }}
         nodeCanvasObject={drawNode}
         nodePointerAreaPaint={(node: ForceNode, color, ctx) => {
           ctx.beginPath();

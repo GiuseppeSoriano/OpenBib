@@ -35,6 +35,10 @@ Order = Literal["cited_by_count", "recent"]
 _ORDER_DOC = "Deprecated and ignored: ordering applies to POST /graph/related."
 
 
+# nginx's code for a client that closed the connection before the response.
+_CLIENT_CLOSED_REQUEST = 499
+
+
 def _provider_unavailable(exc: related.RelatedProviderError) -> ApiError:
     """503 ``related_provider_unavailable``; ``reason`` tells an outage, a
     timeout, a rate limit (with ``Retry-After``) and a missing API key apart."""
@@ -92,9 +96,14 @@ async def related_range(
     # before any Redis or provider work.
     await db.commit()
     try:
-        return await related.related_range(db, redis, body, source, saved)
+        async with related.watch_client(request.receive):
+            return await related.related_range(db, redis, body, source, saved)
     except related.RelatedProviderError as exc:
         raise _provider_unavailable(exc) from exc
+    except related.ClientGoneError:
+        # Paging on or switching direction abandons a range: its provider
+        # calls stopped, and nobody reads this.
+        return Response(status_code=_CLIENT_CLOSED_REQUEST)
 
 
 @router.post("/related/top-up", response_model=TopUpResponse)
@@ -134,9 +143,12 @@ async def related_top_up(
     ]
     await db.commit()
     try:
-        return await related.related_top_up(db, redis, body, sources, saved)
+        async with related.watch_client(request.receive):
+            return await related.related_top_up(db, redis, body, sources, saved)
     except related.RelatedProviderError as exc:
         raise _provider_unavailable(exc) from exc
+    except related.ClientGoneError:
+        return Response(status_code=_CLIENT_CLOSED_REQUEST)
 
 
 @router.get("/library", response_model=GraphResponse)
