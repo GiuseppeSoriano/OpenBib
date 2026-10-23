@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -15,6 +15,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import QueryError from "@/components/ui/QueryError";
 import PageHeader from "@/components/ui/PageHeader";
 import SectionHeading from "@/components/ui/SectionHeading";
+import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import type { LibraryEntryListItem, LibraryFacets, ReadingState, UserStats } from "@/types";
 import { ArrowRight, FolderOpen, FolderPlus, Search } from "lucide-react";
 import "./DashboardPage.css";
@@ -69,8 +70,9 @@ function entryTitle(item: LibraryEntryListItem): string {
   return item.primary_version?.title || item.primary_canonical_key;
 }
 
-function entryLink(item: LibraryEntryListItem): string {
-  return `/library?focus=${encodeURIComponent(item.paper_group_key)}`;
+/** The paper the details panel opens for an entry; unresolved ones re-resolve on open. */
+function entryDetails(item: LibraryEntryListItem): { key: string; unresolved: boolean } {
+  return { key: item.primary_canonical_key, unresolved: !item.resolved || !item.primary_version };
 }
 
 function stateCount(facets: LibraryFacets | undefined, state: ReadingState): number {
@@ -84,6 +86,9 @@ export default function DashboardPage() {
   const { data: collections, isLoading: collectionsLoading } = useCollectionsList(true);
   // Phones already reach search from the top bar's icon and the Search tab.
   const isPhone = useMediaQuery(PHONE_QUERY);
+  // Titles open the details panel here, so closing it leaves the dashboard as it was.
+  const [details, setDetails] = useState<{ key: string; unresolved: boolean } | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   // The onboarding card and export reminder depend on the stats: refetch on every visit.
   const {
@@ -256,6 +261,7 @@ export default function DashboardPage() {
         title={greetingText}
         description={isNewUser ? undefined : t("dashboard.figuresNote")}
         actions={isNewUser ? undefined : figures}
+        headingRef={headingRef}
       />
 
       {isNewUser && (
@@ -313,9 +319,13 @@ export default function DashboardPage() {
                         {String(index + 1).padStart(2, "0")}
                       </span>
                       <div className="dashboard-continue-body">
-                        <Link to={entryLink(item)} className="row-title dashboard-continue-title">
+                        <button
+                          type="button"
+                          className="row-title dashboard-continue-title dashboard-title-btn"
+                          onClick={() => setDetails(entryDetails(item))}
+                        >
                           {entryTitle(item)}
-                        </Link>
+                        </button>
                         {meta && <p className="row-meta">{meta}</p>}
                       </div>
                       <span className={`state-pill state-pill--${state === "reading" ? "reading" : "toread"}`}>
@@ -376,9 +386,13 @@ export default function DashboardPage() {
                 <ul className="list-rows">
                   {(recentQuery.data?.items ?? []).map((item) => (
                     <li key={item.paper_group_key} className="list-row dashboard-recent-row">
-                      <Link to={entryLink(item)} className="dashboard-recent-title">
+                      <button
+                        type="button"
+                        className="dashboard-recent-title dashboard-title-btn"
+                        onClick={() => setDetails(entryDetails(item))}
+                      >
                         {entryTitle(item)}
-                      </Link>
+                      </button>
                       <time className="dashboard-when" dateTime={item.created_at}>
                         {relativeTime(item.created_at, language, now)}
                       </time>
@@ -465,6 +479,14 @@ export default function DashboardPage() {
           )}
         </section>
       )}
+
+      <PaperDetailsPanel
+        paperKey={details?.key ?? null}
+        onClose={() => setDetails(null)}
+        resolveOnOpen={!!details?.unresolved}
+        // A state change can drop the row that opened the panel: fall back to the page title.
+        fallbackFocus={() => headingRef.current}
+      />
     </div>
   );
 }

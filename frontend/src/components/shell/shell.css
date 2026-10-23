@@ -93,7 +93,8 @@
     color: var(--color-text);
   }
 
-  /* "Search or jump to…": opens the command palette. */
+  /* "Search or jump to…": opens the command palette. One line at every
+     width and text size: the label never wraps, the hint gives way first. */
   .sidebar-search {
     display: flex;
     align-items: center;
@@ -113,8 +114,47 @@
     border-color: var(--color-border-strong);
     color: var(--color-text);
   }
+  /* The label and the hint, after the icon's 10px gap: the label column. It
+     is the hint's query container, not the button: Chromium does not re-run
+     a query on a <button> container when only the text size changes, so a
+     live change (the browser's font size setting) kept the hint until a
+     reload. The hint sits 6px after the label. No mono face is bundled: the
+     system ones draw "Ctrl K" up to 52.6px wide, too wide by 1.6px with a
+     10px gap. */
+  .sidebar-search-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    container: sidebar-search / inline-size;
+  }
+  /* min-width: 0 comes from .sidebar-link-label. The ellipsis is a last
+     resort only (a font or language the hint threshold below did not
+     foresee, or text above 150%, Chrome's largest preset). */
   .sidebar-search .sidebar-link-label {
     flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sidebar-search kbd {
+    flex-shrink: 0;
+  }
+  /* The hint shows only while the English label (113px: 8.7em) and "Ctrl K"
+     in a 0.6em-per-character mono with its padding (50.6px: 3.9em) fit in
+     the 173px column with the gap and the hint's border (8px). The em is the
+     button's 13px, so above 100% text size the hint goes and the label keeps
+     the room, plus 5px of the button's 9px end padding: Chromium draws the
+     English label 174px wide at 150%. The shortcut stays in
+     aria-keyshortcuts. Re-measure if the copy or the shortcut changes. */
+  @container sidebar-search (width < calc(8px + 12.6em)) {
+    .sidebar-search kbd {
+      display: none;
+    }
+    .sidebar-search .sidebar-link-label {
+      margin-inline-end: -5px;
+    }
   }
   .sidebar--rail .sidebar-search {
     justify-content: center;

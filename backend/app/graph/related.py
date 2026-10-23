@@ -29,19 +29,23 @@ never cached.
 Ranges are positions in the *eligible* ranked list: the first occurrence of
 each paper group, minus the source itself and the caller's pinned groups, so
 unpinning a paper puts it back at its original rank. Only served papers are
-hydrated with full metadata. No provider call runs inside a DB transaction.
+hydrated with full metadata; a paper whose record could not be fetched is
+served from list data, flagged ``details_pending``, and never stored. No
+provider call runs inside a DB transaction, and none outlives its client:
+inside ``watch_client`` a disconnect cancels the call in flight.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import hashlib
 import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from functools import partial
@@ -80,6 +84,23 @@ _NOID_TTL_SECONDS = 86400
 # Time kept after the scan budget for hydration, so a request ends within
 # about 25 s (nginx keeps its 60 s default proxy_read_timeout).
 _HYDRATE_RESERVE_SECONDS = 5.0
+# Hydration always gets at least this long, however much of the budget the
+# scan used: the provider's pacing (one call per 2 s) plus one rate-limited
+# retry (2 s backoff). A request then ends within about 30 s.
+_HYDRATE_MIN_SECONDS = 10.0
+# A failed batch lookup is tried again (up to this many lookups, each with
+# the provider's own retries) only while ``_HYDRATE_RETRY_SECONDS`` are left
+# of the first ``_HYDRATE_MIN_SECONDS`` of hydration (and of the deadline):
+# about half of Semantic Scholar's answers are 429s, however calls are spaced,
+# but a lookup that kept failing for that long (three paced attempts, 2 s and
+# 4 s apart) returns list data now and leaves the rest to the client's
+# background refresh, instead of holding the request and the shared pacing.
+_HYDRATE_LOOKUPS = 2
+_HYDRATE_RETRY_SECONDS = 4.0
+# The wait clients are told before asking again for rate-limited details.
+# Semantic Scholar's 429s carry no Retry-After and do not ease with longer
+# waits, and the request already retried within its budget.
+_DETAILS_RETRY_AFTER = 3
 # Ranked lists are stored, and read back, this many entries per chunk.
 _RANKED_CHUNK = 1000
 ORDERS = ("cited_by_count", "recent")
@@ -206,6 +227,66 @@ class _BudgetSpentError(TimeoutError):
     nothing failed, the work is left for the next request."""
 
 
+class ClientGoneError(Exception):
+    """The client closed the connection: nobody will read this response, so
+    its provider calls stop (a snapshot it was filling resumes with the next
+    request)."""
+
+
+# Set by ``watch_client`` when the request's client disconnects; provider
+# calls race it. Tasks a request starts inherit it.
+_client_gone: contextvars.ContextVar[asyncio.Event | None] = contextvars.ContextVar(
+    "related_client_gone", default=None
+)
+
+
+def _client_left() -> bool:
+    """Whether the client of the request being served has disconnected."""
+    gone = _client_gone.get()
+    return gone is not None and gone.is_set()
+
+
+@contextlib.asynccontextmanager
+async def watch_client(receive: Callable[[], Awaitable[dict]]) -> AsyncIterator[None]:
+    """Watch the ASGI ``receive`` channel of a request whose body has been
+    read: the next message is ``http.disconnect`` when the client goes away.
+    Within the block every provider call is cancelled at that moment and
+    raises ``ClientGoneError``; queued behind the shared pacing, calls for
+    abandoned requests would delay the ones a client still waits for."""
+    gone = asyncio.Event()
+
+    async def watch() -> None:
+        with contextlib.suppress(Exception):
+            if (await receive()).get("type") == "http.disconnect":
+                gone.set()
+
+    watcher = asyncio.create_task(watch())
+    token = _client_gone.set(gone)
+    try:
+        yield
+    finally:
+        _client_gone.reset(token)
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+
+
+async def _unless_gone[T](call: Awaitable[T], gone: asyncio.Event) -> T:
+    """``call``, cancelled as soon as ``gone`` is set."""
+    work = asyncio.ensure_future(call)
+    waiter = asyncio.ensure_future(gone.wait())
+    try:
+        await asyncio.wait({work, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if work.done():
+            return work.result()
+        raise ClientGoneError
+    finally:
+        for task in (work, waiter):
+            task.cancel()
+        # Let the cancelled call unwind (it may hold the provider's limiter).
+        await asyncio.gather(work, waiter, return_exceptions=True)
+
+
 # Raw entries -> (stored canonical key, stored group key) per S2 paperId.
 Canonicalize = Callable[[list[list]], Awaitable[dict[str, tuple[str, str]]]]
 
@@ -253,15 +334,21 @@ async def _shared_write(db: AsyncSession) -> AsyncIterator[None]:
 async def _provider_call[T](call: Awaitable[T], deadline: float) -> T:
     """Await a provider call within ``deadline``. Running out of time raises
     ``TimeoutError`` (``_BudgetSpentError`` when the call could not even
-    start); any provider failure becomes ``RelatedProviderError``."""
+    start), a client that went away ``ClientGoneError``; any provider failure
+    becomes ``RelatedProviderError``."""
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    gone = _client_gone.get()
+    if remaining <= 0 or _client_left():
         if asyncio.iscoroutine(call):
             call.close()
+        if remaining > 0:
+            raise ClientGoneError
         raise _BudgetSpentError
     try:
+        if gone is not None:
+            call = _unless_gone(call, gone)
         return await asyncio.wait_for(call, timeout=remaining)
-    except TimeoutError:
+    except (TimeoutError, ClientGoneError):
         raise
     except ProviderError as exc:
         logger.warning("Related-paper provider call failed: %s", exc.code)
@@ -880,8 +967,9 @@ async def _cache_found(
 
 
 def _minimal_read(entry: list) -> PaperMetadataRead:
-    """List data only, for a paper the provider did not return in full.
-    Never saved: ``cache_papers`` would overwrite richer fields."""
+    """List data only, for a paper the provider did not return in full: its
+    node is served ``details_pending``. Never saved (``cache_papers`` would
+    overwrite richer fields) and never cached."""
     graph_id, canonical_key, group_key, published, cited_by_count = entry
     try:
         publication_date = date.fromordinal(published) if published else None
@@ -890,8 +978,8 @@ def _minimal_read(entry: list) -> PaperMetadataRead:
     return PaperMetadataRead(
         canonical_key=canonical_key,
         paper_group_key=group_key,
-        # Lists carry no titles: the key stands in, as for base-graph papers
-        # without a cached record.
+        # Snapshots keep no titles: the key stands in (``title`` is required);
+        # clients show a placeholder for a pending node instead.
         title=canonical_key,
         publication_date=publication_date,
         semantic_scholar_id=graph_id,
@@ -902,20 +990,62 @@ def _minimal_read(entry: list) -> PaperMetadataRead:
     )
 
 
-async def hydrate(
-    db: AsyncSession, entries: list[list], *, deadline: float
-) -> dict[str, PaperMetadataRead]:
-    """Full read models for ranked entries, keyed by paperId.
+@dataclass
+class Hydration:
+    """Read models of ranked entries, keyed by paperId. ``pending`` holds the
+    paperIds served from list data only; ``incomplete`` says the batch lookup
+    failed (so asking again may complete them), ``retry_after`` how long to
+    wait first when the provider rate limited it."""
+
+    reads: dict[str, PaperMetadataRead] = field(default_factory=dict)
+    pending: set[str] = field(default_factory=set)
+    incomplete: bool = False
+    retry_after: int | None = None
+
+    def pending_keys(self) -> set[str]:
+        return {self.reads[graph_id].canonical_key for graph_id in self.pending}
+
+
+_HYDRATION_FAILURES = {
+    "timeout": "Related-paper hydration ran out of time; serving list data only",
+    "rate_limited": "Related-paper hydration was rate limited; serving list data only",
+}
+
+
+async def _fetch_records(ids: list[str], deadline: float) -> list[PaperMetadata | None]:
+    """The batch lookup within ``deadline``, tried again after a rate limit
+    or an outage (up to ``_HYDRATE_LOOKUPS`` times), but only while
+    ``_HYDRATE_RETRY_SECONDS`` are left of the first ``_HYDRATE_MIN_SECONDS``:
+    however long the deadline, a failing lookup ends the hydration within
+    about that window. Each lookup already retries twice with backoff, and
+    the provider paces every attempt."""
+    retry_until = min(deadline, time.monotonic() + _HYDRATE_MIN_SECONDS)
+    for lookup in range(1, _HYDRATE_LOOKUPS + 1):
+        try:
+            return await _provider_call(registry.papers_by_ids(ids), deadline)
+        except RelatedProviderError as exc:
+            retryable = exc.kind in ("rate_limited", "provider_unavailable")
+            last = lookup == _HYDRATE_LOOKUPS
+            if last or not retryable or retry_until - time.monotonic() < _HYDRATE_RETRY_SECONDS:
+                raise
+            logger.info("Related-paper hydration failed; trying the batch again")
+    raise AssertionError("unreachable")
+
+
+async def hydrate(db: AsyncSession, entries: list[list], *, deadline: float) -> Hydration:
+    """Full read models for ranked entries.
 
     Cached rows first (by paperId, else by the entry's key); the rest in one
     batch lookup, upserted. Both give the stored record, whose key and group
     may differ from the entry's. The snapshot's ``cited_by_count`` is
-    overlaid (not saved) so node sizes match the ordering. A paper the
-    provider cannot return, or any hydration failure, degrades to the
-    entry's own list data.
+    overlaid (not saved) so node sizes match the ordering. The lookup gets at
+    least ``_HYDRATE_MIN_SECONDS``, past ``deadline`` if need be. A paper the
+    provider does not return (a null row), or every missing paper when the
+    lookup fails, degrades to the entry's own list data and is ``pending``.
     """
+    hydration = Hydration()
     if not entries:
-        return {}
+        return hydration
     ids = [entry[0] for entry in entries]
     result = await db.execute(
         select(CachedPaperMetadata)
@@ -933,7 +1063,7 @@ async def hydrate(
         if row.semantic_scholar_id:
             by_id.setdefault(row.semantic_scholar_id, row)
         by_key[row.canonical_key] = row
-    reads: dict[str, PaperMetadataRead] = {}
+    reads = hydration.reads
     legacy: list[tuple[CachedPaperMetadata, str]] = []
     for graph_id, key, *_rest in entries:
         row = by_id.get(graph_id)
@@ -956,12 +1086,20 @@ async def hydrate(
     if missing:
         await _release(db)
         try:
-            fetched = await _provider_call(
-                registry.papers_by_ids(missing), max(deadline, time.monotonic() + 1.0)
+            fetched = await _fetch_records(
+                missing, max(deadline, time.monotonic() + _HYDRATE_MIN_SECONDS)
             )
-        except (TimeoutError, RelatedProviderError):
-            logger.warning("Related-paper hydration failed; serving list data only")
+        except (TimeoutError, RelatedProviderError) as exc:
+            kind = exc.kind if isinstance(exc, RelatedProviderError) else "timeout"
+            logger.warning(
+                _HYDRATION_FAILURES.get(
+                    kind, "Related-paper hydration failed; serving list data only"
+                )
+            )
             fetched = [None] * len(missing)
+            hydration.incomplete = kind != "not_configured"
+            if kind == "rate_limited":
+                hydration.retry_after = _DETAILS_RETRY_AFTER
         pairs = [
             (gid, paper) for gid, paper in zip(missing, fetched, strict=True) if paper is not None
         ]
@@ -975,11 +1113,15 @@ async def hydrate(
 
     hydrated: dict[str, PaperMetadataRead] = {}
     for entry in entries:
-        read = reads.get(entry[0]) or _minimal_read(entry)
+        read = reads.get(entry[0])
+        if read is None:
+            read = _minimal_read(entry)
+            hydration.pending.add(entry[0])
         if entry[4] is not None and read.cited_by_count != entry[4]:
             read = read.model_copy(update={"cited_by_count": entry[4]})
         hydrated[entry[0]] = read
-    return hydrated
+    hydration.reads = hydrated
+    return hydration
 
 
 def _served(
@@ -1009,9 +1151,14 @@ def _served(
     return served
 
 
-async def _nodes(db: AsyncSession, papers: list[PaperMetadataRead]) -> dict[str, GraphNode]:
+async def _nodes(
+    db: AsyncSession, papers: list[PaperMetadataRead], pending_keys: Iterable[str] = ()
+) -> dict[str, GraphNode]:
     """One node per group (rank order), with every cached version of it so
-    related nodes match base-graph nodes."""
+    related nodes match base-graph nodes. A node whose selected version is
+    list data only (its key in ``pending_keys``) is ``details_pending``, with
+    no label."""
+    pending_keys = frozenset(pending_keys)
     by_group = await paper_service.get_cached_papers_by_groups(
         db, {paper.paper_group_key for paper in papers}
     )
@@ -1028,16 +1175,28 @@ async def _nodes(db: AsyncSession, papers: list[PaperMetadataRead]) -> dict[str,
         ]
         if not any(version is selected for version in versions):
             versions.insert(0, selected)
+        pending = selected.canonical_key in pending_keys
         nodes[group] = GraphNode(
             id=group,
-            label=selected.title,
+            label=None if pending else selected.title,
             type="paper_group" if len(versions) > 1 else "paper",
             paper_group_key=group,
             version_count=len(versions),
             selected_version=selected,
             versions=versions,
+            details_pending=pending,
         )
     return nodes
+
+
+def _details_flags(hydration: Hydration, nodes: Iterable[GraphNode]) -> dict:
+    """``details_incomplete`` and ``retry_after`` of a response: set only when
+    a served node is pending because the lookup failed."""
+    incomplete = hydration.incomplete and any(node.details_pending for node in nodes)
+    return {
+        "details_incomplete": incomplete,
+        "retry_after": hydration.retry_after if incomplete else None,
+    }
 
 
 def _edges(
@@ -1064,6 +1223,17 @@ def _edges(
                 }
             )
     return edges, rows
+
+
+async def _all(calls: Iterable[Awaitable[None]]) -> None:
+    """Run ``calls`` concurrently and wait for every one of them, then raise
+    the first exception any raised (a disconnect included). Unlike a plain
+    ``gather``, no task is left running, or touching the request's session,
+    after the request has ended."""
+    results = await asyncio.gather(*calls, return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
 
 
 def _deadlines() -> tuple[float, float]:
@@ -1166,9 +1336,9 @@ async def related_range(
             reason="ranking",
         )
 
-    reads = await hydrate(db, window.entries, deadline=request_deadline)
-    papers = _served(window.entries, reads, source, exclude)
-    nodes = await _nodes(db, papers)
+    hydration = await hydrate(db, window.entries, deadline=request_deadline)
+    papers = _served(window.entries, hydration.reads, source, exclude)
+    nodes = await _nodes(db, papers, hydration.pending_keys())
     edges, rows = _edges(source, papers, req.direction, saved)
     if rows:
         async with _shared_write(db):
@@ -1182,6 +1352,7 @@ async def related_range(
         range_start=window.range_start,
         range_end=window.range_end,
         **_totals(window, provider_total),
+        **_details_flags(hydration, nodes.values()),
     )
 
 
@@ -1222,7 +1393,8 @@ async def related_top_up(
     source gets its own ``error`` (``ranking`` while its list is still being
     collected, or when the deadline came before its turn); only when every
     source fails does this raise
-    ``RelatedProviderError`` (a rate-limited one first, for its wait).
+    ``RelatedProviderError`` (a rate-limited one first, for its wait). A
+    disconnect raises ``ClientGoneError`` once every source's task stopped.
     """
     scan_deadline, request_deadline = _deadlines()
     exclude = frozenset(req.exclude_group_keys)
@@ -1238,8 +1410,11 @@ async def related_top_up(
         async with db_lock:
             return await _stored_keys(db, graph_ids)
 
+    # A source whose turn comes after the client left does no work at all.
     async def lookup(plan: _TopUp) -> None:
         async with semaphore:
+            if _client_left():
+                raise ClientGoneError
             try:
                 plan.found = await _lookup_graph_id(redis, plan.source, scan_deadline)
             except _BudgetSpentError:
@@ -1249,6 +1424,8 @@ async def related_top_up(
 
     async def scan(plan: _TopUp) -> None:
         async with semaphore:
+            if _client_left():
+                raise ClientGoneError
             try:
                 plan.window = await resolve_window(
                     redis,
@@ -1269,12 +1446,10 @@ async def related_top_up(
 
     await _release(db)
     lookups = [p for p in active if not p.source.graph_id and p.source.identifier]
-    await asyncio.gather(*(lookup(plan) for plan in lookups))
+    await _all(lookup(plan) for plan in lookups)
     await _cache_found(db, [p.source for p in lookups], [p.found for p in lookups])
     await _release(db)
-    await asyncio.gather(
-        *(scan(plan) for plan in active if plan.source.graph_id and plan.failure is None)
-    )
+    await _all(scan(plan) for plan in active if plan.source.graph_id and plan.failure is None)
     failures = [plan.failure for plan in plans if plan.failure is not None]
     if len(failures) == len(plans):
         failure = next((f for f in failures if f.kind == "rate_limited"), failures[0])
@@ -1285,11 +1460,15 @@ async def related_top_up(
         if plan.window is not None:
             for entry in plan.window.entries:
                 entries.setdefault(entry[0], entry)
-    reads = await hydrate(db, list(entries.values()), deadline=request_deadline)
+    hydration = await hydrate(db, list(entries.values()), deadline=request_deadline)
     for plan in plans:
         if plan.window is not None:
-            plan.papers = _served(plan.window.entries, reads, plan.source, exclude | plan.connected)
-    nodes = await _nodes(db, [paper for plan in plans for paper in plan.papers])
+            plan.papers = _served(
+                plan.window.entries, hydration.reads, plan.source, exclude | plan.connected
+            )
+    nodes = await _nodes(
+        db, [paper for plan in plans for paper in plan.papers], hydration.pending_keys()
+    )
 
     edge_set: dict[tuple[str, str, str], None] = {}
     rows: list[dict] = []
@@ -1342,4 +1521,5 @@ async def related_top_up(
         sources=results,
         range_size=settings.graph_related_range_size,
         max_results=settings.graph_related_max_results,
+        **_details_flags(hydration, nodes.values()),
     )

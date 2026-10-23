@@ -7,7 +7,7 @@ import { DirectionToggle, OrderingToggle } from "@/components/graph/GraphControl
 import GraphLegend from "@/components/graph/GraphLegend";
 import GraphNodePopup from "@/components/graph/GraphNodePopup";
 import RangeNavigator, { type RangeSelection } from "@/components/graph/RangeNavigator";
-import { paperTitle } from "@/components/graph/paperText";
+import { nodeTitle } from "@/components/graph/paperText";
 import type { ExplorationState, RangeControls } from "@/components/graph/graphExploration";
 import Panel from "@/components/ui/Panel";
 import type { CitingOrder, GraphNode, PaperMetadata, RelationDirection } from "@/types";
@@ -181,7 +181,7 @@ export function GraphSheetControls({
         </div>
       )}
       <div className="graph-sheet-section">
-        <RelationSource direction={mode.direction} title={node ? paperTitle(node.selected_version, t) : null} />
+        <RelationSource direction={mode.direction} title={node ? nodeTitle(node, t) : null} />
         <p className="graph-hint tabular">{t("graph.pinnedCount", { count: state.pinned.size })}</p>
         <div className="graph-sheet-field">
           <span className="graph-sheet-label label-caps" aria-hidden="true">

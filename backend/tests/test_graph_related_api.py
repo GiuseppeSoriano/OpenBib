@@ -1,5 +1,6 @@
 """HTTP contract of POST /graph/related and /graph/related/top-up."""
 
+import asyncio
 import json
 import os
 import uuid
@@ -334,3 +335,97 @@ async def test_no_transaction_or_user_lock_is_held_during_provider_io(
     assert all(in_transaction is False for in_transaction, _ in observed)
     if ON_POSTGRES:
         assert all(lock_free is True for _, lock_free in observed)
+
+
+async def test_failed_details_are_flagged_in_the_response(db, fake, seeds):
+    fake.fail_ids = ProviderError("provider_rate_limited", "busy", retry_after=30)
+
+    async with _client(db) as client:
+        response = await client.post("/api/v1/graph/related", json=_range_body())
+        top_up = await client.post(
+            "/api/v1/graph/related/top-up", json=_top_up_body(target_per_source=2)
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["details_incomplete"], body["retry_after"]) == (True, 3)
+    assert {(node["label"], node["details_pending"]) for node in body["nodes"]} == {(None, True)}
+    assert top_up.status_code == 200
+    assert (top_up.json()["details_incomplete"], top_up.json()["retry_after"]) == (True, 3)
+    assert all(node["details_pending"] for node in top_up.json()["nodes"])
+
+    fake.fail_ids = None
+    async with _client(db) as client:
+        response = await client.post("/api/v1/graph/related", json=_range_body())
+
+    body = response.json()
+    assert (body["details_incomplete"], body["retry_after"]) == (False, None)
+    assert not any(node["details_pending"] for node in body["nodes"])
+
+
+@pytest.mark.parametrize("endpoint", ["related", "related/top-up"])
+async def test_a_request_its_client_abandoned_stops_its_provider_calls(
+    db, fake, seeds, monkeypatch, endpoint
+):
+    """Through the real middleware stack: the disconnect reaches the handler,
+    the queued batch lookup is cancelled, and nobody gets a 200."""
+    queued = asyncio.Event()
+    cancelled: list[list[str]] = []
+
+    async def stuck(ids):
+        queued.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.append(list(ids))
+            raise
+
+    monkeypatch.setattr(registry, "papers_by_ids", stuck)
+
+    async def override_db():
+        yield db
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_db
+    payload = _range_body() if endpoint == "related" else _top_up_body(target_per_source=2)
+    body = json.dumps(payload).encode()
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        await queued.wait()  # the client leaves while the lookup waits
+        return {"type": "http.disconnect"}
+
+    messages: list[dict] = []
+
+    async def send(message):
+        messages.append(message)
+
+    path = f"/api/v1/graph/{endpoint}"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+    }
+
+    await asyncio.wait_for(app(scope, receive, send), timeout=10)
+
+    assert len(cancelled) == 1
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    assert start["status"] == 499

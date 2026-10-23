@@ -234,7 +234,7 @@
   }
 
   .landing-motif-edges line {
-    stroke: var(--graph-edge);
+    stroke: var(--graph-motif-edge);
     stroke-width: 1.25;
     stroke-linecap: round;
   }

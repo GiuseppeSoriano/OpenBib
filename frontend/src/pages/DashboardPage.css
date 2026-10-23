@@ -179,8 +179,23 @@
     white-space: nowrap;
     color: var(--color-text);
   }
-  .dashboard-recent-title:hover {
+  /* Titles are buttons: they open the details panel on the dashboard itself. */
+  .dashboard-title-btn {
+    display: block;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+  .dashboard-title-btn:hover {
     color: var(--color-accent);
+  }
+  .dashboard-title-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
   }
   .dashboard-when {
     flex: none;

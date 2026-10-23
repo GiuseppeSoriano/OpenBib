@@ -454,7 +454,7 @@
     "legendSaved": "In Libreria",
     "listInLibrary": "In Libreria",
     "legendPaper": "Articolo (dimensione = citazioni)",
-    "legendEdge": "A → B: A cita B",
+    "legendEdge": "A <arrow>→</arrow> B: A cita B",
     "legendPinned": "Fissato",
     "legendSelected": "Selezionato",
     "dragHint": "Trascina un nodo o usa Fissa per bloccarlo",
@@ -538,6 +538,8 @@
     "tooManySeeds": "I grafi sono limitati a 200 articoli. Apri una raccolta più piccola o un singolo articolo.",
     "notAvailable": "Questo grafo non è disponibile.",
     "detailsUnavailable": "Dettagli non disponibili",
+    "titleLoading": "Caricamento titolo…",
+    "titleUnavailable": "Titolo non disponibile",
     "canvasLabel": "Grafo delle citazioni con {{nodes, number}} articoli e {{edges, number}} collegamenti. Usa l’elenco degli articoli per esplorarlo con tastiera o lettore di schermo.",
     "canvasLabelSeed": "Grafo delle citazioni di “{{title}}” con {{nodes, number}} articoli e {{edges, number}} collegamenti. Usa l’elenco degli articoli per esplorarlo con tastiera o lettore di schermo."
   },

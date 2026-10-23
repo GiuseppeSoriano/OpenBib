@@ -4,7 +4,7 @@ import { PinToggle } from "@/components/graph/GraphNodePopup";
 import GraphStatus from "@/components/graph/GraphStatus";
 import { adjacentRanges, isRangeCapped, type RangeSelection } from "@/components/graph/RangeNavigator";
 import { graphDotClass } from "@/components/graph/nodeStyle";
-import { isUnresolved, paperTitle } from "@/components/graph/paperText";
+import { isUnresolved, nodeTitle } from "@/components/graph/paperText";
 import type { ExplorationState, RangeControls } from "@/components/graph/graphExploration";
 import type { GraphNode } from "@/types";
 
@@ -55,7 +55,7 @@ export default function GraphSelectionSummary({
   const range = current?.kind === "range" ? current : null;
   const next = rangeControls ? adjacentRanges(rangeControls).next : null;
   const summary = rangeControls?.summary;
-  const title = node ? paperTitle(node.selected_version, t) : "";
+  const title = node ? nodeTitle(node, t) : "";
   const { direction, order } = state.mode;
 
   // The same rule as the desktop range summary (rangeSummaryText): a capped

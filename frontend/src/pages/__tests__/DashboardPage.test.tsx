@@ -26,6 +26,19 @@ vi.mock("@/lib/api", () => ({
   library: { listEntries: vi.fn(), getFacets: vi.fn() },
 }));
 
+// The real panel is covered by its own tests; here it only shows which paper it opened.
+vi.mock("@/components/paper/PaperDetailsPanel", () => ({
+  default: ({ paperKey, resolveOnOpen, onClose }: { paperKey: string | null; resolveOnOpen?: boolean; onClose: () => void }) =>
+    paperKey ? (
+      <div role="dialog" aria-label="Paper details" data-resolve={String(!!resolveOnOpen)}>
+        {paperKey}
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    ) : null,
+}));
+
 let backupsEnabled: boolean | undefined;
 vi.mock("@/lib/legal", () => ({
   useLegalConfig: () => ({ data: { terms_version: "1", privacy_version: "1", backups_enabled: backupsEnabled } }),
@@ -238,7 +251,7 @@ describe("DashboardPage", () => {
     serveLibrary({ reading: [entry("g1", "The Graph Neural Network Model")] });
     const user = userEvent.setup();
     await user.click(within(continueReading).getByRole("button", { name: "Try again" }));
-    expect(await within(continueReading).findByRole("link", { name: "The Graph Neural Network Model" })).toBeInTheDocument();
+    expect(await within(continueReading).findByRole("button", { name: "The Graph Neural Network Model" })).toBeInTheDocument();
   });
 
   it("offers both next steps when the Library has papers but there are no collections", async () => {
@@ -284,7 +297,7 @@ describe("DashboardPage", () => {
     const section = await screen.findByRole("region", { name: "Continue reading" });
     await waitFor(() => expect(within(section).getAllByRole("listitem")).toHaveLength(3));
     const rows = within(section).getAllByRole("listitem");
-    expect(rows.map((row) => within(row).getByRole("link").textContent)).toEqual([
+    expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual([
       "The Graph Neural Network Model",
       "Attention Is All You Need",
       "Graph Attention Networks",
@@ -292,7 +305,6 @@ describe("DashboardPage", () => {
     expect(rows.map((row) => row.querySelector(".state-pill")?.textContent)).toEqual(["Reading", "Reading", "To read"]);
     expect(rows[2]!.querySelector(".state-pill")).toHaveClass("state-pill--toread");
     expect(within(rows[1]!).getByText("Vaswani, Shazeer, Parmar et al. · NeurIPS · 2017")).toBeInTheDocument();
-    expect(within(rows[0]!).getByRole("link")).toHaveAttribute("href", "/library?focus=g1");
     expect(within(section).getByRole("link", { name: "All in progress" })).toHaveAttribute(
       "href",
       "/library?state=reading",
@@ -333,6 +345,38 @@ describe("DashboardPage", () => {
     expect(legend).toEqual(["To read4", "Reading3", "Read2", "Other2"]);
   });
 
+  it("opens a paper's details on the dashboard itself, from Continue reading and Recently saved", async () => {
+    serve(POPULATED, [collection]);
+    serveLibrary({
+      reading: [entry("g1", "The Graph Neural Network Model")],
+      recent: [{ ...entry("g5", "Pending paper"), resolved: false }],
+    });
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/library" element={<p>Library page</p>} />
+      </Routes>,
+    );
+    const user = userEvent.setup();
+    const reading = await screen.findByRole("region", { name: "Continue reading" });
+    const title = await within(reading).findByRole("button", { name: "The Graph Neural Network Model" });
+    await user.click(title);
+    const panel = screen.getByRole("dialog", { name: "Paper details" });
+    expect(panel).toHaveTextContent("doi:g1");
+    expect(panel).toHaveAttribute("data-resolve", "false");
+    expect(screen.queryByText("Library page")).toBeNull();
+
+    await user.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Continue reading" })).toBeInTheDocument();
+
+    const recent = screen.getByRole("region", { name: "Recently saved" });
+    await user.click(await within(recent).findByRole("button", { name: "Pending paper" }));
+    // An unresolved entry re-resolves when its details open.
+    expect(screen.getByRole("dialog", { name: "Paper details" })).toHaveAttribute("data-resolve", "true");
+    expect(screen.queryByText("Library page")).toBeNull();
+  });
+
   it("lists recent saves newest first with relative times", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-03T20:00:00Z"));
@@ -347,10 +391,7 @@ describe("DashboardPage", () => {
     const section = await screen.findByRole("region", { name: "Recently saved" });
     expect(await within(section).findByText("2 hours ago")).toBeInTheDocument();
     expect(within(section).getByText("last week")).toBeInTheDocument();
-    expect(within(section).getByRole("link", { name: "Graph Attention Networks" })).toHaveAttribute(
-      "href",
-      "/library?focus=g5",
-    );
+    expect(within(section).getByRole("button", { name: "Graph Attention Networks" })).toBeInTheDocument();
     expect(library.listEntries).toHaveBeenCalledWith({ sort: "added", size: 5 });
 
     const row = await screen.findByRole("row", { name: /Graph learning/ });

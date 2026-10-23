@@ -156,6 +156,13 @@ export interface GraphNode {
   selected_version: PaperMetadata;
   versions: PaperMetadata[];
   is_seed: boolean;
+  /**
+   * The provider's record of the selected version could not be fetched: it
+   * carries the related list's data only, so its title is not known (the
+   * version's `title` is its canonical key and `label` is null). Absent from
+   * older servers.
+   */
+  details_pending?: boolean;
 }
 
 export interface GraphEdge {
@@ -444,6 +451,13 @@ export interface RelatedRangeResponse {
    * nodes yet (`scan_incomplete`); `scanned` of about `provider_total` so far.
    */
   reason: "no_provider_id" | "ranking" | null;
+  /**
+   * Some nodes are `details_pending` because fetching their records failed:
+   * the same request may complete them, after `retry_after` seconds when the
+   * provider rate limited it. Absent from older servers.
+   */
+  details_incomplete?: boolean;
+  retry_after?: number | null;
 }
 
 export interface TopUpSource {
@@ -482,6 +496,9 @@ export interface TopUpResponse {
   sources: TopUpSourceResult[];
   range_size: number;
   max_results: number;
+  /** As in `RelatedRangeResponse`. */
+  details_incomplete?: boolean;
+  retry_after?: number | null;
 }
 
 export interface RegistrationStatus {

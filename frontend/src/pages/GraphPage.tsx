@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { GitFork } from "lucide-react";
-import api, { graph as graphApi, library } from "@/lib/api";
+import api, { graph as graphApi, library, papers } from "@/lib/api";
 import { apiStatus } from "@/lib/apiError";
 import { COMPACT_QUERY, PHONE_MAX } from "@/lib/breakpoints";
 import { collectionRead, useCollectionAccess } from "@/lib/collection-access";
@@ -31,7 +31,7 @@ import {
   type RankingStall,
 } from "@/components/graph/graphExploration";
 import { EMPTY_GRAPH, type ForceGraphData } from "@/components/graph/mergeGraph";
-import { isUnresolved, paperDoi, paperTitle } from "@/components/graph/paperText";
+import { isUnresolved, nodeTitle, paperDoi } from "@/components/graph/paperText";
 import { useGraphExploration } from "@/components/graph/useGraphExploration";
 import PaperDetailsPanel from "@/components/paper/PaperDetailsPanel";
 import EmptyState from "@/components/ui/EmptyState";
@@ -163,7 +163,8 @@ function GraphExplorer({
 
   // The force-graph data lives in a ref: d3 mutates node objects in place
   // (positions, pins) and syncForceData keeps surviving objects, so nodes
-  // never jump when ranges change.
+  // never jump when ranges change. A title arriving in the background keeps
+  // the data itself (no re-heat): the canvas repaints on catalogRevision.
   const dataRef = useRef<ForceGraphData>(EMPTY_GRAPH);
   const forceData = useMemo(() => {
     void catalogRevision;
@@ -200,10 +201,22 @@ function GraphExplorer({
   useEffect(() => {
     if (unavailable) setDetailsKey(null);
   }, [unavailable]);
+  // The details panel's paper (its own query, observed here without a
+  // second fetch): a node still waiting for its details takes them, so the
+  // canvas and the list show its title too.
+  const { data: detailsPaper } = useQuery({
+    queryKey: ["paper-detail", detailsKey],
+    queryFn: () => papers.getDetail(detailsKey!),
+    enabled: false,
+  });
+  const { paperDetailsLoaded } = exploration;
+  useEffect(() => {
+    if (detailsKey && detailsPaper) paperDetailsLoaded(detailsKey, detailsPaper);
+  }, [detailsKey, detailsPaper, paperDetailsLoaded]);
 
   const selectedId = state.selectedId;
   const selectedNode = selectedId ? catalog.getNode(selectedId) ?? null : null;
-  const selectedTitle = selectedNode ? paperTitle(selectedNode.selected_version, t) : null;
+  const selectedTitle = selectedNode ? nodeTitle(selectedNode, t) : null;
   const controls = selectedId ? rangeControls(state, selectedId) : null;
   const branch = selectedId ? currentBranch(state, selectedId) : undefined;
   const currentRangeIds = branch && branch.rangeIndex !== null ? branch.memberIds : [];
@@ -385,6 +398,7 @@ function GraphExplorer({
             <CitationGraph
               ref={graphRef}
               data={forceData}
+              payloadRevision={catalogRevision}
               selectedId={selectedId}
               savedGroupKeys={savedGroupKeys}
               pinnedIds={state.pinned}

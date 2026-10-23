@@ -15,6 +15,9 @@ import securityCss from "@/components/settings/SecuritySettings.css?raw";
 import stateChipCss from "@/components/paper/ReadingStateSelect.css?raw";
 import indexHtml from "../../../index.html?raw";
 import { COMPACT_QUERY, TOUCH_QUERY } from "@/lib/breakpoints";
+import { shortcutLabel } from "@/components/shell/shortcuts";
+import enLocale from "@/i18n/locales/en.json";
+import itLocale from "@/i18n/locales/it.json";
 
 interface Rule {
   selectors: string[];
@@ -436,6 +439,52 @@ describe("layout contract", () => {
       expect(declarations(shellCss, ".topbar-brand")).toContain("flex: 0 1 auto;");
     });
 
+    it("keeps the sidebar's search label on one line: the shortcut hint gives way first", () => {
+      // The label never wraps (a wrap grew the button from 34px to 44px on
+      // Windows); it ellipsizes only as a last resort.
+      expect(declarations(shellCss, ".sidebar-link-label")).toContain("min-width: 0;");
+      const label = declarations(shellCss, ".sidebar-search .sidebar-link-label");
+      expect(label).toContain("white-space: nowrap;");
+      expect(label).toContain("overflow: hidden;");
+      expect(label).toContain("text-overflow: ellipsis;");
+      // The hint keeps its width, 6px after the label; the icon keeps its 10px.
+      expect(declarations(shellCss, ".sidebar-search kbd")).toContain("flex-shrink: 0;");
+      const column = declarations(shellCss, ".sidebar-search-text");
+      expect(column).toContain("flex: 1;");
+      expect(column).toContain("min-width: 0;");
+      expect(column).toContain("gap: 6px;");
+      // The label column is the query container, not the button: Chromium
+      // does not re-run a query on a <button> container on a live text-size
+      // change.
+      expect(column).toContain("container: sidebar-search / inline-size;");
+      expect(declarations(shellCss, ".sidebar-search")).not.toMatch(/container/);
+      // Below the room for the English label and "Ctrl K" the hint is hidden,
+      // in em so it follows the text size, and the label takes 5px of the end
+      // padding (Chromium draws it 174px wide at 150%, in a 173px column).
+      expect(squash(shellCss)).toMatch(
+        /@container sidebar-search \(width < calc\(8px \+ 12\.6em\)\) \{ \.sidebar-search kbd \{ display: none; \} \.sidebar-search \.sidebar-link-label \{ margin-inline-end: -5px; \} \}/,
+      );
+      // The 248px sidebar and its 14px padding: the button's 199px content box.
+      expect(declarations(tokensCss, ":root")).toContain("--sidebar-width: 248px;");
+      expect(declarations(shellCss, ".sidebar")).toContain("padding: 18px 14px var(--space-md);");
+    });
+
+    it("pins the copy the sidebar search's hint threshold was measured from", () => {
+      // calc(8px + 12.6em) above holds the English label (8.7em in IBM Plex
+      // Sans) and "Ctrl K" (3.9em). Re-measure it if any of these change: a
+      // longer label would ellipsize next to the hint at 100% text size.
+      expect(enLocale.shell.searchOrJump).toBe("Search or jump to…");
+      expect(itLocale.shell.searchOrJump.length).toBeLessThanOrEqual(enLocale.shell.searchOrJump.length);
+      expect(shortcutLabel()).toBe("Ctrl K");
+      Object.defineProperty(navigator, "platform", { value: "MacIntel", configurable: true });
+      try {
+        expect(shortcutLabel()).toBe("⌘K");
+      } finally {
+        delete (navigator as { platform?: string }).platform;
+      }
+      expect(shortcutLabel()).toBe("Ctrl K");
+    });
+
     it("places Settings controls in the second column on every row", () => {
       expect(squash(securityCss)).toContain(
         "@container (min-width: 32rem) { .settings-security-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
@@ -458,6 +507,12 @@ describe("layout contract", () => {
       expect(meta).not.toContain("column-gap");
       expect(declarations(graphHeaderCss, ".graph-summary-range")).toContain("white-space: nowrap;");
       expect(declarations(indexCss, ".sheet-submit")).toContain("width: 100%;");
+    });
+
+    it("draws the legend's link swatch in the canvas's own link colours, from tokens", () => {
+      expect(declarations(graphHeaderCss, ".legend-arrow line")).toContain("stroke: var(--graph-edge);");
+      expect(declarations(graphHeaderCss, ".legend-arrow path")).toContain("fill: var(--graph-edge-arrow);");
+      expect(declarations(graphHeaderCss, ".legend-arrow")).not.toContain("color:");
     });
   });
 });
