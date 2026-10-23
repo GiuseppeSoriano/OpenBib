@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 interface PageHeaderProps {
   title: ReactNode;
@@ -11,6 +11,8 @@ interface PageHeaderProps {
   /** Larger display title (the dashboard greeting). */
   display?: boolean;
   className?: string;
+  /** Makes the h1 a programmatic focus target (e.g. after a dialog's trigger is gone). */
+  headingRef?: Ref<HTMLHeadingElement>;
 }
 
 /** The page's h1 block: eyebrow, serif title, description and actions. */
@@ -22,6 +24,7 @@ export default function PageHeader({
   titleId,
   display = false,
   className,
+  headingRef,
 }: PageHeaderProps) {
   const classes = ["page-header", display && "page-header--display", className]
     .filter(Boolean)
@@ -30,7 +33,7 @@ export default function PageHeader({
     <div className={classes}>
       <div className="page-header-text">
         {eyebrow && <p className="page-header-eyebrow">{eyebrow}</p>}
-        <h1 id={titleId} className="page-header-title">
+        <h1 id={titleId} ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="page-header-title">
           {title}
         </h1>
         {description && <p className="page-header-description">{description}</p>}
