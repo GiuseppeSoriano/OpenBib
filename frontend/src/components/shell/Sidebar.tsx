@@ -77,8 +77,14 @@ export default function Sidebar({ rail, collapsible, onToggleRail, onOpenPalette
         data-testid="palette-button"
       >
         <Search size={16} aria-hidden="true" />
-        {label(t("shell.searchOrJump"))}
-        {!rail && <kbd aria-hidden="true">{shortcutLabel()}</kbd>}
+        {rail ? (
+          label(t("shell.searchOrJump"))
+        ) : (
+          <span className="sidebar-search-text">
+            {label(t("shell.searchOrJump"))}
+            <kbd aria-hidden="true">{shortcutLabel()}</kbd>
+          </span>
+        )}
       </button>
 
       <div className="sidebar-scroll">

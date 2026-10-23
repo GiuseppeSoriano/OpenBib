@@ -110,6 +110,24 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("names the palette button by its whole label, whether or not the shortcut hint shows", async () => {
+    renderSidebar();
+    const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+    // The hint is hidden at large text sizes and the label may ellipsize:
+    // the name and the shortcut never depend on either.
+    const button = within(sidebar).getByRole("button", { name: "Search or jump to…" });
+    expect(button).toHaveAttribute("aria-keyshortcuts", "Meta+K Control+K");
+    // The label column holds both: it is the hint's query container.
+    const column = button.querySelector(".sidebar-search-text");
+    expect(column?.querySelector(".sidebar-link-label")).toHaveTextContent(/^Search or jump to…$/);
+    expect(column?.querySelector("kbd")).toHaveAttribute("aria-hidden", "true");
+    // The rail keeps the name and drops the column and the hint.
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Collapse sidebar" }));
+    const railButton = within(sidebar).getByRole("button", { name: "Search or jump to…" });
+    expect(railButton).toHaveAttribute("title", "Search or jump to…");
+    expect(railButton.querySelector(".sidebar-search-text, kbd")).toBeNull();
+  });
+
   it("opens the account menu upwards from the foot of the sidebar", async () => {
     renderSidebar();
     const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
