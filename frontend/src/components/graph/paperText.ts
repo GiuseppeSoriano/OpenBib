@@ -67,3 +67,39 @@ export function truncateLabel(text: string, max: number = LABEL_MAX): string {
   const clean = text.replace(/\s+/g, " ").trim();
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
+
+/** A hovered paper's canvas label spells its title out on up to this many lines. */
+export const LABEL_MAX_LINES = 3;
+
+/**
+ * A title broken at its spaces onto lines of at most `max` characters (a
+ * word longer than a line is split), for the hovered paper's label. A title
+ * that fits one line comes back whole, as its only line, exactly as
+ * truncateLabel gives it; past `lines` lines, the last one ends in "…".
+ */
+export function wrapLabel(text: string, max: number = LABEL_MAX, lines: number = LABEL_MAX_LINES): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return [clean];
+  const words = clean.split(" ").flatMap((word) => {
+    const parts: string[] = [];
+    for (let start = 0; start < word.length; start += max) parts.push(word.slice(start, start + max));
+    return parts;
+  });
+  const wrapped: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (line && line.length + 1 + word.length > max) {
+      wrapped.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  wrapped.push(line);
+  if (wrapped.length <= lines) return wrapped;
+  const kept = wrapped.slice(0, lines);
+  const last = kept[lines - 1]!;
+  // The ellipsis follows the last whole word when there is room for it.
+  kept[lines - 1] = last.length < max ? `${last}…` : `${last.slice(0, max - 1).trimEnd()}…`;
+  return kept;
+}

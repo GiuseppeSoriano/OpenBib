@@ -109,6 +109,59 @@ function linkRecorder() {
   return { ctx, strokes, fills };
 }
 
+/** The canvas's size and the engine's transform, as a context reports them. */
+interface CanvasView {
+  canvas: { width: number; height: number };
+  transform: { a: number; d: number; e: number; f: number };
+}
+
+/**
+ * A 2D context that records each label line filled (with the place its
+ * label was moved to) and each line stroked as a halo, in paint order.
+ * Every line measures `width` px. Without a `view`, every place counts as
+ * on the canvas.
+ */
+function labelRecorder(width = 200, view?: CanvasView) {
+  const fills: { text: string; x: number; y: number; at: Point }[] = [];
+  const halos: string[] = [];
+  let at: Point = [0, 0];
+  const ctx = {
+    fillStyle: "",
+    strokeStyle: "",
+    save: vi.fn(),
+    restore: vi.fn(),
+    scale: vi.fn(),
+    translate: (x: number, y: number) => {
+      at = [x, y];
+    },
+    strokeText: (text: string) => halos.push(text),
+    fillText: (text: string, x: number, y: number) => fills.push({ text, x, y, at }),
+    measureText: () => ({ width }),
+    ...(view && { canvas: view.canvas, getTransform: () => view.transform }),
+  };
+  return { ctx, fills, halos };
+}
+
+/** jsdom has no PointerEvent: a mouse event carrying the pointer's kind. */
+function pointer(type: string, pointerType: string) {
+  return Object.assign(new MouseEvent(type, { bubbles: type !== "pointerleave" }), { pointerType });
+}
+
+/** A title too long for one label line (129 characters). */
+const LONG_TITLE =
+  "Attention is all you need: transformers for sequence transduction without recurrence or convolution in neural machine translation";
+/** LONG_TITLE, broken at its spaces onto lines of at most 48 characters. */
+const LONG_TITLE_LINES = [
+  "Attention is all you need: transformers for",
+  "sequence transduction without recurrence or",
+  "convolution in neural machine translation",
+];
+
+function titled(node: ForceNode, title: string): ForceNode {
+  node.node.selected_version.title = title;
+  return node;
+}
+
 const distance = ([ax, ay]: Point, [bx, by]: Point) => Math.hypot(bx - ax, by - ay);
 const midpoint = ([ax, ay]: Point, [bx, by]: Point): Point => [(ax + bx) / 2, (ay + by) / 2];
 
@@ -487,6 +540,14 @@ describe("CitationGraph", () => {
     expect(engine.props.linkLabel).toBeUndefined();
   });
 
+  it("shows no engine tooltip on a hovered paper: its canvas label carries the title", () => {
+    const { data } = setup();
+    titled(data.nodes[0]!, LONG_TITLE);
+    act(() => engine.props.onNodeHover(data.nodes[0]));
+    // An empty label is no tooltip (left unset, the engine reads a `name`).
+    for (const node of data.nodes) expect(engine.props.nodeLabel(node)).toBe("");
+  });
+
   it("records the rounded view on the container after a zoom", () => {
     setup();
     act(() => engine.props.onZoomEnd({ k: 1.23456, x: 10.6, y: -4.2 }));
@@ -556,9 +617,17 @@ describe("CitationGraph", () => {
     engine.props.onRenderFramePost(ctx, 2);
     expect(labels).toContain("Title unavailable");
     expect(labels.some((label) => label.includes("doi:"))).toBe(false);
+    // Hovered, a placeholder stays as it is, on its one line.
     listData(pending, { detailsUnavailable: false });
-    expect(engine.props.nodeLabel(pending)).toBe("<span>Loading title…</span>");
-    expect(engine.props.nodeLabel(given)).toBe("<span>Title unavailable</span>");
+    for (const [node, placeholder] of [
+      [pending, "Loading title…"],
+      [given, "Title unavailable"],
+    ] as const) {
+      act(() => engine.props.onNodeHover(node));
+      labels.length = 0;
+      engine.props.onRenderFramePost(ctx, 1);
+      expect(labels).toEqual([placeholder]);
+    }
   });
 
   it("repaints on a payload revision without handing the engine new data", () => {
@@ -586,7 +655,10 @@ describe("CitationGraph", () => {
     rerender(graph(1));
     expect(engine.props.graphData).toBe(data);
     expect(engine.props.nodeCanvasObject).not.toBe(painter);
-    expect(engine.props.nodeLabel(data.nodes[0])).toBe("<span>Arrived</span>");
+    const fillText = vi.fn();
+    const ctx = { save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(), fillText, measureText: () => ({ width: 40 }) };
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(fillText).toHaveBeenCalledWith("Arrived", 0, 0);
   });
 
   it("keeps the selected node's fill, rings it with a soft halo and labels it in the theme's amber", () => {
@@ -736,17 +808,268 @@ describe("CitationGraph", () => {
     engine.props.onRenderFramePost(ctx, 1);
     expect(labels).toEqual(["Title s", "Title p"]);
 
-    // A hovered paper joins them at any zoom.
+    // A hovered paper joins them at any zoom, painted last, on top.
     labels.length = 0;
     act(() => engine.props.onNodeHover(data.nodes[2]));
     engine.props.onRenderFramePost(ctx, 1);
-    expect(labels).toEqual(["Title s", "Title c", "Title p"]);
+    expect(labels).toEqual(["Title s", "Title p", "Title c"]);
     act(() => engine.props.onNodeHover(null));
 
     // Zoomed in: the others too, most cited first; "a" would overlap "b".
     labels.length = 0;
     engine.props.onRenderFramePost(ctx, 2);
     expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+
+    // Hovered, "a" shows its label after all, and the one of "b" gives way
+    // to it until the pointer moves on.
+    labels.length = 0;
+    act(() => engine.props.onNodeHover(data.nodes[0]));
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toEqual(["Title s", "Title p", "Title c", "Title a"]);
+    labels.length = 0;
+    act(() => engine.props.onNodeHover(null));
+    engine.props.onRenderFramePost(ctx, 2);
+    expect(labels).toEqual(["Title s", "Title p", "Title b", "Title c"]);
+  });
+
+  it("spells a hovered paper's cut title out on up to three lines, on top, and leaves a title that fits as it is", () => {
+    const scaling = Array.from({ length: 6 }, () => "Scaling laws for neural language models").join(" ");
+    const long = titled(forceNode("long", 0, 0), LONG_TITLE);
+    const short = forceNode("short", 0, 200);
+    const huge = titled(forceNode("huge", 0, -200), scaling);
+    render(
+      <CitationGraph
+        data={{ nodes: [long, short, huge], links: [] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder;
+    };
+
+    // Not hovered: one line each, cut at about 48 characters.
+    const before = frame().fills;
+    expect(before.map((line) => line.text)).toEqual([truncateLabel(LONG_TITLE), "Title short", truncateLabel(scaling)]);
+
+    // Hovered: the whole title, broken at its spaces, a line apart, over the
+    // halo, where its one line was, and painted after the others.
+    act(() => engine.props.onNodeHover(long));
+    let { fills, halos } = frame();
+    expect(fills.map((line) => line.text)).toEqual(["Title short", truncateLabel(scaling), ...LONG_TITLE_LINES]);
+    const lines = fills.slice(2);
+    expect(lines.map((line) => [line.x, line.y])).toEqual([
+      [0, 0],
+      [0, 15],
+      [0, 30],
+    ]);
+    for (const line of lines) expect(line.at).toEqual(before[0]!.at);
+    expect(halos).toEqual(LONG_TITLE_LINES);
+
+    // Longer than three lines: the third ends in an ellipsis.
+    act(() => engine.props.onNodeHover(huge));
+    ({ fills } = frame());
+    const hugeLines = fills.slice(2).map((line) => line.text);
+    expect(hugeLines).toHaveLength(3);
+    for (const line of hugeLines) expect(line.length).toBeLessThanOrEqual(48);
+    expect(hugeLines.join(" ")).toMatch(/^Scaling laws for neural language models Scaling .*neural…$/);
+
+    // A title that fits its line: nothing more appears, nothing moves.
+    act(() => engine.props.onNodeHover(short));
+    ({ fills, halos } = frame());
+    expect(fills.filter((line) => line.text === "Title short")).toEqual([before[1]]);
+    expect(fills).toHaveLength(3);
+    expect(halos).toEqual(["Title short"]);
+  });
+
+  it("grows a hovered title from where its one line was, over a circle its other lines reach", () => {
+    // At zoom 2 a label line is 7.5 units tall: the one line of "h" clears
+    // the circle of "n" below it, three lines would reach into it.
+    const h = titled(forceNode("h", 0, 0), LONG_TITLE);
+    const n = forceNode("n", 0, 24);
+    render(
+      <CitationGraph
+        data={{ nodes: [h, n], links: [] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const before = frame();
+    expect(before[0]!.text).toBe(truncateLabel(LONG_TITLE));
+    expect(before[0]!.at).toEqual([0, PAPER_RADIUS + 1.5]);
+
+    act(() => engine.props.onNodeHover(h));
+    const lines = frame().filter((line) => line.at[0] === 0 && LONG_TITLE_LINES.includes(line.text));
+    expect(lines.map((line) => line.text)).toEqual(LONG_TITLE_LINES);
+    // All three below the paper, from where its one line was.
+    for (const line of lines) expect(line.at).toEqual(before[0]!.at);
+    expect(lines.map((line) => line.y)).toEqual([0, 15, 30]);
+  });
+
+  it("grows a hovered title up from above its paper where the canvas's edge would cut its lines below", () => {
+    // Zoom 2 on a 400×100 canvas: graph y 50 is the bottom edge. One line
+    // below "h" fits on it, three would not.
+    const view: CanvasView = { canvas: { width: 400, height: 100 }, transform: { a: 2, d: 2, e: 200, f: 0 } };
+    const h = titled(forceNode("h", -40, 30), LONG_TITLE);
+    const short = forceNode("short", 60, 40);
+    render(
+      <CitationGraph
+        data={{ nodes: [h, short], links: [] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder(200, view);
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const below = 30 + PAPER_RADIUS + 1.5;
+    const before = frame();
+    expect(before.map((line) => [line.text, line.at])).toEqual([
+      [truncateLabel(LONG_TITLE), [-40, below]],
+      ["Title short", [60, 40 + PAPER_RADIUS + 1.5]],
+    ]);
+
+    act(() => engine.props.onNodeHover(h));
+    const lines = frame().filter((line) => LONG_TITLE_LINES.includes(line.text));
+    expect(lines.map((line) => line.text)).toEqual(LONG_TITLE_LINES);
+    // Above the paper, its last line where a one-line label above would go.
+    const [left, top] = lines[0]!.at;
+    expect(left).toBe(-40);
+    expect(top + 3 * 7.5).toBeCloseTo(30 - PAPER_RADIUS - 1.5);
+    for (const line of lines) expect(line.at).toEqual([left, top]);
+
+    // A title that fits its line stays where it is, though it runs past the
+    // edge as well: hovering it adds nothing.
+    act(() => engine.props.onNodeHover(short));
+    expect(frame()).toEqual(before);
+  });
+
+  it("keeps the other labels clear of a hovered paper's spelled-out title until the pointer moves on", () => {
+    // Hovered, the title of "h" runs to three lines below it: the label of
+    // "o", to its right, and the selection's, to its left, would cross them.
+    const h = titled(forceNode("h", 0, 0), LONG_TITLE);
+    const o = forceNode("o", 70, 15);
+    const s = forceNode("s", -70, 15);
+    render(
+      <CitationGraph
+        data={{ nodes: [h, o, s], links: [] }}
+        selectedId="s"
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const before = frame();
+    expect(before.map((line) => line.text)).toEqual(["Title s", truncateLabel(LONG_TITLE), "Title o"]);
+    // The selection's label sits below its paper.
+    expect(before[0]!.at[1]).toBeGreaterThan(15);
+
+    act(() => engine.props.onNodeHover(h));
+    const hovered = frame();
+    // The label of "o" is left out; the selection's moves above its paper.
+    expect(hovered.map((line) => line.text)).toEqual(["Title s", ...LONG_TITLE_LINES]);
+    expect(hovered[0]!.at[0]).toBe(-70);
+    expect(hovered[0]!.at[1]).toBeLessThan(15);
+
+    act(() => engine.props.onNodeHover(null));
+    expect(frame()).toEqual(before);
+    // Hovering only repaints.
+    expect(engine.reheat).not.toHaveBeenCalled();
+  });
+
+  it("takes a touch for no hover: the touched paper's label and links stay as they are", () => {
+    const a = titled(forceNode("a", 0, 0), LONG_TITLE);
+    const b = forceNode("b", 200, 0);
+    const link = forceLink(a, b);
+    render(
+      <CitationGraph
+        data={{ nodes: [a, b], links: [link] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const texts = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills.map((line) => line.text);
+    };
+    const container = screen.getByTestId("citation-graph");
+
+    // The engine reports the paper under a finger as hovered.
+    fireEvent(container, pointer("pointerdown", "touch"));
+    act(() => engine.props.onNodeHover(a));
+    expect(texts()).toEqual([truncateLabel(LONG_TITLE), "Title b"]);
+    expect(engine.props.linkCanvasObjectMode(link)).toBe("replace");
+
+    // A mouse over it is a hover, though the engine, still on the same
+    // paper, reports nothing new.
+    fireEvent(container, pointer("pointermove", "mouse"));
+    expect(texts()).toEqual(["Title b", ...LONG_TITLE_LINES]);
+    expect(engine.props.linkCanvasObjectMode(link)).toBe("after");
+  });
+
+  it("ends the hover when the pointer leaves the canvas, though the engine still reports the paper", () => {
+    // Hovered, the title of "h" runs to three lines, over the label of "o".
+    const h = titled(forceNode("h", 0, 0), LONG_TITLE);
+    const o = forceNode("o", 70, 15);
+    const link = forceLink(h, o);
+    render(
+      <CitationGraph
+        data={{ nodes: [h, o], links: [link] }}
+        selectedId={null}
+        ariaLabel="Citation graph"
+        onNodeClick={vi.fn()}
+        onBackgroundClick={vi.fn()}
+      />,
+    );
+    const frame = () => {
+      const recorder = labelRecorder();
+      engine.props.onRenderFramePost(recorder.ctx, 2);
+      return recorder.fills;
+    };
+    const container = screen.getByTestId("citation-graph");
+    const before = frame();
+    expect(before.map((line) => line.text)).toEqual([truncateLabel(LONG_TITLE), "Title o"]);
+
+    fireEvent(container, pointer("pointermove", "mouse"));
+    act(() => engine.props.onNodeHover(h));
+    expect(frame().map((line) => line.text)).toEqual(LONG_TITLE_LINES);
+    expect(engine.props.linkCanvasObjectMode(link)).toBe("after");
+
+    // Straight onto a card or the legend over the canvas, or off its edge:
+    // the engine says nothing, the next frame is the unhovered one.
+    engine.zoom.mockClear();
+    fireEvent(container, pointer("pointerleave", "mouse"));
+    expect(engine.zoom).toHaveBeenCalled();
+    expect(frame()).toEqual(before);
+    expect(engine.props.linkCanvasObjectMode(link)).toBe("replace");
+
+    // Back over the canvas, the engine's paper is hovered again (until its
+    // next frame finds another one under the pointer).
+    fireEvent(container, pointer("pointermove", "mouse"));
+    expect(frame().map((line) => line.text)).toEqual(LONG_TITLE_LINES);
   });
 
   it("keeps labels off neighbouring nodes: others are skipped, a pin's moves aside or is skipped", () => {

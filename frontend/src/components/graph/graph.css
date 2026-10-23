@@ -827,14 +827,17 @@
   .legend-dot--selected {
     margin: 0 3.5px;
   }
-  /* The sheet's column: every swatch in a box as wide as the arrow. */
+  /* The sheet's column: every dot in a box as wide as the selection's
+     ring, so the dots line up and start where the edge entry's "A" does. */
   .graph-legend--inline .legend-dot {
-    margin: 0 6px;
+    margin: 0 3.5px;
   }
-  /* Edge direction: a link as the canvas draws one, in its colours: the
-     quiet line with the arrowhead halfway along it, pointing at the cited
-     paper. The line is a touch wider than the canvas's 1px to read at
-     swatch size; the arrowhead carries the direction (3:1). */
+  /* Edge direction, "A [link] B": a link as the canvas draws one, in its
+     colours, standing in for the arrow (which screen readers get as text):
+     the quiet line with the arrowhead halfway along it, pointing at the
+     cited paper. The line is a touch wider than the canvas's 1px to read at
+     swatch size; the arrowhead carries the direction (3:1). The entry's
+     gap spaces it from the letters as from the dots' labels. */
   .legend-arrow {
     flex-shrink: 0;
     width: 22px;

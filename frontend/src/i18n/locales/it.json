@@ -454,7 +454,7 @@
     "legendSaved": "In Libreria",
     "listInLibrary": "In Libreria",
     "legendPaper": "Articolo (dimensione = citazioni)",
-    "legendEdge": "A → B: A cita B",
+    "legendEdge": "A <arrow>→</arrow> B: A cita B",
     "legendPinned": "Fissato",
     "legendSelected": "Selezionato",
     "dragHint": "Trascina un nodo o usa Fissa per bloccarlo",

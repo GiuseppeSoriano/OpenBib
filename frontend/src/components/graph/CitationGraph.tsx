@@ -11,7 +11,7 @@ import { forceCollide } from "d3-force-3d";
 import { useTranslation } from "react-i18next";
 import { endpointId, type ForceGraphData, type ForceLink, type ForceNode } from "@/components/graph/mergeGraph";
 import { markRadius, nodeRadius, nodeStyle, type NodeStyleColors } from "@/components/graph/nodeStyle";
-import { nodeTitle, truncateLabel } from "@/components/graph/paperText";
+import { nodeTitle, truncateLabel, wrapLabel } from "@/components/graph/paperText";
 import { centreFor, freeArea, type Rect } from "@/components/graph/viewGeometry";
 
 export interface CitationGraphHandle {
@@ -122,6 +122,8 @@ const FOCUS_ZOOM = 1.5;
 const AUTO_FIT_DELAY = 900;
 /** Pointer travel (px) that counts as the user panning or dragging. */
 const DRAG_SLOP = 4;
+/** A label line's height, at the 12px the labels are laid out in. */
+const LABEL_LINE_HEIGHT = 15;
 
 // Links, in screen px at every zoom: a 1px line held 2px clear of both
 // circles, with one arrowhead (7 long, 6 wide) halfway along it, its tip
@@ -141,12 +143,27 @@ const ARROW_MIN_SEGMENT = 18;
 const ENGINE_LINK_COLOR = () => "rgba(0,0,0,0)";
 /** Links are not pointer targets: no hover, no tooltip, no click. */
 const NO_LINK_POINTER_AREA = () => undefined;
+/**
+ * No engine tooltip on a hovered paper either: its own canvas label shows
+ * the title (whole, where one line would cut it). Left unset, the engine
+ * would look for one in a `name` field.
+ */
+const NO_NODE_TOOLTIP = () => "";
 
 interface Box {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+/** A label's place: its centre's x and its top's y. */
+type Spot = [number, number];
+
+/** A side of a paper: where a label's first line goes, and the whole label. */
+interface Slot {
+  line: Spot;
+  full: Spot;
 }
 
 function citations(node: ForceNode): number {
@@ -256,7 +273,17 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   const dataRef = useRef(data);
   const pinnedRef = useRef(pinnedIds);
   const frozenRef = useRef(false);
+  // The paper the drawing treats as hovered (see applyHover), and the one
+  // the engine last reported under the pointer.
   const hoveredRef = useRef<string | null>(null);
+  const engineHoveredRef = useRef<string | null>(null);
+  // The kind of pointer last seen on the canvas: the engine reports the
+  // paper under a touch as hovered, but a touch screen has no hover.
+  const pointerTypeRef = useRef("mouse");
+  // Whether the pointer is over the canvas: the engine keeps reporting the
+  // paper it last saw under it once it has left (for a card, the legend or
+  // the papers panel).
+  const pointerInsideRef = useRef(true);
   // Whether the user panned or zoomed the view themselves (wheel, drag,
   // pinch, the zoom buttons) since the last fit.
   const interactedRef = useRef(false);
@@ -338,8 +365,24 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     }, 420);
   }, []);
 
+  // The hover the drawing shows: the engine's, while a mouse (or pen) is
+  // over the canvas. A touch is never a hover: the tapped paper is selected
+  // instead. Once the layout has settled the canvas only redraws on a view
+  // change, so a same-scale zoom asks for one frame.
+  const applyHover = useCallback(() => {
+    const id = pointerInsideRef.current && pointerTypeRef.current !== "touch" ? engineHoveredRef.current : null;
+    if (hoveredRef.current === id) return;
+    hoveredRef.current = id;
+    const fg = fgRef.current;
+    if (fg) fg.zoom(fg.zoom());
+  }, []);
+
   // The user's own pans and zooms (wheel, a drag on the canvas or a node,
   // a pinch). Programmatic moves raise no pointer events, so they never count.
+  // The capture phase also notes the pointer's kind before the engine,
+  // which picks the hovered paper on its next frame, sees the event; the
+  // engine reports no change for the paper it already had, so the hover is
+  // worked out again here (a mouse after a touch, a pointer back in).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -348,14 +391,27 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       interactedRef.current = true;
     };
     const onDown = (event: PointerEvent) => {
+      pointerTypeRef.current = event.pointerType;
+      pointerInsideRef.current = true;
+      applyHover();
       start = { x: event.clientX, y: event.clientY };
     };
     const onMove = (event: PointerEvent) => {
+      pointerTypeRef.current = event.pointerType;
+      pointerInsideRef.current = true;
+      applyHover();
       if (!start || !event.buttons) return;
       if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > DRAG_SLOP) interactedRef.current = true;
     };
     const onUp = () => {
       start = null;
+    };
+    // The pointer left the canvas itself (leaving one of its own layers
+    // reaches here too, in the capture phase).
+    const onLeave = (event: PointerEvent) => {
+      if (event.target !== el) return;
+      pointerInsideRef.current = false;
+      applyHover();
     };
     const options = { capture: true, passive: true };
     el.addEventListener("wheel", onWheel, options);
@@ -363,14 +419,16 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     el.addEventListener("pointermove", onMove, options);
     el.addEventListener("pointerup", onUp, options);
     el.addEventListener("pointercancel", onUp, options);
+    el.addEventListener("pointerleave", onLeave, options);
     return () => {
       el.removeEventListener("wheel", onWheel, options);
       el.removeEventListener("pointerdown", onDown, options);
       el.removeEventListener("pointermove", onMove, options);
       el.removeEventListener("pointerup", onUp, options);
       el.removeEventListener("pointercancel", onUp, options);
+      el.removeEventListener("pointerleave", onLeave, options);
     };
-  }, []);
+  }, [applyHover]);
 
   // Fit once when the first range or top-up adds papers to the base graph,
   // after they have had a moment to spread, unless the user has moved the
@@ -573,7 +631,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   );
 
   // Titles (serif, like every paper title), drawn after every node so they
-  // sit on top. The selected and hovered papers are always labelled, over a
+  // sit on top. The hovered and selected papers are always labelled, over a
   // halo so they read across edges (the selection's in its amber). Pinned
   // papers come next, at every zoom and also over a halo, then the others
   // only from LABEL_ZOOM up, most cited first; a pinned or other label that
@@ -583,8 +641,13 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
   // paper's circle (or the selection's ring). A pinned, selected or hovered
   // title that would cross one below its paper moves above, right or left
   // of it, to the first free side; a pin's with no free side is skipped too
-  // (the list and a hover still name it), the selection's and the hover's
-  // never.
+  // (the list and a hover still name it), the hover's never.
+  // The hovered paper's title is placed first and painted last, on top:
+  // where one line would cut it, it is spelled out whole on up to three
+  // lines, grown from the side its one line takes (above the paper, up from
+  // it), or from another side where the canvas's edge would cut it. Every
+  // other label keeps clear of it, the selection's included: that one moves
+  // aside, or is left out only until the hover ends.
   const drawLabels = useCallback(
     (ctx: CanvasRenderingContext2D, globalScale: number) => {
       const px = 1 / globalScale;
@@ -593,8 +656,8 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
       const k = Math.max(12 * px, 3) / 12;
       const hovered = hoveredRef.current;
       const rank = (id: string) => {
-        if (id === selectedId) return 0;
-        if (id === hovered) return 1;
+        if (id === hovered) return 0;
+        if (id === selectedId) return 1;
         return pinnedIds.has(id) || alwaysLabelIds.has(id) ? 2 : 3;
       };
       const nodes = dataRef.current.nodes;
@@ -618,63 +681,86 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         return left >= 0 && top >= 0 && left + m.a * box.w <= ctx.canvas.width && top + m.d * box.h <= ctx.canvas.height;
       };
       const drawn: Box[] = [];
+      const placed: { lines: string[]; x: number; y: number; halo: boolean; selected: boolean; hovered: boolean }[] = [];
       ctx.save();
       ctx.font = `12px ${colors.labelFont}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.lineJoin = "round";
       for (const { node, rank: level } of queue) {
-        const label = truncateLabel(nodeTitle(node.node, t));
+        const title = nodeTitle(node.node, t);
+        const lines = level === 0 ? wrapLabel(title) : [truncateLabel(title)];
+        const expanded = lines.length > 1;
         const x = node.x ?? 0;
         const y = node.y ?? 0;
         const r = radiusOf(node);
         const selected = node.id === selectedId;
         const gap = selected ? 10 * px : 3 * px;
-        const width = ctx.measureText(label).width * k;
-        const height = 15 * k;
-        // A label's place: its centre's x and its top's y.
-        const boxAt = ([cx, top]: [number, number]): Box => ({
+        const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) * k;
+        const lineHeight = LABEL_LINE_HEIGHT * k;
+        const height = lineHeight * lines.length;
+        // A label's box, from its centre's x and its top's y, `rows` lines tall.
+        const boxAt = ([cx, top]: Spot, rows = lines.length): Box => ({
           x: cx - width / 2 - 2 * px,
           y: top - px,
           w: width + 4 * px,
-          h: height + 2 * px,
+          h: lineHeight * rows + 2 * px,
         });
-        const fits = (place: [number, number]) => {
-          const candidate = boxAt(place);
-          return !hitsNode(candidate, node) && !(level >= 2 && drawn.some((other) => overlaps(candidate, other)));
+        // Clear of every label placed before it: for the selection's, that
+        // is only the hovered paper's.
+        const clear = (box: Box) => !drawn.some((other) => overlaps(box, other));
+        // Each side of the paper a label can take: where its first line goes,
+        // and where the whole label goes, grown from that line (downwards,
+        // or upwards above the paper). Only a spelled-out title has more.
+        const below: Slot = { line: [x, y + r + gap], full: [x, y + r + gap] };
+        const right: Spot = [x + r + gap + width / 2, y - lineHeight / 2];
+        const left: Spot = [x - r - gap - width / 2, y - lineHeight / 2];
+        const sides: Slot[] = [
+          { line: [x, y - r - gap - lineHeight], full: [x, y - r - gap - height] },
+          { line: right, full: right },
+          { line: left, full: left },
+        ];
+        // The first line alone picks the side, so a hovered title grows from
+        // where its one line goes (over the circles its other lines cross);
+        // the whole label has to stay on the canvas, though.
+        const free = (slot: Slot) => {
+          const box = boxAt(slot.line, 1);
+          return !hitsNode(box, node) && clear(box);
         };
-        const below: [number, number] = [x, y + r + gap];
+        const onCanvas = (slot: Slot) => onScreen(boxAt(slot.full));
         // An always-labelled paper whose title would cross a circle (or
         // another label) below it takes the first free room above, to the
         // right or to the left of it instead.
         // A side that runs off the canvas is only taken by a pin, and only
-        // when no side on screen is free.
-        const sides: [number, number][] = [
-          [x, y - r - gap - height],
-          [x + r + gap + width / 2, y - height / 2],
-          [x - r - gap - width / 2, y - height / 2],
-        ];
+        // when no side on screen is free. A spelled-out title also leaves the
+        // room below where the canvas's edge would cut its lines, for a side
+        // on screen, across a circle if it must.
         const place =
-          level < 3 && !fits(below)
-            ? sides.find((side) => fits(side) && onScreen(boxAt(side))) ??
-              (level === 2 ? sides.find(fits) : undefined) ??
+          level < 3 && !(free(below) && (!expanded || onCanvas(below)))
+            ? sides.find((side) => free(side) && onCanvas(side)) ??
+              (level === 2 ? sides.find(free) : expanded ? sides.find(onCanvas) : undefined) ??
               below
             : below;
-        const [labelX, labelY] = place;
-        const box = boxAt(place);
-        if (level >= 2 && drawn.some((other) => overlaps(box, other))) continue;
+        const [labelX, labelY] = place.full;
+        const box = boxAt(place.full);
+        if (!clear(box)) continue;
         if (level >= 2 && hitsNode(box, node)) continue;
         drawn.push(box);
+        placed.push({ lines, x: labelX, y: labelY, halo: level < 3, selected, hovered: level === 0 });
+      }
+      // The hovered label last, over everything else.
+      placed.sort((a, b) => Number(a.hovered) - Number(b.hovered));
+      for (const label of placed) {
         ctx.save();
-        ctx.translate(labelX, labelY);
+        ctx.translate(label.x, label.y);
         ctx.scale(k, k);
-        if (level < 3) {
+        if (label.halo) {
           ctx.lineWidth = (3 * px) / k;
           ctx.strokeStyle = colors.canvas;
-          ctx.strokeText(label, 0, 0);
+          label.lines.forEach((line, i) => ctx.strokeText(line, 0, i * LABEL_LINE_HEIGHT));
         }
-        ctx.fillStyle = selected ? colors.selectedLabel : colors.label;
-        ctx.fillText(label, 0, 0);
+        ctx.fillStyle = label.selected ? colors.selectedLabel : colors.label;
+        label.lines.forEach((line, i) => ctx.fillText(line, 0, i * LABEL_LINE_HEIGHT));
         ctx.restore();
       }
       ctx.restore();
@@ -682,15 +768,14 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
     [alwaysLabelIds, colors, pinnedIds, selectedId, t],
   );
 
-  // A hover labels its paper; once the layout has settled the canvas only
-  // redraws on a view change, so a same-scale zoom asks for one frame.
-  const handleNodeHover = useCallback((node: ForceNode | null) => {
-    const id = node?.id ?? null;
-    if (hoveredRef.current === id) return;
-    hoveredRef.current = id;
-    const fg = fgRef.current;
-    if (fg) fg.zoom(fg.zoom());
-  }, []);
+  // A hover labels its paper and focuses its links (see applyHover).
+  const handleNodeHover = useCallback(
+    (node: ForceNode | null) => {
+      engineHoveredRef.current = node?.id ?? null;
+      applyHover();
+    },
+    [applyHover],
+  );
 
   const handleNodeClick = useCallback(
     (node: ForceNode) => {
@@ -733,7 +818,7 @@ const CitationGraph = forwardRef<CitationGraphHandle, CitationGraphProps>(functi
         backgroundColor="rgba(0,0,0,0)"
         nodeId="id"
         nodeVal={(node: ForceNode) => radiusOf(node) ** 2 / 4}
-        nodeLabel={(node: ForceNode) => { const label = document.createElement("span"); label.textContent = nodeTitle(node.node, t); return label.outerHTML; }}
+        nodeLabel={NO_NODE_TOOLTIP}
         nodeCanvasObject={drawNode}
         nodePointerAreaPaint={(node: ForceNode, color, ctx) => {
           ctx.beginPath();

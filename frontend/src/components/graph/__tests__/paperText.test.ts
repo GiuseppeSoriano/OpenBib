@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { detailsStatus, nodeTitle } from "@/components/graph/paperText";
+import { LABEL_MAX, detailsStatus, nodeTitle, truncateLabel, wrapLabel } from "@/components/graph/paperText";
 import type { GraphNode, PaperMetadata } from "@/types";
 
 function version(key: string, title: string, provider = "semantic_scholar"): PaperMetadata {
@@ -67,5 +67,40 @@ describe("nodeTitle", () => {
     expect(nodeTitle(node([preprint]), t)).toBe("Distributing entanglement");
     // Unresolved seeds keep their own wording.
     expect(nodeTitle(node([version("hash:x", "hash:x", "unknown")]), t)).toBe("Details unavailable");
+  });
+});
+
+describe("wrapLabel", () => {
+  const TITLE =
+    "Attention is all you need: transformers for sequence transduction without recurrence or convolution in neural machine translation";
+
+  it("gives a title that fits one line back whole, exactly as the one-line label shows it", () => {
+    for (const title of ["Deep residual learning for image recognition", "  Spaced \n  out  ", "Loading title…"]) {
+      expect(wrapLabel(title)).toEqual([truncateLabel(title)]);
+    }
+    expect(wrapLabel("A".repeat(LABEL_MAX))).toEqual(["A".repeat(LABEL_MAX)]);
+  });
+
+  it("spells a longer title out at its spaces, on lines of at most 48 characters", () => {
+    const lines = wrapLabel(`  ${TITLE.replace(/ /g, "  ")}\n`);
+    expect(lines).toEqual([
+      "Attention is all you need: transformers for",
+      "sequence transduction without recurrence or",
+      "convolution in neural machine translation",
+    ]);
+    expect(lines.join(" ")).toBe(TITLE);
+  });
+
+  it("stops at three lines, the last ending in an ellipsis after its last whole word", () => {
+    const lines = wrapLabel(Array.from({ length: 6 }, () => "Scaling laws for neural language models").join(" "));
+    expect(lines).toHaveLength(3);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(LABEL_MAX);
+    expect(lines[2]).toBe("neural language models Scaling laws for neural…");
+  });
+
+  it("splits a word longer than a line", () => {
+    expect(wrapLabel("x".repeat(120))).toEqual(["x".repeat(48), "x".repeat(48), "x".repeat(24)]);
+    const [, , last] = wrapLabel("y".repeat(200));
+    expect(last).toBe(`${"y".repeat(47)}…`);
   });
 });

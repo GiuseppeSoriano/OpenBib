@@ -454,7 +454,7 @@
     "legendSaved": "In Library",
     "listInLibrary": "In Library",
     "legendPaper": "Paper (size = citations)",
-    "legendEdge": "A → B: A cites B",
+    "legendEdge": "A <arrow>→</arrow> B: A cites B",
     "legendPinned": "Pinned",
     "legendSelected": "Selected",
     "dragHint": "Drag a node or use Pin to fix it in place",

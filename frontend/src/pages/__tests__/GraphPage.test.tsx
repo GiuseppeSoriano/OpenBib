@@ -999,7 +999,9 @@ describe("GraphPage (compact)", () => {
     expect(within(dialog).getByText("Pinned")).toBeInTheDocument();
     expect(within(dialog).getByText("Selected")).toBeInTheDocument();
     expect(within(dialog).getByText("In Library").querySelector(".legend-dot")).toHaveClass("legend-dot--saved");
-    expect(within(dialog).getByText("A → B: A cites B")).toBeInTheDocument();
+    const edgeEntry = within(dialog).getByText("→").closest("li");
+    expect(edgeEntry).toHaveTextContent("A → B: A cites B");
+    expect(edgeEntry?.querySelector("svg.legend-arrow")).not.toBeNull();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(within(summary()).getByRole("button", { name: "Seed Paper" })).toHaveFocus();

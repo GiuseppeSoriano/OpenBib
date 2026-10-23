@@ -1,5 +1,5 @@
-import { useId, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useId, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 
 interface GraphLegendProps {
@@ -17,6 +17,25 @@ interface GraphLegendProps {
  * collapses it keeps it collapsed on the next graph until a reload.
  */
 let overlayOpen = true;
+
+/**
+ * The canvas's link, a line with its arrowhead (7 long, 6 wide) centred
+ * halfway, pointing at the cited paper, drawn in place of the arrow in the
+ * entry's "A → B": screen readers get that arrow (the children) as text.
+ */
+function LinkGlyph({ children }: { children?: ReactNode }) {
+  return (
+    <>
+      <svg className="legend-arrow" viewBox="0 0 22 10" aria-hidden="true" focusable="false">
+        <line x1="1" y1="5" x2="21" y2="5" />
+        <path d="M14.5 5 7.5 2 7.5 8Z" />
+      </svg>
+      <span className="sr-only">{children}</span>
+    </>
+  );
+}
+
+const EDGE_COMPONENTS = { arrow: <LinkGlyph /> };
 
 /**
  * The node marks (two fills, the Library's centre dot, the selection ring)
@@ -43,13 +62,7 @@ export default function GraphLegend({ variant = "overlay" }: GraphLegendProps) {
         <span className="legend-dot legend-dot--selected" aria-hidden="true" /> {t("graph.legendSelected")}
       </li>
       <li>
-        {/* The canvas's link: a line with its arrowhead (7 long, 6 wide)
-            centred halfway, pointing at the cited paper. */}
-        <svg className="legend-arrow" viewBox="0 0 22 10" aria-hidden="true" focusable="false">
-          <line x1="1" y1="5" x2="21" y2="5" />
-          <path d="M14.5 5 7.5 2 7.5 8Z" />
-        </svg>{" "}
-        {t("graph.legendEdge")}
+        <Trans i18nKey="graph.legendEdge" components={EDGE_COMPONENTS} />
       </li>
     </>
   );

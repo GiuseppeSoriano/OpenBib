@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import GraphLegend from "@/components/graph/GraphLegend";
+import i18n from "@/i18n";
+
+/**
+ * What the edge entry shows, in order: its text pieces and "[link]" for the
+ * drawn link, leaving out what only screen readers get.
+ */
+function shownParts(entry: Element): string[] {
+  return Array.from(entry.childNodes)
+    .filter((node) => !(node instanceof Element && node.classList.contains("sr-only")))
+    .map((node) => (node instanceof SVGElement ? "[link]" : node.textContent!.trim()))
+    .filter(Boolean);
+}
 
 describe("GraphLegend", () => {
   // The overlay's open state lives in module memory for the session: each
@@ -85,6 +97,29 @@ describe("GraphLegend", () => {
       // Colours come from the tokens in graph.css, never inline.
       expect(glyph.querySelector("[style], [fill], [stroke]")).toBeNull();
       unmount();
+    }
+  });
+
+  it("reads A, the drawn link, then B: the arrow it replaces is left to screen readers", async () => {
+    for (const variant of ["overlay", "inline"] as const) {
+      const { container, unmount } = render(<GraphLegend variant={variant} />);
+      const entry = container.querySelector("svg.legend-arrow")!.closest("li")!;
+      expect(shownParts(entry)).toEqual(["A", "[link]", "B: A cites B"]);
+      // One arrow on screen, the drawn one; its text stand-in is visually
+      // hidden, so the entry still reads "A → B: A cites B".
+      expect(within(entry).getByText("→")).toHaveClass("sr-only");
+      expect(entry.textContent).toBe("A → B: A cites B");
+      unmount();
+    }
+
+    await act(() => i18n.changeLanguage("it"));
+    try {
+      const { container } = render(<GraphLegend variant="inline" />);
+      const entry = container.querySelector("svg.legend-arrow")!.closest("li")!;
+      expect(shownParts(entry)).toEqual(["A", "[link]", "B: A cita B"]);
+      expect(entry.textContent).toBe("A → B: A cita B");
+    } finally {
+      await act(() => i18n.changeLanguage("en"));
     }
   });
 
